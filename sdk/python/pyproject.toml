@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agents-sandbox-sdk"
+version = "0.1.0"
+description = "Python SDK for agents-sandbox."
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "agents-sandbox maintainers" }]
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agents_sandbox"]

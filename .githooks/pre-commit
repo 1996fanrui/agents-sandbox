@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# Usage:
+#   This hook rejects staged files that match Git ignore rules, then runs the
+#   project test suite before allowing the commit.
+#   Install with: git config core.hooksPath .githooks
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"${SCRIPT_DIR}/../scripts/lints/check_no_ignored_files.sh" --staged
+"${SCRIPT_DIR}/../scripts/run_test.sh"

@@ -1,0 +1,148 @@
+# Sandbox Container Lifecycle
+
+This document describes the runtime lifecycle contract owned by `agents-sandbox`.
+
+The scope is the sandbox runtime itself:
+
+- primary sandbox container
+- dedicated sandbox network
+- dependency containers
+- runtime event stream
+- runtime-owned cleanup and reconciliation
+
+Product-specific lifecycle semantics such as archive states stay outside this repository.
+
+## Runtime Resources
+
+| Resource | Ownership | Notes |
+|----------|-----------|-------|
+| Primary container | `agents-sandbox` | Main execution target for `CreateExec` and `StartExec` |
+| Dedicated network | `agents-sandbox` | One network per sandbox; shared bridge and host network are not supported |
+| Dependency containers | `agents-sandbox` | Sidecars and other declared dependencies attached to the same dedicated network |
+| Event journal | `agents-sandbox` | Source of ordered replayable lifecycle and exec events |
+| Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
+
+Docker object labels must use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`.
+
+## Lifecycle States
+
+```mermaid
+stateDiagram-v2
+    [*] --> NotCreated
+
+    NotCreated --> Pending : CreateSandbox accepted
+    Pending --> Ready : materialization succeeds
+    Pending --> Failed : materialization fails
+
+    Ready --> Ready : CreateExec / StartExec
+    Ready --> Stopped : StopSandbox or idle_ttl
+    Stopped --> Ready : ResumeSandbox succeeds
+
+    Ready --> Deleting : DeleteSandbox accepted
+    Stopped --> Deleting : DeleteSandbox accepted
+    Failed --> Deleting : DeleteSandbox accepted
+    Pending --> Deleting : DeleteSandbox accepted
+    Deleting --> Deleted : resource removal succeeds
+
+    Deleted --> [*]
+```
+
+The externally visible lifecycle states are `PENDING`, `READY`, `FAILED`, `STOPPED`, `DELETING`, and `DELETED`.
+
+## Lifecycle Event Contract
+
+All lifecycle convergence must be observable through `SubscribeSandboxEvents`.
+
+| Transition | Required Event Sequence |
+|------------|-------------------------|
+| Create accepted | `SANDBOX_ACCEPTED` |
+| Materialization in progress | `SANDBOX_PREPARING` |
+| Dependency becomes usable | `SANDBOX_DEPENDENCY_READY` |
+| Create or resume succeeds | `SANDBOX_READY` |
+| Create, resume, stop, or delete fails | `SANDBOX_FAILED` |
+| Stop begins | `SANDBOX_STOP_REQUESTED` |
+| Stop completes | `SANDBOX_STOPPED` |
+| Delete begins | `SANDBOX_DELETE_REQUESTED` |
+| Delete completes | `SANDBOX_DELETED` |
+
+Idle-stop behavior is part of the same contract. When the daemon stops a sandbox because `runtime.idle_ttl` expired, it must emit `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` and then `SANDBOX_STOPPED`.
+
+## Create Path
+
+```mermaid
+flowchart TB
+    A[CreateSandbox accepted] --> B[Allocate sandbox_id and persist SANDBOX_ACCEPTED]
+    B --> C[Validate create spec]
+    C --> D[Create dedicated network]
+    D --> E[Materialize workspace and capability projections]
+    E --> F[Create dependency containers]
+    F --> G[Start primary and dependencies once prerequisites are ready]
+    G --> H[Persist runtime handles and resolved projections]
+    H --> I[Emit SANDBOX_READY]
+```
+
+Create-path rules:
+
+- `CreateSandbox` returns immediately after the request is accepted and the daemon has assigned `sandbox_id`.
+- The daemon owns actual materialization; the caller must not infer readiness from the RPC response alone.
+- The daemon must fail fast on invalid projections, invalid dependency declarations, or unsafe artifact targets.
+- The daemon must reject duplicate `CreateSandbox` requests for the same active `sandbox_owner`.
+
+## Resume Path
+
+`ResumeSandbox` only resumes an already created sandbox. It does not accept the original create spec again.
+
+```mermaid
+flowchart TB
+    A[ResumeSandbox accepted] --> B[Load persisted sandbox state]
+    B --> C{Runtime resources complete?}
+    C -->|No| D[Emit SANDBOX_FAILED]
+    C -->|Yes| E[Start existing primary and dependency containers]
+    E --> F[Emit SANDBOX_READY]
+```
+
+Resume-path rules:
+
+- Missing runtime parts are treated as runtime corruption and must fail fast.
+- The daemon must not silently recreate a partially missing sandbox from request-time assumptions.
+- Resume keeps runtime identity stable; it does not create a replacement `sandbox_id`.
+
+## Stop and Delete
+
+```mermaid
+flowchart LR
+    A[StopSandbox or idle_ttl] --> B[Emit SANDBOX_STOP_REQUESTED]
+    B --> C[Stop primary container]
+    C --> D[Stop dependency containers]
+    D --> E[Emit SANDBOX_STOPPED]
+```
+
+```mermaid
+flowchart LR
+    A[DeleteSandbox] --> B[Emit SANDBOX_DELETE_REQUESTED]
+    B --> C[Remove primary container]
+    C --> D[Remove dependency containers]
+    D --> E[Remove dedicated network]
+    E --> F[Remove runtime-owned state and artifacts]
+    F --> G[Emit SANDBOX_DELETED]
+```
+
+Delete-path rules:
+
+- Delete is asynchronous and immediately acknowledged.
+- Cleanup removes runtime-owned Docker resources and runtime-owned filesystem state.
+- Product-owned metadata cleanup is outside the scope of this repository.
+
+## Reconciliation
+
+The daemon owns runtime reconciliation for resources under its namespace.
+
+It must be able to detect and converge:
+
+- idle sandboxes eligible for stop
+- runtime resources left behind after failed materialization
+- dependency containers without a valid sandbox owner
+- dedicated networks without live runtime membership
+
+Reconciliation must use structured audit logs and explicit action reasons and strategies.
+

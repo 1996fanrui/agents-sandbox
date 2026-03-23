@@ -27,6 +27,22 @@ go.work.sum
 # env file
 .env
 
+# Local-only files
+requirements/
+CLAUDE.md
+AGENTS.md
+scripts/lints/check_no_ignored_files.sh
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+dist/
+build/
+
 # Editor/IDE
 # .idea/
 # .vscode/
