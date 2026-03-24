@@ -1,0 +1,298 @@
+syntax = "proto3";
+
+package agbox.v1;
+
+option go_package = "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1;agboxv1";
+
+import "google/protobuf/timestamp.proto";
+
+service SandboxService {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc CreateSandbox(CreateSandboxRequest) returns (CreateSandboxResponse);
+  rpc GetSandbox(GetSandboxRequest) returns (GetSandboxResponse);
+  rpc ListSandboxes(ListSandboxesRequest) returns (ListSandboxesResponse);
+  rpc ResumeSandbox(ResumeSandboxRequest) returns (AcceptedResponse);
+  rpc StopSandbox(StopSandboxRequest) returns (AcceptedResponse);
+  rpc DeleteSandbox(DeleteSandboxRequest) returns (AcceptedResponse);
+  rpc SubscribeSandboxEvents(SubscribeSandboxEventsRequest) returns (stream SandboxEvent);
+  rpc CreateExec(CreateExecRequest) returns (CreateExecResponse);
+  rpc StartExec(StartExecRequest) returns (AcceptedResponse);
+  rpc CancelExec(CancelExecRequest) returns (AcceptedResponse);
+  rpc GetExec(GetExecRequest) returns (GetExecResponse);
+  rpc ListActiveExecs(ListActiveExecsRequest) returns (ListActiveExecsResponse);
+}
+
+enum SandboxState {
+  SANDBOX_STATE_UNSPECIFIED = 0;
+  SANDBOX_STATE_PENDING = 1;
+  SANDBOX_STATE_READY = 2;
+  SANDBOX_STATE_FAILED = 3;
+  SANDBOX_STATE_STOPPED = 4;
+  SANDBOX_STATE_DELETING = 5;
+  SANDBOX_STATE_DELETED = 6;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  SANDBOX_ACCEPTED = 1;
+  SANDBOX_PREPARING = 2;
+  SANDBOX_DEPENDENCY_READY = 3;
+  SANDBOX_READY = 4;
+  SANDBOX_FAILED = 5;
+  SANDBOX_STOP_REQUESTED = 6;
+  SANDBOX_STOPPED = 7;
+  SANDBOX_DELETE_REQUESTED = 8;
+  SANDBOX_DELETED = 9;
+  EXEC_CREATED = 10;
+  EXEC_STARTED = 11;
+  EXEC_FINISHED = 12;
+  EXEC_FAILED = 13;
+  EXEC_CANCELLED = 14;
+}
+
+enum ExecState {
+  EXEC_STATE_UNSPECIFIED = 0;
+  EXEC_STATE_CREATED = 1;
+  EXEC_STATE_RUNNING = 2;
+  EXEC_STATE_FINISHED = 3;
+  EXEC_STATE_FAILED = 4;
+  EXEC_STATE_CANCELLED = 5;
+}
+
+enum ProjectionMountMode {
+  PROJECTION_MOUNT_MODE_UNSPECIFIED = 0;
+  PROJECTION_MOUNT_MODE_BIND = 1;
+  PROJECTION_MOUNT_MODE_SHADOW_COPY = 2;
+}
+
+enum WorkspaceMaterializationMode {
+  WORKSPACE_MATERIALIZATION_MODE_UNSPECIFIED = 0;
+  WORKSPACE_MATERIALIZATION_MODE_DURABLE_COPY = 1;
+  WORKSPACE_MATERIALIZATION_MODE_BIND = 2;
+}
+
+enum ActionReason {
+  ACTION_REASON_UNSPECIFIED = 0;
+  ACTION_REASON_START_NEW_SESSION = 1;
+  ACTION_REASON_RESUME_SESSION = 2;
+  ACTION_REASON_EXECUTE_RUN = 3;
+  ACTION_REASON_CLEANUP_IDLE_SESSION = 4;
+  ACTION_REASON_CLEANUP_LEAKED_SESSION_RESOURCES = 5;
+  ACTION_REASON_CLEANUP_ARCHIVED_SESSION = 6;
+}
+
+enum ActionStrategy {
+  ACTION_STRATEGY_UNSPECIFIED = 0;
+  ACTION_STRATEGY_MATERIALIZE_NEW_SESSION_RUNTIME = 1;
+  ACTION_STRATEGY_RESUME_EXISTING_RUNTIME = 2;
+  ACTION_STRATEGY_CREATE_RUN_EXEC = 3;
+  ACTION_STRATEGY_START_RUN_EXEC = 4;
+  ACTION_STRATEGY_CANCEL_RUN_EXEC = 5;
+  ACTION_STRATEGY_IDLE_SESSION_STOP = 6;
+  ACTION_STRATEGY_DELETE_SANDBOX_RUNTIME = 7;
+  ACTION_STRATEGY_LEAKED_SIDECAR_REMOVE = 8;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  string version = 1;
+  string daemon = 2;
+}
+
+message SandboxOwner {
+  string product = 1;
+  string owner_type = 2;
+  string owner_id = 3;
+}
+
+message CallerMetadata {
+  string product = 1;
+  string session_id = 2;
+  string run_id = 3;
+}
+
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+
+message CacheProjectionRequest {
+  string cache_id = 1;
+  bool enabled = 2;
+}
+
+message ToolingProjectionRequest {
+  string capability_id = 1;
+  bool writable = 2;
+  string source_path = 3;
+  string target_path = 4;
+}
+
+message DependencySpec {
+  string dependency_name = 1;
+  string image = 2;
+  string network_alias = 3;
+  repeated KeyValue environment = 4;
+}
+
+message WorkspaceSpec {
+  string path = 1;
+  WorkspaceMaterializationMode mode = 2;
+}
+
+message CreateSpec {
+  WorkspaceSpec workspace = 1;
+  repeated CacheProjectionRequest cache_projections = 2;
+  repeated ToolingProjectionRequest tooling_projections = 3;
+  repeated DependencySpec dependencies = 4;
+}
+
+message ResolvedProjectionHandle {
+  string capability_id = 1;
+  string source_path = 2;
+  string target_path = 3;
+  ProjectionMountMode mount_mode = 4;
+  bool writable = 5;
+  bool write_back = 6;
+}
+
+message SandboxHandle {
+  string sandbox_id = 1;
+  SandboxOwner owner = 2;
+  SandboxState state = 3;
+  repeated ResolvedProjectionHandle resolved_tooling_projections = 4;
+  repeated DependencySpec dependencies = 5;
+  string last_event_cursor = 6;
+}
+
+message SandboxEvent {
+  string event_id = 1;
+  uint64 sequence = 2;
+  string cursor = 3;
+  string sandbox_id = 4;
+  EventType event_type = 5;
+  google.protobuf.Timestamp occurred_at = 6;
+  bool replay = 7;
+  bool snapshot = 8;
+  string phase = 9;
+  string dependency_name = 10;
+  string error_code = 11;
+  string error_message = 12;
+  string reason = 13;
+  string exec_id = 14;
+  int32 exit_code = 15;
+  SandboxState sandbox_state = 16;
+  ExecState exec_state = 17;
+  ActionReason action_reason = 18;
+  ActionStrategy action_strategy = 19;
+}
+
+message ExecStatus {
+  string exec_id = 1;
+  string sandbox_id = 2;
+  ExecState state = 3;
+  repeated string command = 4;
+  string cwd = 5;
+  repeated KeyValue env_overrides = 6;
+  int32 exit_code = 7;
+  string error = 8;
+}
+
+message CreateSandboxRequest {
+  SandboxOwner sandbox_owner = 1;
+  CreateSpec create_spec = 2;
+  CallerMetadata caller_metadata = 3;
+}
+
+message CreateSandboxResponse {
+  string sandbox_id = 1;
+  SandboxState initial_state = 2;
+}
+
+message GetSandboxRequest {
+  string sandbox_id = 1;
+}
+
+message GetSandboxResponse {
+  SandboxHandle sandbox = 1;
+}
+
+message ListSandboxesRequest {
+  SandboxOwner owner = 1;
+  bool include_deleted = 2;
+}
+
+message ListSandboxesResponse {
+  repeated SandboxHandle sandboxes = 1;
+}
+
+message ResumeSandboxRequest {
+  string sandbox_id = 1;
+}
+
+message StopSandboxRequest {
+  string sandbox_id = 1;
+  string reason = 2;
+  ActionReason action_reason = 3;
+  ActionStrategy action_strategy = 4;
+}
+
+message DeleteSandboxRequest {
+  string sandbox_id = 1;
+  string reason = 2;
+  ActionReason action_reason = 3;
+  ActionStrategy action_strategy = 4;
+}
+
+message AcceptedResponse {
+  bool accepted = 1;
+}
+
+message SubscribeSandboxEventsRequest {
+  string sandbox_id = 1;
+  string from_cursor = 2;
+  bool include_current_snapshot = 3;
+}
+
+message CreateExecRequest {
+  string sandbox_id = 1;
+  repeated string command = 2;
+  string cwd = 3;
+  repeated KeyValue env_overrides = 4;
+  CallerMetadata caller_metadata = 5;
+  ActionReason action_reason = 6;
+  ActionStrategy action_strategy = 7;
+}
+
+message CreateExecResponse {
+  string exec_id = 1;
+}
+
+message StartExecRequest {
+  string exec_id = 1;
+  ActionReason action_reason = 2;
+  ActionStrategy action_strategy = 3;
+}
+
+message CancelExecRequest {
+  string exec_id = 1;
+  ActionReason action_reason = 2;
+  ActionStrategy action_strategy = 3;
+}
+
+message GetExecRequest {
+  string exec_id = 1;
+}
+
+message GetExecResponse {
+  ExecStatus exec = 1;
+}
+
+message ListActiveExecsRequest {
+  string sandbox_id = 1;
+}
+
+message ListActiveExecsResponse {
+  repeated ExecStatus execs = 1;
+}
