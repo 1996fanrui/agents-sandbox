@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
@@ -22,8 +24,14 @@ type daemonFileConfig struct {
 		SocketPath string `toml:"socket_path"`
 	} `toml:"server"`
 	Runtime struct {
-		IdleTTL string `toml:"idle_ttl"`
+		IdleTTL      string `toml:"idle_ttl"`
+		StateRoot    string `toml:"state_root"`
+		ReplayWindow int    `toml:"event_replay_window"`
 	} `toml:"runtime"`
+	Artifacts struct {
+		ExecOutputRoot     string `toml:"exec_output_root"`
+		ExecOutputTemplate string `toml:"exec_output_template"`
+	} `toml:"artifacts"`
 }
 
 type startupFlags struct {
@@ -31,6 +39,8 @@ type startupFlags struct {
 	configPath         string
 	socketPathFromEnv  bool
 	socketPathProvided bool
+	configPathFromEnv  bool
+	configPathProvided bool
 }
 
 func resolveStartupConfig(args []string, lookupEnv func(string) (string, bool)) (startupConfig, error) {
@@ -39,22 +49,25 @@ func resolveStartupConfig(args []string, lookupEnv func(string) (string, bool)) 
 		return startupConfig{}, err
 	}
 	serviceConfig := control.DefaultServiceConfig()
-	socketPath := defaultSocketPath
+	socketPath := defaultSocketPathForPlatform(lookupEnv)
 
 	if parsedFlags.configPath != "" {
 		fileConfig, err := loadDaemonFileConfig(parsedFlags.configPath)
 		if err != nil {
 			return startupConfig{}, err
 		}
-		if fileConfig.Server.SocketPath != "" {
-			socketPath = fileConfig.Server.SocketPath
+		socketPath, serviceConfig, err = applyFileConfig(socketPath, serviceConfig, parsedFlags.configPath, fileConfig)
+		if err != nil {
+			return startupConfig{}, err
 		}
-		if fileConfig.Runtime.IdleTTL != "" {
-			idleTTL, err := time.ParseDuration(fileConfig.Runtime.IdleTTL)
-			if err != nil {
-				return startupConfig{}, fmt.Errorf("parse runtime.idle_ttl from %s: %w", parsedFlags.configPath, err)
-			}
-			serviceConfig.IdleTTL = idleTTL
+	} else if detectedConfigPath := detectDefaultConfigPath(lookupEnv); detectedConfigPath != "" {
+		fileConfig, err := loadDaemonFileConfig(detectedConfigPath)
+		if err != nil {
+			return startupConfig{}, err
+		}
+		socketPath, serviceConfig, err = applyFileConfig(socketPath, serviceConfig, detectedConfigPath, fileConfig)
+		if err != nil {
+			return startupConfig{}, err
 		}
 	}
 	if parsedFlags.socketPathFromEnv || parsedFlags.socketPathProvided {
@@ -77,9 +90,10 @@ func parseFlags(args []string, lookupEnv func(string) (string, bool)) (startupFl
 	}
 	if envValue, ok := lookupEnv(configEnvVar); ok && envValue != "" {
 		flags.configPath = envValue
+		flags.configPathFromEnv = true
 	}
 	flagSet.Var(&stringFlag{target: &flags.socketPath, wasSet: &flags.socketPathProvided}, "socket", "Unix domain socket path for the daemon.")
-	flagSet.StringVar(&flags.configPath, "config", flags.configPath, "Path to the daemon TOML config file.")
+	flagSet.Var(&stringFlag{target: &flags.configPath, wasSet: &flags.configPathProvided}, "config", "Path to the daemon TOML config file.")
 	if err := flagSet.Parse(args); err != nil {
 		return startupFlags{}, err
 	}
@@ -121,4 +135,76 @@ func loadDaemonFileConfig(path string) (daemonFileConfig, error) {
 		return daemonFileConfig{}, fmt.Errorf("decode daemon config file %s: %w", path, err)
 	}
 	return config, nil
+}
+
+func detectDefaultConfigPath(lookupEnv func(string) (string, bool)) string {
+	var candidate string
+	switch runtime.GOOS {
+	case "darwin":
+		if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+			candidate = filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "config.toml")
+		}
+	default:
+		configRoot := ""
+		if envValue, ok := lookupEnv("XDG_CONFIG_HOME"); ok && envValue != "" {
+			configRoot = envValue
+		} else if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+			configRoot = filepath.Join(homeDir, ".config")
+		}
+		if configRoot != "" {
+			candidate = filepath.Join(configRoot, "agents-sandbox", "config.toml")
+		}
+	}
+	if candidate == "" {
+		return ""
+	}
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
+func defaultSocketPathForPlatform(lookupEnv func(string) (string, bool)) string {
+	switch runtime.GOOS {
+	case "darwin":
+		if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+			return filepath.Join(homeDir, "Library", "Application Support", "agbox", "run", "agboxd.sock")
+		}
+	default:
+		if runtimeDir, ok := lookupEnv("XDG_RUNTIME_DIR"); ok && runtimeDir != "" {
+			return filepath.Join(runtimeDir, "agbox", "agboxd.sock")
+		}
+	}
+	return defaultSocketPath
+}
+
+func applyFileConfig(
+	socketPath string,
+	serviceConfig control.ServiceConfig,
+	configPath string,
+	fileConfig daemonFileConfig,
+) (string, control.ServiceConfig, error) {
+	if fileConfig.Server.SocketPath != "" {
+		socketPath = fileConfig.Server.SocketPath
+	}
+	if fileConfig.Runtime.IdleTTL != "" {
+		idleTTL, err := time.ParseDuration(fileConfig.Runtime.IdleTTL)
+		if err != nil {
+			return "", control.ServiceConfig{}, fmt.Errorf("parse runtime.idle_ttl from %s: %w", configPath, err)
+		}
+		serviceConfig.IdleTTL = idleTTL
+	}
+	if fileConfig.Runtime.StateRoot != "" {
+		serviceConfig.StateRoot = fileConfig.Runtime.StateRoot
+	}
+	if fileConfig.Runtime.ReplayWindow > 0 {
+		serviceConfig.ReplayLimit = fileConfig.Runtime.ReplayWindow
+	}
+	if fileConfig.Artifacts.ExecOutputRoot != "" {
+		serviceConfig.ArtifactOutputRoot = fileConfig.Artifacts.ExecOutputRoot
+	}
+	if fileConfig.Artifacts.ExecOutputTemplate != "" {
+		serviceConfig.ArtifactOutputTemplate = fileConfig.Artifacts.ExecOutputTemplate
+	}
+	return socketPath, serviceConfig, nil
 }

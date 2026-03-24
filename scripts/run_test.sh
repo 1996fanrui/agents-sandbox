@@ -43,16 +43,34 @@ run_go_tests() {
   go test ./...
 }
 
+run_sdk_tests() {
+  local sdk_root="${PROJECT_ROOT}/sdk/python"
+  if [ ! -f "${sdk_root}/pyproject.toml" ]; then
+    return 0
+  fi
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv command not found." >&2
+    exit 1
+  fi
+
+  (
+    cd "${sdk_root}"
+    uv run pytest
+  )
+}
+
 case "${1:-all}" in
   lint)
     run_lints
     ;;
   test)
     run_go_tests
+    run_sdk_tests
     ;;
   all)
     run_lints
     run_go_tests
+    run_sdk_tests
     ;;
   *)
     echo "Unsupported mode: ${1}" >&2

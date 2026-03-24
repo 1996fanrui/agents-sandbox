@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
@@ -46,7 +47,7 @@ func runWithDeps(
 		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
-	lockHandle, err := acquireLock(defaultLockPath)
+	lockHandle, err := acquireLock(resolveLockPath(startup.socketPath))
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -61,4 +62,11 @@ func runWithDeps(
 		return 1
 	}
 	return 0
+}
+
+func resolveLockPath(socketPath string) string {
+	if socketPath == "" || socketPath == defaultSocketPath {
+		return defaultLockPath
+	}
+	return filepath.Join(filepath.Dir(socketPath), "agboxd.lock")
 }

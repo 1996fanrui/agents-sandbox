@@ -55,11 +55,41 @@ class SandboxClient:
     def resume_sandbox(self, sandbox_id: str) -> service_pb2.AcceptedResponse:
         return self._call(self._stub.ResumeSandbox, service_pb2.ResumeSandboxRequest(sandbox_id=sandbox_id))
 
-    def stop_sandbox(self, sandbox_id: str, reason: str) -> service_pb2.AcceptedResponse:
-        return self._call(self._stub.StopSandbox, service_pb2.StopSandboxRequest(sandbox_id=sandbox_id, reason=reason))
+    def stop_sandbox(
+        self,
+        sandbox_id: str,
+        reason: str = "",
+        *,
+        action_reason: int = service_pb2.ACTION_REASON_UNSPECIFIED,
+        action_strategy: int = service_pb2.ACTION_STRATEGY_UNSPECIFIED,
+    ) -> service_pb2.AcceptedResponse:
+        return self._call(
+            self._stub.StopSandbox,
+            service_pb2.StopSandboxRequest(
+                sandbox_id=sandbox_id,
+                reason=reason,
+                action_reason=action_reason,
+                action_strategy=action_strategy,
+            ),
+        )
 
-    def delete_sandbox(self, sandbox_id: str, reason: str) -> service_pb2.AcceptedResponse:
-        return self._call(self._stub.DeleteSandbox, service_pb2.DeleteSandboxRequest(sandbox_id=sandbox_id, reason=reason))
+    def delete_sandbox(
+        self,
+        sandbox_id: str,
+        reason: str = "",
+        *,
+        action_reason: int = service_pb2.ACTION_REASON_UNSPECIFIED,
+        action_strategy: int = service_pb2.ACTION_STRATEGY_UNSPECIFIED,
+    ) -> service_pb2.AcceptedResponse:
+        return self._call(
+            self._stub.DeleteSandbox,
+            service_pb2.DeleteSandboxRequest(
+                sandbox_id=sandbox_id,
+                reason=reason,
+                action_reason=action_reason,
+                action_strategy=action_strategy,
+            ),
+        )
 
     def subscribe_sandbox_events(
         self,
@@ -83,11 +113,37 @@ class SandboxClient:
     def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
         return self._call(self._stub.CreateExec, request)
 
-    def start_exec(self, exec_id: str) -> service_pb2.AcceptedResponse:
-        return self._call(self._stub.StartExec, service_pb2.StartExecRequest(exec_id=exec_id))
+    def start_exec(
+        self,
+        exec_id: str,
+        *,
+        action_reason: int = service_pb2.ACTION_REASON_UNSPECIFIED,
+        action_strategy: int = service_pb2.ACTION_STRATEGY_UNSPECIFIED,
+    ) -> service_pb2.AcceptedResponse:
+        return self._call(
+            self._stub.StartExec,
+            service_pb2.StartExecRequest(
+                exec_id=exec_id,
+                action_reason=action_reason,
+                action_strategy=action_strategy,
+            ),
+        )
 
-    def cancel_exec(self, exec_id: str) -> service_pb2.AcceptedResponse:
-        return self._call(self._stub.CancelExec, service_pb2.CancelExecRequest(exec_id=exec_id))
+    def cancel_exec(
+        self,
+        exec_id: str,
+        *,
+        action_reason: int = service_pb2.ACTION_REASON_UNSPECIFIED,
+        action_strategy: int = service_pb2.ACTION_STRATEGY_UNSPECIFIED,
+    ) -> service_pb2.AcceptedResponse:
+        return self._call(
+            self._stub.CancelExec,
+            service_pb2.CancelExecRequest(
+                exec_id=exec_id,
+                action_reason=action_reason,
+                action_strategy=action_strategy,
+            ),
+        )
 
     def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
         return self._call(self._stub.GetExec, service_pb2.GetExecRequest(exec_id=exec_id))

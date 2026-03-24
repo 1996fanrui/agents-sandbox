@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -104,6 +106,77 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	}
 	if last.GetActionReason() != agboxv1.ActionReason_ACTION_REASON_EXECUTE_RUN || last.GetActionStrategy() != agboxv1.ActionStrategy_ACTION_STRATEGY_START_RUN_EXEC {
 		t.Fatalf("unexpected exec finish action metadata: %#v", last)
+	}
+}
+
+func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
+	artifactRoot := t.TempDir()
+	client := newBufconnClient(t, ServiceConfig{
+		ReplayLimit:            16,
+		TransitionDelay:        5 * time.Millisecond,
+		PollInterval:           2 * time.Millisecond,
+		ArtifactOutputRoot:     artifactRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.jsonl",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxOwner: &agboxv1.SandboxOwner{
+			Product:   "consumer",
+			OwnerType: "workspace",
+			OwnerId:   "workspace-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		Command:   []string{"echo", "hello"},
+	})
+	if err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+	if _, err := client.StartExec(context.Background(), &agboxv1.StartExecRequest{ExecId: execResp.GetExecId()}); err != nil {
+		t.Fatalf("StartExec failed: %v", err)
+	}
+	waitForExecState(t, client, execResp.GetExecId(), agboxv1.ExecState_EXEC_STATE_FINISHED)
+
+	artifactPath := filepath.Join(artifactRoot, createResp.GetSandboxId(), execResp.GetExecId()+".jsonl")
+	content, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if string(content) != "{\"state\":\"finished\"}\n" {
+		t.Fatalf("unexpected artifact content: %q", string(content))
+	}
+}
+
+func TestCreateExecFailsFastWhenArtifactTemplateEscapesRoot(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		ArtifactOutputRoot:     t.TempDir(),
+		ArtifactOutputTemplate: "../escape.jsonl",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxOwner: &agboxv1.SandboxOwner{
+			Product:   "consumer",
+			OwnerType: "workspace",
+			OwnerId:   "workspace-escape",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		Command:   []string{"echo"},
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected failed precondition, got %v", err)
 	}
 }
 

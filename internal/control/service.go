@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1"
@@ -21,22 +23,26 @@ import (
 )
 
 type ServiceConfig struct {
-	ReplayLimit     int
-	TransitionDelay time.Duration
-	PollInterval    time.Duration
-	IdleTTL         time.Duration
-	Version         string
-	DaemonName      string
+	ReplayLimit            int
+	TransitionDelay        time.Duration
+	PollInterval           time.Duration
+	IdleTTL                time.Duration
+	StateRoot              string
+	ArtifactOutputRoot     string
+	ArtifactOutputTemplate string
+	Version                string
+	DaemonName             string
 }
 
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
-		ReplayLimit:     32,
-		TransitionDelay: 10 * time.Millisecond,
-		PollInterval:    10 * time.Millisecond,
-		IdleTTL:         30 * time.Minute,
-		Version:         "0.1.0",
-		DaemonName:      "agboxd",
+		ReplayLimit:            32,
+		TransitionDelay:        10 * time.Millisecond,
+		PollInterval:           10 * time.Millisecond,
+		IdleTTL:                30 * time.Minute,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.jsonl",
+		Version:                "0.1.0",
+		DaemonName:             "agboxd",
 	}
 }
 
@@ -51,12 +57,20 @@ type Service struct {
 	execs    map[string]string
 }
 
+var (
+	errArtifactPathEscapesRoot    = errors.New("artifact path escapes configured root")
+	errArtifactPathUsesSymlink    = errors.New("artifact path uses symlink boundary")
+	errArtifactPathUsesHardlink   = errors.New("artifact path uses hardlink boundary")
+	errArtifactTemplateFieldEmpty = errors.New("artifact template field is empty")
+)
+
 type sandboxRecord struct {
 	handle                    *agboxv1.SandboxHandle
 	ownerKey                  string
 	dependencies              []*agboxv1.DependencySpec
 	events                    []*agboxv1.SandboxEvent
 	execs                     map[string]*agboxv1.ExecStatus
+	execArtifacts             map[string]string
 	nextSequence              uint64
 	lastTerminalRunFinishedAt time.Time
 }
@@ -88,6 +102,9 @@ func NewService(config ServiceConfig) *Service {
 	}
 	if config.IdleTTL <= 0 {
 		config.IdleTTL = defaults.IdleTTL
+	}
+	if config.ArtifactOutputTemplate == "" {
+		config.ArtifactOutputTemplate = defaults.ArtifactOutputTemplate
 	}
 	if config.Version == "" {
 		config.Version = defaults.Version
@@ -134,9 +151,10 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 			ResolvedToolingProjections: resolveTooling(req.GetCreateSpec().GetToolingProjections()),
 			Dependencies:               cloneDependencies(req.GetCreateSpec().GetDependencies()),
 		},
-		ownerKey:     ownerKey,
-		dependencies: cloneDependencies(req.GetCreateSpec().GetDependencies()),
-		execs:        make(map[string]*agboxv1.ExecStatus),
+		ownerKey:      ownerKey,
+		dependencies:  cloneDependencies(req.GetCreateSpec().GetDependencies()),
+		execs:         make(map[string]*agboxv1.ExecStatus),
+		execArtifacts: make(map[string]string),
 	}
 	s.boxes[sandboxID] = record
 	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
@@ -350,6 +368,11 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	}
 	s.nextExec++
 	execID := fmt.Sprintf("exec-%d", s.nextExec)
+	if artifactPath, artifactErr := s.prepareExecArtifactPath(record.handle.GetSandboxId(), execID); artifactErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "prepare exec artifact output: %v", artifactErr)
+	} else if artifactPath != "" {
+		record.execArtifacts[execID] = artifactPath
+	}
 	execRecord := &agboxv1.ExecStatus{
 		ExecId:       execID,
 		SandboxId:    req.GetSandboxId(),
@@ -416,6 +439,11 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 	execRecord.State = agboxv1.ExecState_EXEC_STATE_CANCELLED
 	record := s.boxes[sandboxID]
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
+	if artifactPath := record.execArtifacts[req.GetExecId()]; artifactPath != "" {
+		if err := writeExecArtifact(artifactPath, "cancelled"); err != nil {
+			return nil, status.Errorf(codes.Internal, "write exec artifact: %v", err)
+		}
+	}
 	s.appendEventLocked(record, agboxv1.EventType_EXEC_CANCELLED, eventMutation{
 		execID:         req.GetExecId(),
 		execState:      agboxv1.ExecState_EXEC_STATE_CANCELLED,
@@ -543,6 +571,21 @@ func (s *Service) completeExec(execID string, actionReason audit.ActionReason, a
 	execRecord.ExitCode = 0
 	record := s.boxes[sandboxID]
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
+	if artifactPath := record.execArtifacts[execID]; artifactPath != "" {
+		if err := writeExecArtifact(artifactPath, "finished"); err != nil {
+			execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
+			execRecord.Error = fmt.Sprintf("write exec artifact: %v", err)
+			s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
+				execID:         execID,
+				execState:      agboxv1.ExecState_EXEC_STATE_FAILED,
+				errorCode:      "ARTIFACT_OUTPUT_WRITE_FAILED",
+				errorMessage:   execRecord.GetError(),
+				actionReason:   actionReason,
+				actionStrategy: actionStrategy,
+			})
+			return
+		}
+	}
 	s.appendEventLocked(record, agboxv1.EventType_EXEC_FINISHED, eventMutation{
 		execID:         execID,
 		execState:      agboxv1.ExecState_EXEC_STATE_FINISHED,
@@ -551,6 +594,111 @@ func (s *Service) completeExec(execID string, actionReason audit.ActionReason, a
 		actionStrategy: actionStrategy,
 	})
 	go s.scheduleIdleStop(sandboxID)
+}
+
+func (s *Service) prepareExecArtifactPath(sandboxID string, execID string) (string, error) {
+	if s.config.ArtifactOutputRoot == "" || s.config.ArtifactOutputTemplate == "" {
+		return "", nil
+	}
+	return prepareExecOutputPath(
+		s.config.ArtifactOutputRoot,
+		s.config.ArtifactOutputTemplate,
+		map[string]string{
+			"sandbox_id": sandboxID,
+			"exec_id":    execID,
+		},
+	)
+}
+
+func writeExecArtifact(path string, state string) error {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(fmt.Sprintf("{\"state\":\"%s\"}\n", state))
+	return err
+}
+
+func prepareExecOutputPath(root string, template string, fields map[string]string) (string, error) {
+	relativePath, err := expandArtifactTemplate(template, fields)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(relativePath) {
+		return "", errArtifactPathEscapesRoot
+	}
+	cleanRelative := filepath.Clean(relativePath)
+	if cleanRelative == "." || cleanRelative == "" || strings.HasPrefix(cleanRelative, "..") {
+		return "", errArtifactPathEscapesRoot
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(rootAbs, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(rootAbs, cleanRelative)
+	parentPath := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parentPath, 0o755); err != nil {
+		return "", err
+	}
+	parentRealPath, err := filepath.EvalSymlinks(parentPath)
+	if err != nil {
+		return "", err
+	}
+	if !pathWithinRoot(rootAbs, parentRealPath) {
+		return "", errArtifactPathEscapesRoot
+	}
+	targetInfo, err := os.Lstat(targetPath)
+	if err == nil {
+		if targetInfo.Mode()&os.ModeSymlink != 0 {
+			return "", errArtifactPathUsesSymlink
+		}
+		if usesHardlink(targetInfo) {
+			return "", errArtifactPathUsesHardlink
+		}
+		return targetPath, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func expandArtifactTemplate(template string, fields map[string]string) (string, error) {
+	resolved := template
+	for key, value := range fields {
+		if value == "" {
+			return "", fmt.Errorf("%w: %s", errArtifactTemplateFieldEmpty, key)
+		}
+		resolved = strings.ReplaceAll(resolved, "{"+key+"}", value)
+	}
+	if strings.Contains(resolved, "{") || strings.Contains(resolved, "}") {
+		return "", fmt.Errorf("artifact template contains unresolved field: %s", resolved)
+	}
+	return resolved, nil
+}
+
+func pathWithinRoot(root string, candidate string) bool {
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (!strings.HasPrefix(relative, ".."+string(filepath.Separator)) && relative != "..")
+}
+
+func usesHardlink(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Nlink > 1
 }
 
 func (s *Service) scheduleIdleStop(sandboxID string) {
