@@ -12,30 +12,40 @@ If a change adds, removes, renames, or changes the default of a config key, upda
 - Environment-specific injection may provide deployment-local values such as socket paths, mounted files, or secret file locations.
 - Secrets stay outside the repository and outside generated documentation.
 
-Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as workspace materialization, dependency declarations, and tooling projection requests belong to the RPC contract, not to `config.toml`.
+Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_resources`), and dependency declarations belong to the RPC contract, not to `config.toml`.
+
+The AgentsSandbox daemon startup values resolve with this precedence:
+
+1. CLI flags such as `--socket` and `--config`
+2. Environment variables such as `AGBOX_SOCKET` and `AGBOX_CONFIG_FILE`
+3. Auto-discovered `config.toml`
+4. Built-in defaults
+
+The singleton host lock is not an operator-tunable config key. The AgentsSandbox daemon derives it from the effective socket path:
+
+- the host-managed deployment path `/run/agbox/agboxd.sock` uses the fixed host lock `/run/agbox/agboxd.lock`
+- standalone or foreground paths outside `/run/agbox` co-locate the lock next to the chosen socket, for example `/tmp/dev/agboxd.sock` uses `/tmp/dev/agboxd.lock`
+- socket-scoped locks are acceptable only for standalone or explicit foreground usage; they are not a supported way to run multiple host-global control planes against the same Docker daemon
 
 ## Configuration File Locations
 
 | Scenario | Path |
 |----------|------|
-| Linux standalone | `$XDG_CONFIG_HOME/agents-sandbox/config.toml`, with fallback to `~/.config/agents-sandbox/config.toml` |
+| Linux standalone | `$XDG_CONFIG_HOME/agents-sandbox/config.toml`, or `~/.config/agents-sandbox/config.toml` when `XDG_CONFIG_HOME` is unset |
 | macOS standalone | `~/Library/Application Support/agents-sandbox/config.toml` |
-| Compose deployment | `/etc/agents-sandbox/config.toml` mounted into the `agboxd` container |
+| Host-managed daemon deployment | `/etc/agents-sandbox/config.toml` managed by the host `systemd` service |
+
+The AgentsSandbox daemon auto-loads the platform-default file only when no explicit `--config` flag or `AGBOX_CONFIG_FILE` override is provided.
 
 ## Configuration Keys
 
 | Key | Type | Recommended Default | Override Scope | Purpose |
 |-----|------|---------------------|----------------|---------|
-| `server.socket_path` | string | Platform default for standalone; `/run/agbox/agboxd.sock` for compose | Daemon config only | Canonical Unix domain socket path for the daemon |
-| `runtime.state_root` | string | Linux standalone: `$XDG_STATE_HOME/agents-sandbox` or `~/.local/state/agents-sandbox`; macOS standalone: `~/Library/Application Support/agents-sandbox/state`; compose: `/var/lib/agents-sandbox/state` | Daemon config only | Persistent root for runtime state, event journals, sequence counters, and shadow-copy materialization |
+| `server.socket_path` | string | `$XDG_RUNTIME_DIR/agbox/agboxd.sock` on Linux standalone, `~/Library/Application Support/agbox/run/agboxd.sock` on macOS standalone, `/run/agbox/agboxd.sock` for host-managed deployment | Daemon config only | Canonical Unix domain socket path for the daemon |
 | `runtime.idle_ttl` | duration string | `"30m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
-| `runtime.event_replay_window` | duration string | `"24h"` | Daemon config only | Retention window for event replay and reconnect recovery |
-| `artifacts.exec_output_root` | string | `"/var/lib/agents-sandbox/artifacts/exec"` | Daemon config only | Root directory for exec output files |
-| `artifacts.exec_output_template` | string template | `"{sandbox_id}/{exec_id}.jsonl"` | Daemon config only | Relative path template for exec output files |
-| `artifacts.enforce_root_boundary` | boolean | `true` | Daemon config only | Reject path escapes outside `artifacts.exec_output_root` |
-| `projections.cache_defaults.uv` | boolean | `true` | Daemon config only; request may disable | Default enablement for the `uv` cache projection |
-| `projections.cache_defaults.npm` | boolean | `true` | Daemon config only; request may disable | Default enablement for the `npm` cache projection |
-| `projections.cache_defaults.apt` | boolean | `true` | Daemon config only; request may disable | Default enablement for the `apt` cache projection |
+| `runtime.state_root` | string | unset | Daemon config only | Root for durable-copy workspace materialization, generic copy inputs, and shadow-copy projection state |
+| `artifacts.exec_output_root` | string | unset | Daemon config only | Root directory where runtime-owned exec output files are created |
+| `artifacts.exec_output_template` | string | `"{sandbox_id}/{exec_id}.jsonl"` | Daemon config only | Relative template expanded against `artifacts.exec_output_root`; supported fields are `sandbox_id` and `exec_id` |
 
 ## Request-Time Overrides
 
@@ -43,31 +53,31 @@ The northbound API may override only a narrow subset of behavior:
 
 | Surface | Allowed Request Override | Notes |
 |---------|--------------------------|-------|
-| Workspace materialization | Yes | Each sandbox provides its own workspace source and materialization mode |
+| Primary sandbox image | Yes | Every sandbox request must provide its own runtime image; this is not a daemon config default |
+| Generic mounts | Yes | Each sandbox may bind explicit host paths to explicit container targets |
+| Generic copies | Yes | Each sandbox may copy explicit host files or trees into explicit container targets |
+| Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `.claude`, `.codex`, `uv`, or `ssh-agent` |
 | Dependency list | Yes | Each sandbox declares its own dependency set |
-| Cache projections | Yes, disable-only | Requests may turn off daemon-default caches, but may not introduce arbitrary new host paths |
-| Tooling projections | Yes, explicit capability request | Requests may choose from the daemon's built-in capability set |
-| Artifact output location | No | Output root and template stay daemon-owned |
 | `runtime.idle_ttl` | No | Idle stop policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |
 
-## Built-in Tooling Capabilities
+Legacy `workspace`, `cache_projections`, and `tooling_projections` fields still exist in the protocol for internal and compatibility paths, but they are not the preferred public SDK surface.
 
-These capabilities are runtime contracts exposed by the daemon. They are not arbitrary user-defined mount rules.
+Replay retention is not an operator-tunable config key in V1. The current daemon keeps per-sandbox event history in memory for the daemon process lifetime, which is enough for `from_cursor="0"` replay while the daemon remains alive.
 
-| Capability ID | Default Host Source | Default Container Target | Purpose |
-|---------------|---------------------|--------------------------|---------|
-| `.claude` | `~/.claude` | `/home/sandbox/.claude` | Claude configuration |
-| `.codex` | `~/.codex` | `/home/sandbox/.codex` | Codex configuration |
-| `.agents` | `~/.agents` | `/home/sandbox/.agents` | Agent configuration |
-| `gh-auth` | `~/.config/gh` | `/home/sandbox/.config/gh` | GitHub CLI authentication |
-| `ssh-agent` | `SSH_AUTH_SOCK` from the host environment | `/ssh-agent` | SSH agent forwarding |
+## Singleton Deployment Rule
 
-## Artifact Output Safety Rules
+The AgentsSandbox daemon is a single-writer control plane for one host runtime. Starting a second daemon against the same Docker daemon is unsafe because cleanup and lifecycle decisions are host-global.
 
-The daemon owns exec output path construction and must fail fast on unsafe or invalid targets:
+Supported deployments must satisfy all of these constraints:
 
-- Template expansion must produce a path under `artifacts.exec_output_root`.
-- Parent directory resolution must reject `..` escapes.
-- Path preparation must reject symlink and hardlink boundary escapes.
-- Missing template fields, owner mismatches, or permission failures must surface explicit errors.
+- The daemon acquires an exclusive non-blocking lock before it removes any socket path or starts gRPC serving.
+- The daemon exits fail-fast if the lock is already held.
+- A consumer that bind-mounts the host runtime directory must use the same directory for both `server.socket_path` and the derived host lock; per-stack private Docker volumes are not a safe singleton mechanism.
+
+In practice, the host-managed safe default is:
+
+- `server.socket_path = "/run/agbox/agboxd.sock"`
+- derived host lock path: `/run/agbox/agboxd.lock`
+
+With that layout, accidental duplicate compose stacks on the same host contend on the same lock file and the later daemon fails before it can mutate the shared socket or Docker-managed runtime state.

@@ -9,58 +9,69 @@ The goal is a portable Docker-first runtime with a strict default security postu
 - Each sandbox gets its own dedicated Docker network.
 - The primary container and all declared dependencies attach only to that sandbox network.
 - Host network, shared bridge reuse, and Docker socket exposure to runtime containers are not supported.
-- Only explicitly declared workspace and capability projections may enter the sandbox.
+- Only explicitly declared filesystem inputs may enter the sandbox.
 - Invalid or unsafe runtime inputs must fail fast. The daemon must not silently widen mounts or fall back to weaker isolation.
 
-## Projection Classes
+## Filesystem Ingress Classes
 
-Projection intent is split into two independent classes and must not be merged into a single generic mount bucket.
+The public northbound surface supports three distinct filesystem ingress classes:
 
 | Class | Purpose | Examples | Default Behavior |
 |-------|---------|----------|------------------|
-| Cache projections | Reuse package and tool caches to avoid repeated downloads | `uv`, `npm`, `apt` | Enabled by daemon defaults and may be disabled per sandbox |
-| Tooling projections | Provide agent and operator capabilities | `.claude`, `.codex`, `.agents`, `gh-auth`, `ssh-agent` | Disabled unless the caller explicitly requests the capability |
+| `mounts` | Bind explicit host paths into the sandbox | project tree, host config file, shared data directory | Disabled unless the caller explicitly declares each mount |
+| `copies` | Copy explicit host files or trees into the sandbox | source snapshot, seed config, fixture data | Disabled unless the caller explicitly declares each copy |
+| `builtin_resources` | Request daemon-defined resource shortcuts | `.claude`, `.codex`, `.agents`, `gh-auth`, `ssh-agent`, `uv`, `npm`, `apt` | Disabled unless the caller explicitly requests each resource |
+
+Legacy `workspace`, `cache_projections`, and `tooling_projections` request fields still exist for protocol compatibility and daemon internals, but they are not the preferred public SDK surface.
 
 ## Built-in Tooling Projections
 
+The imported session/auth runtime uses `/home/agbox` as its effective `HOME`, so the default container targets below are aligned with that path.
+
 | Capability ID | Default Host Source | Default Container Target | Mode |
 |---------------|---------------------|--------------------------|------|
-| `.claude` | `~/.claude` | `/home/sandbox/.claude` | read-write |
-| `.codex` | `~/.codex` | `/home/sandbox/.codex` | read-write |
-| `.agents` | `~/.agents` | `/home/sandbox/.agents` | read-write |
-| `gh-auth` | `~/.config/gh` | `/home/sandbox/.config/gh` | read-only |
+| `.claude` | `~/.claude` | `/home/agbox/.claude` | read-write |
+| `.codex` | `~/.codex` | `/home/agbox/.codex` | read-write |
+| `.agents` | `~/.agents` | `/home/agbox/.agents` | read-write |
+| `gh-auth` | `~/.config/gh` | `/home/agbox/.config/gh` | read-only |
 | `ssh-agent` | `SSH_AUTH_SOCK` from the host environment | `/ssh-agent` | socket forwarding |
+| `uv` | `~/.cache/uv` | `/home/agbox/.cache/uv` | read-write |
+| `npm` | `~/.npm` | `/home/agbox/.npm` | read-write |
+| `apt` | `~/.cache/agents-sandbox-apt` | `/var/cache/apt/archives` | read-write |
 
 These are daemon-defined capabilities. Requests may select from this set but may not replace them with arbitrary host paths.
 
-## Workspace Materialization and Symlinks
+The minimal base runtime image asset is maintained under `images/base-runtime/`, and the HOME-aligned coding runtime image asset is maintained under `images/coding-runtime/`.
 
-The workspace and projection layers follow different symlink rules.
+## Symlink Handling
 
-### Workspace materialization
+The runtime applies different rules to different ingress modes.
 
-`WorkspaceMaterializationSpec(mode=durable_copy)` preserves the current durable-copy behavior:
+### Generic mounts
 
-- symlinks that stay inside the declared project root are preserved
-- symlinks that escape the declared project root are rejected
-- dangling or unreadable links are rejected
+`mounts` keep the original host tree shape:
 
-### Projection materialization
+- the mount source itself must be a real file or directory, not a symlink
+- if the requested mount cannot be provided safely, the daemon fails fast
+- the daemon does not silently rewrite a mount into a copy
 
-`CapabilityProjectionSpec` must preflight symlink targets before bind mounting:
+### Generic copies
 
-- if a target stays inside the same projection root, bind mounting is allowed
-- if a target stays inside another explicitly declared projection root, bind mounting is allowed
-- if a target escapes every declared projection root, the daemon must not auto-mount the escaped host path
+`copies` copy content into daemon-owned state before exposing it in the sandbox:
 
-Escaping projection targets must take one of two outcomes:
+- the copy source itself must be a real file or directory, not a symlink
+- exclude patterns are applied while populating the copied tree
+- project-external or unreadable symlink targets are rejected instead of being auto-imported
 
-- `shadow_copy` into daemon-owned runtime state, then project the shadow tree into the sandbox
-- explicit failure if `shadow_copy` cannot be completed safely
+### Built-in resources
 
-For writable projections that fall back to `shadow_copy`, writes stay inside the shadow tree and do not write back to the original escaped target.
+`builtin_resources` resolve to daemon-defined host paths and targets:
 
-The daemon must expose the resolved result through `ResolvedProjectionHandle`, including whether the projection uses `bind` or `shadow_copy` and whether write-back remains enabled.
+- regular directories use bind mounts when safe
+- directory trees that contain escaping symlinks fall back to daemon-owned shadow copies when supported
+- socket resources such as `ssh-agent` are forwarded only when the host path is a real Unix socket
+
+The daemon exposes the resolved result through `ResolvedProjectionHandle`, including whether the resource uses `bind` or `shadow_copy` and whether write-back remains enabled.
 
 ## Dependency Model
 
@@ -81,7 +92,7 @@ Dependencies are generic runtime features. Product-specific config formats that 
 
 ```mermaid
 flowchart TB
-    A[Create dedicated network] --> B[Materialize workspace and projections]
+    A[Create dedicated network] --> B[Materialize filesystem inputs and built-in resources]
     B --> C[Create dependency containers]
     B --> D[Create primary container]
     C --> E[Start dependencies when prerequisites are ready]
@@ -121,4 +132,3 @@ Required rules:
 - runtime-owned event and artifact files
 
 The daemon must not require an external product database snapshot to decide whether a dependency or network belongs to a live sandbox. Ownership must be derivable from runtime state plus namespaced labels.
-
