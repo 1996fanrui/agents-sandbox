@@ -7,6 +7,9 @@
 *.dll
 *.so
 *.dylib
+/agboxd
+/.build/
+/logs/
 
 # Test binary, built with `go test -c`
 *.test
