@@ -1,0 +1,44 @@
+#!/bin/bash
+# agboxd startup script (foreground mode for systemd)
+#
+# Usage:
+#   sudo systemctl start agboxd           # Start the system service
+#   sudo systemctl stop agboxd            # Stop the system service
+#   systemctl --user start agboxd         # Start the user service for local development
+#   journalctl -u agboxd -f               # Follow system service lifecycle logs
+#
+# Optional environment variables:
+#   AGBOX_SOCKET       Override the daemon Unix socket path.
+#   AGBOX_CONFIG_FILE  Override the daemon config file path.
+#   GO_BIN             Override the Go executable used for building.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BUILD_DIR="${PROJECT_ROOT}/.build"
+LOG_DIR="${PROJECT_ROOT}/logs"
+GO_BIN="${GO_BIN:-go}"
+
+if ! command -v "${GO_BIN}" >/dev/null 2>&1; then
+    echo "Error: ${GO_BIN} is required to build agboxd." >&2
+    exit 1
+fi
+
+mkdir -p "${BUILD_DIR}" "${LOG_DIR}"
+exec > "${LOG_DIR}/agboxd_$(date +%Y%m%d_%H%M%S).log" 2>&1
+
+SOCKET_ARGS=()
+if [ -n "${AGBOX_SOCKET:-}" ]; then
+    SOCKET_ARGS=(--socket "${AGBOX_SOCKET}")
+fi
+
+CONFIG_ARGS=()
+if [ -n "${AGBOX_CONFIG_FILE:-}" ]; then
+    CONFIG_ARGS=(--config "${AGBOX_CONFIG_FILE}")
+fi
+
+cd "${PROJECT_ROOT}"
+"${GO_BIN}" build -o "${BUILD_DIR}/agboxd" ./cmd/agboxd
+
+exec "${BUILD_DIR}/agboxd" "${SOCKET_ARGS[@]}" "${CONFIG_ARGS[@]}"

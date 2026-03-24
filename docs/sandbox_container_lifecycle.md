@@ -16,10 +16,10 @@ Product-specific lifecycle semantics such as archive states stay outside this re
 
 | Resource | Ownership | Notes |
 |----------|-----------|-------|
-| Primary container | `agents-sandbox` | Main execution target for `CreateExec` and `StartExec` |
+| Primary container | `agents-sandbox` | Main execution target for `CreateExec` |
 | Dedicated network | `agents-sandbox` | One network per sandbox; shared bridge and host network are not supported |
 | Dependency containers | `agents-sandbox` | Sidecars and other declared dependencies attached to the same dedicated network |
-| Event journal | `agents-sandbox` | Source of ordered replayable lifecycle and exec events |
+| In-memory event history | `agents-sandbox` | Source of ordered replayable lifecycle and exec events while the daemon process remains alive |
 | Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
 
 Docker object labels must use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`.
@@ -34,7 +34,7 @@ stateDiagram-v2
     Pending --> Ready : materialization succeeds
     Pending --> Failed : materialization fails
 
-    Ready --> Ready : CreateExec / StartExec
+    Ready --> Ready : CreateExec
     Ready --> Stopped : StopSandbox or idle_ttl
     Stopped --> Ready : ResumeSandbox succeeds
 
@@ -67,6 +67,23 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`.
 
 Idle-stop behavior is part of the same contract. When the daemon stops a sandbox because `runtime.idle_ttl` expired, it must emit `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` and then `SANDBOX_STOPPED`.
 
+Exec lifecycle is part of the same event stream:
+
+- `CreateExec` is the only public exec-starting RPC.
+- A successful request allocates `exec_id`, starts the runtime exec asynchronously, and emits `EXEC_STARTED`.
+- Terminal states are reported as `EXEC_FINISHED`, `EXEC_FAILED`, or `EXEC_CANCELLED`.
+- Internal audit action reasons and strategies remain daemon-owned and must not appear in the public RPC or event schema.
+
+## Event Replay
+
+For one `sandbox_id`:
+
+- the literal `from_cursor="0"` must replay the full ordered event history since sandbox creation
+- non-zero cursors must be daemon-issued cursors from the same sandbox stream
+- clients must treat `cursor` and `sequence` as the ordering source of truth
+
+The current implementation keeps this event history in daemon memory. A daemon restart resets replay history for still-running sandboxes.
+
 ## Create Path
 
 ```mermaid
@@ -74,7 +91,7 @@ flowchart TB
     A[CreateSandbox accepted] --> B[Allocate sandbox_id and persist SANDBOX_ACCEPTED]
     B --> C[Validate create spec]
     C --> D[Create dedicated network]
-    D --> E[Materialize workspace and capability projections]
+    D --> E[Materialize filesystem inputs and built-in resources]
     E --> F[Create dependency containers]
     F --> G[Start primary and dependencies once prerequisites are ready]
     G --> H[Persist runtime handles and resolved projections]
@@ -85,7 +102,7 @@ Create-path rules:
 
 - `CreateSandbox` returns immediately after the request is accepted and the daemon has assigned `sandbox_id`.
 - The daemon owns actual materialization; the caller must not infer readiness from the RPC response alone.
-- The daemon must fail fast on invalid projections, invalid dependency declarations, or unsafe artifact targets.
+- The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_resources`, invalid dependency declarations, or unsafe artifact targets.
 - The daemon must reject duplicate `CreateSandbox` requests for the same active `sandbox_owner`.
 
 ## Resume Path
@@ -145,4 +162,3 @@ It must be able to detect and converge:
 - dedicated networks without live runtime membership
 
 Reconciliation must use structured audit logs and explicit action reasons and strategies.
-
