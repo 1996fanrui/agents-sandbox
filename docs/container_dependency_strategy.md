@@ -1,13 +1,13 @@
 # Container Dependency Strategy
 
-This document defines how `agents-sandbox` handles projections, dependencies, permissions, and network isolation.
+This document defines how `agents-sandbox` handles projections, services, permissions, and network isolation.
 
 The goal is a portable Docker-first runtime with a strict default security posture and no hidden product-specific branches.
 
 ## Core Rules
 
 - Each sandbox gets its own dedicated Docker network.
-- The primary container and all declared dependencies attach only to that sandbox network.
+- The primary container and all declared services attach only to that sandbox network.
 - Host network, shared bridge reuse, and Docker socket exposure to runtime containers are not supported.
 - Only explicitly declared filesystem inputs may enter the sandbox.
 - Invalid or unsafe runtime inputs must fail fast. The daemon must not silently widen mounts or fall back to weaker isolation.
@@ -22,7 +22,6 @@ The public northbound surface supports three distinct filesystem ingress classes
 | `copies` | Copy explicit host files or trees into the sandbox | source snapshot, seed config, fixture data | Disabled unless the caller explicitly declares each copy |
 | `builtin_resources` | Request daemon-defined resource shortcuts | `.claude`, `.codex`, `.agents`, `gh-auth`, `ssh-agent`, `uv`, `npm`, `apt` | Disabled unless the caller explicitly requests each resource |
 
-Legacy `workspace`, `cache_projections`, and `tooling_projections` request fields still exist for protocol compatibility and daemon internals, but they are not the preferred public SDK surface.
 
 ## Built-in Tooling Projections
 
@@ -71,45 +70,56 @@ The runtime applies different rules to different ingress modes.
 - directory trees that contain escaping symlinks fall back to daemon-owned shadow copies when supported
 - socket resources such as `ssh-agent` are forwarded only when the host path is a real Unix socket
 
-The daemon exposes the resolved result through `ResolvedProjectionHandle`, including whether the resource uses `bind` or `shadow_copy` and whether write-back remains enabled.
+The daemon resolves each built-in resource internally, deciding whether to bind mount or shadow-copy based on the host path structure.
 
-## Dependency Model
+## Service Model
 
-Dependencies are declared explicitly through `DependencySpec`.
+Services are declared explicitly through `ServiceSpec` and split into `required_services` and `optional_services`.
 
-| Field Area | Required Semantics |
-|------------|--------------------|
-| Identity | Each dependency has a stable dependency name inside the sandbox |
-| Image and env | Defined explicitly by the caller or profile |
-| Network alias | Scoped to the sandbox's dedicated network |
-| Health contract | The daemon waits for declared readiness conditions before reporting the sandbox ready |
-| Lifecycle ownership | Dependencies are created, stopped, and deleted with the sandbox |
-| Init hooks | Dependency-owned init hooks may run inside the primary container after the dependency is ready |
+`ServiceSpec` fields:
 
-Dependencies are generic runtime features. Product-specific config formats that map into these fields stay outside this repository.
+| Field | Semantics |
+|-------|-----------|
+| `name` | Stable service name inside the sandbox; also used as the `network_alias` on the sandbox network |
+| `image` | Container image, defined explicitly by the caller or profile |
+| `environment` | Environment variables passed to the service container |
+| `healthcheck` | Readiness condition used by the daemon to determine service health |
+| `post_start_on_primary` | Hook commands to run inside the primary container after this service becomes healthy |
+
+Service categories:
+
+| Category | Startup Behavior | Failure Behavior |
+|----------|-----------------|------------------|
+| `required_services` | Must be healthy before the primary is reported ready | Failure fails the entire sandbox materialization |
+| `optional_services` | Started in parallel with the primary container | Failure emits a warning only; daemon performs best-effort restart |
+
+Services are generic runtime features. Product-specific config formats that map into these fields stay outside this repository.
 
 ## Startup Strategy
 
 ```mermaid
 flowchart TB
     A[Create dedicated network] --> B[Materialize filesystem inputs and built-in resources]
-    B --> C[Create dependency containers]
+    B --> C[Create required service containers]
     B --> D[Create primary container]
-    C --> E[Start dependencies when prerequisites are ready]
+    B --> O[Create optional service containers]
+    C --> E[Start required services serially; wait for each healthcheck]
     D --> F[Start primary container]
-    E --> G[Wait for dependency health conditions]
-    F --> H[Run dependency-owned init hooks inside the primary container]
-    G --> I[Emit dependency-ready events]
-    H --> J[Emit sandbox ready event]
-    I --> J
+    O --> P[Start optional services in parallel with primary]
+    E --> G[All required services healthy]
+    G --> H[Run post_start_on_primary hooks for required services]
+    F --> H
+    H --> I[Emit SANDBOX_SERVICE_READY per required service]
+    P --> Q[Emit SANDBOX_SERVICE_READY or SANDBOX_SERVICE_FAILED per optional service]
+    I --> J[Emit sandbox ready event]
 ```
 
 Startup rules:
 
-- Dependencies may start in parallel once the required network and projections are ready.
-- Parallel startup is a performance optimization only; it must not weaken isolation or readiness checks.
-- Init hooks run only after their owner dependency is ready and the primary container is running.
-- A failing dependency or failing init hook fails the whole materialization path and triggers cleanup of newly created runtime resources.
+- Required services must each pass their healthcheck before the primary is reported ready. A failing required service or failing `post_start_on_primary` hook fails the whole materialization path and triggers cleanup of newly created runtime resources.
+- Optional services start in parallel with the primary container. A failing optional service emits `SANDBOX_SERVICE_FAILED` as a warning; the daemon performs best-effort restart but does not block sandbox readiness.
+- `post_start_on_primary` hooks run only after their owner service is healthy and the primary container is running.
+- Parallel startup of optional services is a performance optimization only; it must not weaken isolation or readiness checks for required services.
 
 ## Permissions and Runtime User Model
 
@@ -119,16 +129,18 @@ Required rules:
 
 - Images may be built as root, but runtime command execution must happen as a non-root sandbox user.
 - Bind-mounted writable paths must remain writable to that runtime user.
-- The daemon must not rely on root-only behavior for normal exec, lifecycle, or dependency orchestration.
+- The daemon must not rely on root-only behavior for normal exec, lifecycle, or service orchestration.
 
 ## Cleanup and Ownership
 
-`agents-sandbox` owns cleanup for runtime resources in its namespace:
+`agents-sandbox` owns cleanup for runtime resources that carry the `io.github.1996fanrui.agents-sandbox.*` label namespace:
 
 - primary containers
-- dependency containers
+- service containers (both required and optional)
 - dedicated networks
 - runtime-owned shadow-copy trees
 - runtime-owned event and artifact files
 
-The daemon must not require an external product database snapshot to decide whether a dependency or network belongs to a live sandbox. Ownership must be derivable from runtime state plus namespaced labels.
+Docker objects without these labels are never inspected, stopped, or removed by the daemon. This label-based boundary ensures user-created or third-party containers are not affected by daemon lifecycle operations.
+
+The daemon must not require an external product database snapshot to decide whether a service container or network belongs to a live sandbox. Ownership must be derivable from runtime state plus namespaced labels.

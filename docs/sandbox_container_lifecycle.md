@@ -6,7 +6,7 @@ The scope is the sandbox runtime itself:
 
 - primary sandbox container
 - dedicated sandbox network
-- dependency containers
+- service containers (required and optional)
 - runtime event stream
 - runtime-owned cleanup and reconciliation
 
@@ -18,7 +18,7 @@ Product-specific lifecycle semantics such as archive states stay outside this re
 |----------|-----------|-------|
 | Primary container | `agents-sandbox` | Main execution target for `CreateExec` |
 | Dedicated network | `agents-sandbox` | One network per sandbox; shared bridge and host network are not supported |
-| Dependency containers | `agents-sandbox` | Sidecars and other declared dependencies attached to the same dedicated network |
+| Service containers | `agents-sandbox` | Required and optional services declared via `ServiceSpec`, attached to the same dedicated network |
 | In-memory event history | `agents-sandbox` | Source of ordered replayable lifecycle and exec events while the daemon process remains alive |
 | Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
 
@@ -57,7 +57,8 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`.
 |------------|-------------------------|
 | Create accepted | `SANDBOX_ACCEPTED` |
 | Materialization in progress | `SANDBOX_PREPARING` |
-| Dependency becomes usable | `SANDBOX_DEPENDENCY_READY` |
+| Required service becomes usable | `SANDBOX_SERVICE_READY` |
+| Optional service fails | `SANDBOX_SERVICE_FAILED` |
 | Create or resume succeeds | `SANDBOX_READY` |
 | Create, resume, stop, or delete fails | `SANDBOX_FAILED` |
 | Stop begins | `SANDBOX_STOP_REQUESTED` |
@@ -92,8 +93,8 @@ flowchart TB
     B --> C[Validate create spec]
     C --> D[Create dedicated network]
     D --> E[Materialize filesystem inputs and built-in resources]
-    E --> F[Create dependency containers]
-    F --> G[Start primary and dependencies once prerequisites are ready]
+    E --> F[Create required and optional service containers]
+    F --> G[Start required services serially; start optional services and primary in parallel]
     G --> H[Persist runtime handles and resolved projections]
     H --> I[Emit SANDBOX_READY]
 ```
@@ -102,8 +103,8 @@ Create-path rules:
 
 - `CreateSandbox` returns immediately after the request is accepted and the daemon has assigned `sandbox_id`.
 - The daemon owns actual materialization; the caller must not infer readiness from the RPC response alone.
-- The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_resources`, invalid dependency declarations, or unsafe artifact targets.
-- The daemon must reject duplicate `CreateSandbox` requests for the same active `sandbox_owner`.
+- The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_resources`, invalid service declarations, or unsafe artifact targets.
+- The daemon must return a specific error code when a caller-provided `sandbox_id` duplicates an existing active sandbox.
 
 ## Resume Path
 
@@ -114,7 +115,7 @@ flowchart TB
     A[ResumeSandbox accepted] --> B[Load persisted sandbox state]
     B --> C{Runtime resources complete?}
     C -->|No| D[Emit SANDBOX_FAILED]
-    C -->|Yes| E[Start existing primary and dependency containers]
+    C -->|Yes| E[Start existing primary and service containers]
     E --> F[Emit SANDBOX_READY]
 ```
 
@@ -130,7 +131,7 @@ Resume-path rules:
 flowchart LR
     A[StopSandbox or idle_ttl] --> B[Emit SANDBOX_STOP_REQUESTED]
     B --> C[Stop primary container]
-    C --> D[Stop dependency containers]
+    C --> D[Stop service containers]
     D --> E[Emit SANDBOX_STOPPED]
 ```
 
@@ -138,7 +139,7 @@ flowchart LR
 flowchart LR
     A[DeleteSandbox] --> B[Emit SANDBOX_DELETE_REQUESTED]
     B --> C[Remove primary container]
-    C --> D[Remove dependency containers]
+    C --> D[Remove service containers]
     D --> E[Remove dedicated network]
     E --> F[Remove runtime-owned state and artifacts]
     F --> G[Emit SANDBOX_DELETED]
@@ -158,7 +159,7 @@ It must be able to detect and converge:
 
 - idle sandboxes eligible for stop
 - runtime resources left behind after failed materialization
-- dependency containers without a valid sandbox owner
+- orphaned service containers without a valid parent sandbox
 - dedicated networks without live runtime membership
 
 Reconciliation must use structured audit logs and explicit action reasons and strategies.
