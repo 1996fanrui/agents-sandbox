@@ -2,7 +2,10 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +16,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -456,8 +460,8 @@ func TestLatestHealthLogTimestampUsesNewestNonNilEntry(t *testing.T) {
 	}
 }
 
-func TestAppendDockerHealthcheckArgsUsesDockerCLICommandBody(t *testing.T) {
-	args := appendDockerHealthcheckArgs(nil, &agboxv1.HealthcheckConfig{
+func TestToContainerHealthConfigMapsProtoFields(t *testing.T) {
+	config, err := toContainerHealthConfig(&agboxv1.HealthcheckConfig{
 		Test:          []string{"CMD", "pg_isready", "-U", "postgres"},
 		Interval:      "5s",
 		Timeout:       "2s",
@@ -465,16 +469,112 @@ func TestAppendDockerHealthcheckArgsUsesDockerCLICommandBody(t *testing.T) {
 		StartPeriod:   "10s",
 		StartInterval: "1s",
 	})
-	want := []string{
-		"--health-cmd", "pg_isready -U postgres",
-		"--health-interval", "5s",
-		"--health-timeout", "2s",
-		"--health-retries", "3",
-		"--health-start-period", "10s",
-		"--health-start-interval", "1s",
+	if err != nil {
+		t.Fatalf("toContainerHealthConfig failed: %v", err)
 	}
-	if !slices.Equal(args, want) {
-		t.Fatalf("unexpected CMD healthcheck args: got %v want %v", args, want)
+	if config == nil {
+		t.Fatal("expected health config")
+	}
+	if !reflect.DeepEqual(config.Test, []string{"CMD", "pg_isready", "-U", "postgres"}) {
+		t.Fatalf("unexpected test command: %#v", config.Test)
+	}
+	if config.Interval != 5*time.Second || config.Timeout != 2*time.Second {
+		t.Fatalf("unexpected health timing: interval=%s timeout=%s", config.Interval, config.Timeout)
+	}
+	if config.Retries != 3 {
+		t.Fatalf("unexpected retries: %d", config.Retries)
+	}
+	if config.StartPeriod != 10*time.Second || config.StartInterval != time.Second {
+		t.Fatalf("unexpected start timing: start_period=%s start_interval=%s", config.StartPeriod, config.StartInterval)
+	}
+}
+
+func TestToContainerHealthConfigRejectsInvalidDuration(t *testing.T) {
+	_, err := toContainerHealthConfig(&agboxv1.HealthcheckConfig{
+		Test:     []string{"CMD", "true"},
+		Interval: "not-a-duration",
+	})
+	if err == nil || !strings.Contains(err.Error(), "parse healthcheck interval") {
+		t.Fatalf("expected invalid interval error, got %v", err)
+	}
+}
+
+func TestDockerContainerStopReturnsNilForExistingStoppedContainer(t *testing.T) {
+	stopCalls := 0
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		switch {
+		case r.Method == http.MethodGet && path == "/containers/stopped/json":
+			writeDockerJSON(t, w, container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					State: &container.State{Running: false, Status: "exited"},
+				},
+			})
+		case r.Method == http.MethodPost && path == "/containers/stopped/stop":
+			stopCalls++
+			t.Fatalf("stop endpoint must not be called for an already stopped container")
+		default:
+			t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	if err := backend.dockerContainerStop(context.Background(), "stopped"); err != nil {
+		t.Fatalf("dockerContainerStop returned error for stopped container: %v", err)
+	}
+	if stopCalls != 0 {
+		t.Fatalf("expected no stop calls, got %d", stopCalls)
+	}
+}
+
+func TestDockerContainerStopReturnsNilForMissingContainer(t *testing.T) {
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		if r.Method == http.MethodGet && path == "/containers/missing/json" {
+			w.WriteHeader(http.StatusNotFound)
+			writeDockerJSON(t, w, map[string]string{"message": "No such container: missing"})
+			return
+		}
+		t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+	})
+
+	if err := backend.dockerContainerStop(context.Background(), "missing"); err != nil {
+		t.Fatalf("dockerContainerStop returned error for missing container: %v", err)
+	}
+}
+
+func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWriter, *http.Request)) *dockerRuntimeBackend {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(server.Close)
+
+	host := strings.Replace(server.URL, "http://", "tcp://", 1)
+	dockerClient, err := client.NewClientWithOpts(
+		client.WithHost(host),
+		client.WithHTTPClient(server.Client()),
+		client.WithVersion("1.44"),
+	)
+	if err != nil {
+		t.Fatalf("NewClientWithOpts failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := dockerClient.Close(); closeErr != nil {
+			t.Fatalf("docker client close failed: %v", closeErr)
+		}
+	})
+
+	return &dockerRuntimeBackend{
+		config:       ServiceConfig{},
+		dockerClient: dockerClient,
+	}
+}
+
+func writeDockerJSON(t *testing.T, w http.ResponseWriter, payload any) {
+	t.Helper()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		t.Fatalf("encode Docker API response failed: %v", err)
 	}
 }
 

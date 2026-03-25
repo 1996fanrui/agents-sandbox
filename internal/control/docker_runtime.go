@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +21,8 @@ import (
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 	"github.com/docker/docker/api/types/container"
 	imagetypes "github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 )
@@ -207,7 +208,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			return runtimeCreateResult{}, err
 		}
 	}
-	if err := dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default")); err != nil {
+	if err := backend.dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default")); err != nil {
 		return runtimeCreateResult{}, err
 	}
 
@@ -220,7 +221,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			ContainerName: containerName,
 			Required:      true,
 		})
-		if err := dockerContainerCreate(ctx, dockerContainerSpec{
+		if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
 			Name:         containerName,
 			Image:        service.GetImage(),
 			NetworkName:  state.NetworkName,
@@ -231,7 +232,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		}); err != nil {
 			return runtimeCreateResult{}, err
 		}
-		if err := dockerContainerStart(ctx, containerName); err != nil {
+		if err := backend.dockerContainerStart(ctx, containerName); err != nil {
 			return runtimeCreateResult{}, err
 		}
 		if err := backend.dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
@@ -241,9 +242,9 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 
 	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, record.optionalServices, func(ctx context.Context, spec dockerContainerSpec) error {
-		return dockerContainerCreate(ctx, spec)
+		return backend.dockerContainerCreate(ctx, spec)
 	}, func(ctx context.Context, name string) error {
-		return dockerContainerStart(ctx, name)
+		return backend.dockerContainerStart(ctx, name)
 	})
 	for _, service := range record.optionalServices {
 		state.ServiceContainers = append(state.ServiceContainers, runtimeServiceContainer{
@@ -253,7 +254,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		})
 	}
 
-	if err := dockerContainerCreate(ctx, dockerContainerSpec{
+	if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
 		NetworkName: state.NetworkName,
@@ -269,7 +270,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	if err := dockerContainerStart(ctx, state.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerStart(ctx, state.PrimaryContainerName); err != nil {
 		return runtimeCreateResult{}, err
 	}
 	if err := backend.dockerWaitContainerRunning(ctx, state.PrimaryContainerName, 10*time.Second); err != nil {
@@ -430,13 +431,13 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 		return nil
 	}
 	if state.PrimaryContainerName != "" {
-		joined = append(joined, dockerContainerRemove(ctx, state.PrimaryContainerName))
+		joined = append(joined, backend.dockerContainerRemove(ctx, state.PrimaryContainerName))
 	}
 	for _, serviceContainer := range state.ServiceContainers {
-		joined = append(joined, dockerContainerRemove(ctx, serviceContainer.ContainerName))
+		joined = append(joined, backend.dockerContainerRemove(ctx, serviceContainer.ContainerName))
 	}
 	if state.NetworkName != "" {
-		joined = append(joined, dockerNetworkRemove(ctx, state.NetworkName))
+		joined = append(joined, backend.dockerNetworkRemove(ctx, state.NetworkName))
 	}
 	if state.ShadowRoot != "" {
 		joined = append(joined, os.RemoveAll(state.ShadowRoot))
@@ -914,51 +915,70 @@ func (backend *dockerRuntimeBackend) ensureDockerImage(ctx context.Context, imag
 	return errors.Join(copyErr, reader.Close())
 }
 
-func dockerNetworkCreate(ctx context.Context, name string, labels map[string]string) error {
-	args := []string{"network", "create"}
-	args = appendDockerLabels(args, labels)
-	args = append(args, name)
-	_, err := runDocker(ctx, args...)
+func (backend *dockerRuntimeBackend) dockerNetworkCreate(ctx context.Context, name string, labels map[string]string) error {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+	_, err := backend.dockerClient.NetworkCreate(ctx, name, network.CreateOptions{Labels: labels})
 	return err
 }
 
-func dockerNetworkRemove(ctx context.Context, name string) error {
+func (backend *dockerRuntimeBackend) dockerNetworkRemove(ctx context.Context, name string) error {
 	if name == "" {
 		return nil
 	}
-	_, err := runDocker(ctx, "network", "rm", name)
-	if err != nil && strings.Contains(err.Error(), "No such network") {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+	err := backend.dockerClient.NetworkRemove(ctx, name)
+	if errdefs.IsNotFound(err) {
 		return nil
 	}
 	return err
 }
 
-func dockerContainerCreate(ctx context.Context, spec dockerContainerSpec) error {
-	args := []string{"create", "--init", "--name", spec.Name}
-	args = appendDockerLabels(args, spec.Labels)
+func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, spec dockerContainerSpec) error {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+	healthcheck, err := toContainerHealthConfig(spec.Healthcheck)
+	if err != nil {
+		return err
+	}
+	hostMounts := make([]mount.Mount, 0, len(spec.Mounts))
+	for _, item := range spec.Mounts {
+		hostMounts = append(hostMounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   item.Source,
+			Target:   item.Target,
+			ReadOnly: item.ReadOnly,
+		})
+	}
+	hostConfig := &container.HostConfig{
+		Init:   ptrTo(true),
+		Mounts: hostMounts,
+	}
+	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {
-		args = append(args, "--network", spec.NetworkName)
-	}
-	if spec.NetworkAlias != "" {
-		args = append(args, "--network-alias", spec.NetworkAlias)
-	}
-	if spec.Workdir != "" {
-		args = append(args, "--workdir", spec.Workdir)
-	}
-	for key, value := range spec.Environment {
-		args = append(args, "--env", key+"="+value)
-	}
-	args = appendDockerHealthcheckArgs(args, spec.Healthcheck)
-	for _, mount := range spec.Mounts {
-		mountArg := fmt.Sprintf("type=bind,src=%s,dst=%s", mount.Source, mount.Target)
-		if mount.ReadOnly {
-			mountArg += ",readonly"
+		hostConfig.NetworkMode = container.NetworkMode(spec.NetworkName)
+		endpointSettings := &network.EndpointSettings{}
+		if spec.NetworkAlias != "" {
+			endpointSettings.Aliases = []string{spec.NetworkAlias}
 		}
-		args = append(args, "--mount", mountArg)
+		networkingConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				spec.NetworkName: endpointSettings,
+			},
+		}
 	}
-	args = append(args, spec.Image)
-	args = append(args, spec.Command...)
-	_, err := runDocker(ctx, args...)
+	_, err = backend.dockerClient.ContainerCreate(ctx, &container.Config{
+		Image:       spec.Image,
+		Cmd:         spec.Command,
+		WorkingDir:  spec.Workdir,
+		Env:         envMapToSlice(spec.Environment),
+		Labels:      spec.Labels,
+		Healthcheck: healthcheck,
+	}, hostConfig, networkingConfig, nil, spec.Name)
 	return err
 }
 
@@ -973,9 +993,11 @@ func primaryContainerEnvironment(mounts []dockerMount) map[string]string {
 	return environment
 }
 
-func dockerContainerStart(ctx context.Context, name string) error {
-	_, err := runDocker(ctx, "start", name)
-	return err
+func (backend *dockerRuntimeBackend) dockerContainerStart(ctx context.Context, name string) error {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+	return backend.dockerClient.ContainerStart(ctx, name, container.StartOptions{})
 }
 
 func (backend *dockerRuntimeBackend) dockerContainerEnsureRunning(ctx context.Context, name string) error {
@@ -986,7 +1008,7 @@ func (backend *dockerRuntimeBackend) dockerContainerEnsureRunning(ctx context.Co
 	if state.Running {
 		return nil
 	}
-	if err := dockerContainerStart(ctx, name); err != nil {
+	if err := backend.dockerContainerStart(ctx, name); err != nil {
 		return err
 	}
 	return backend.dockerWaitContainerRunning(ctx, name, 10*time.Second)
@@ -1141,6 +1163,9 @@ func (backend *dockerRuntimeBackend) dockerContainerStop(ctx context.Context, na
 	if name == "" {
 		return nil
 	}
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
 	state, err := backend.dockerContainerState(ctx, name)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
@@ -1151,16 +1176,26 @@ func (backend *dockerRuntimeBackend) dockerContainerStop(ctx context.Context, na
 	if !state.Running {
 		return nil
 	}
-	_, err = runDocker(ctx, "stop", "--time", "5", name)
+	timeout := 5
+	err = backend.dockerClient.ContainerStop(ctx, name, container.StopOptions{Timeout: &timeout})
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
 	return err
 }
 
-func dockerContainerRemove(ctx context.Context, name string) error {
+func (backend *dockerRuntimeBackend) dockerContainerRemove(ctx context.Context, name string) error {
 	if name == "" {
 		return nil
 	}
-	_, err := runDocker(ctx, "rm", "--force", "--volumes", name)
-	if err != nil && strings.Contains(err.Error(), "No such container") {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+	err := backend.dockerClient.ContainerRemove(ctx, name, container.RemoveOptions{
+		Force:         true,
+		RemoveVolumes: true,
+	})
+	if errdefs.IsNotFound(err) {
 		return nil
 	}
 	return err
@@ -1207,54 +1242,60 @@ func dockerExec(ctx context.Context, spec dockerExecSpec) (dockerExecOutput, int
 	return output, exitCode, err
 }
 
-func appendDockerLabels(args []string, labels map[string]string) []string {
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		args = append(args, "--label", key+"="+labels[key])
-	}
-	return args
-}
-
-func appendDockerHealthcheckArgs(args []string, healthcheck *agboxv1.HealthcheckConfig) []string {
+func toContainerHealthConfig(healthcheck *agboxv1.HealthcheckConfig) (*container.HealthConfig, error) {
 	if healthcheck == nil {
-		return args
+		return nil, nil
 	}
-	if len(healthcheck.GetTest()) == 0 {
-		return args
-	}
-	command := healthcheck.GetTest()[0]
-	switch command {
-	case "NONE":
-		args = append(args, "--no-healthcheck")
-	case "CMD":
-		if len(healthcheck.GetTest()) > 1 {
-			args = append(args, "--health-cmd", strings.Join(healthcheck.GetTest()[1:], " "))
-		}
-	case "CMD-SHELL":
-		if len(healthcheck.GetTest()) > 1 {
-			args = append(args, "--health-cmd", strings.Join(healthcheck.GetTest()[1:], " "))
-		}
+	config := &container.HealthConfig{
+		Test: append([]string(nil), healthcheck.GetTest()...),
 	}
 	if healthcheck.GetInterval() != "" {
-		args = append(args, "--health-interval", healthcheck.GetInterval())
+		interval, err := time.ParseDuration(healthcheck.GetInterval())
+		if err != nil {
+			return nil, fmt.Errorf("parse healthcheck interval: %w", err)
+		}
+		config.Interval = interval
 	}
 	if healthcheck.GetTimeout() != "" {
-		args = append(args, "--health-timeout", healthcheck.GetTimeout())
-	}
-	if healthcheck.GetRetries() > 0 {
-		args = append(args, "--health-retries", strconv.FormatUint(uint64(healthcheck.GetRetries()), 10))
+		timeout, err := time.ParseDuration(healthcheck.GetTimeout())
+		if err != nil {
+			return nil, fmt.Errorf("parse healthcheck timeout: %w", err)
+		}
+		config.Timeout = timeout
 	}
 	if healthcheck.GetStartPeriod() != "" {
-		args = append(args, "--health-start-period", healthcheck.GetStartPeriod())
+		startPeriod, err := time.ParseDuration(healthcheck.GetStartPeriod())
+		if err != nil {
+			return nil, fmt.Errorf("parse healthcheck start period: %w", err)
+		}
+		config.StartPeriod = startPeriod
 	}
 	if healthcheck.GetStartInterval() != "" {
-		args = append(args, "--health-start-interval", healthcheck.GetStartInterval())
+		startInterval, err := time.ParseDuration(healthcheck.GetStartInterval())
+		if err != nil {
+			return nil, fmt.Errorf("parse healthcheck start interval: %w", err)
+		}
+		config.StartInterval = startInterval
 	}
-	return args
+	if healthcheck.GetRetries() > 0 {
+		config.Retries = int(healthcheck.GetRetries())
+	}
+	return config, nil
+}
+
+func envMapToSlice(environment map[string]string) []string {
+	if len(environment) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(environment))
+	for key, value := range environment {
+		values = append(values, key+"="+value)
+	}
+	return values
+}
+
+func ptrTo[T any](value T) *T {
+	return &value
 }
 
 func runDocker(ctx context.Context, args ...string) (string, error) {
