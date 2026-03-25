@@ -9,16 +9,16 @@ import (
 )
 
 const (
-	ReasonSandboxConflict         = "SANDBOX_CONFLICT"
-	ReasonSandboxIDAlreadyExists  = "SANDBOX_ID_ALREADY_EXISTS"
-	ReasonSandboxNotFound         = "SANDBOX_NOT_FOUND"
-	ReasonSandboxNotReady         = "SANDBOX_NOT_READY"
-	ReasonSandboxInvalidState     = "SANDBOX_INVALID_STATE"
-	ReasonSandboxRecoveredOnly    = "SANDBOX_RECOVERED_ONLY"
-	ReasonExecIDAlreadyExists     = "EXEC_ID_ALREADY_EXISTS"
-	ReasonExecNotFound            = "EXEC_NOT_FOUND"
-	ReasonExecAlreadyTerminal     = "EXEC_ALREADY_TERMINAL"
-	ReasonSandboxEventCursorStale = "SANDBOX_EVENT_CURSOR_EXPIRED"
+	ReasonSandboxConflict           = "SANDBOX_CONFLICT"
+	ReasonSandboxIDAlreadyExists    = "SANDBOX_ID_ALREADY_EXISTS"
+	ReasonSandboxNotFound           = "SANDBOX_NOT_FOUND"
+	ReasonSandboxNotReady           = "SANDBOX_NOT_READY"
+	ReasonSandboxInvalidState       = "SANDBOX_INVALID_STATE"
+	ReasonSandboxRecoveredOnly      = "SANDBOX_RECOVERED_ONLY"
+	ReasonExecIDAlreadyExists       = "EXEC_ID_ALREADY_EXISTS"
+	ReasonExecNotFound              = "EXEC_NOT_FOUND"
+	ReasonExecAlreadyTerminal       = "EXEC_ALREADY_TERMINAL"
+	ReasonSandboxEventCursorExpired = "SANDBOX_EVENT_CURSOR_EXPIRED"
 )
 
 func newStatusError(code codes.Code, reason string, format string, args ...any) error {

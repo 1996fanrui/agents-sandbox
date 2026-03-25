@@ -1522,7 +1522,7 @@ func TestStaleCursorReturnsExpiredError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected stale cursor error")
 	}
-	assertStatusErrorReason(t, err, codes.OutOfRange, ReasonSandboxEventCursorStale)
+	assertStatusErrorReason(t, err, codes.OutOfRange, ReasonSandboxEventCursorExpired)
 }
 
 func TestCreateSandboxFailsWhenAcceptedEventAppendFails(t *testing.T) {

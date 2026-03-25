@@ -63,6 +63,8 @@ type Service struct {
 	execs  map[string]string
 }
 
+const eventRetentionCleanupInterval = 5 * time.Minute
+
 var (
 	errArtifactPathEscapesRoot    = errors.New("artifact path escapes configured root")
 	errArtifactPathUsesSymlink    = errors.New("artifact path uses symlink boundary")
@@ -1210,7 +1212,7 @@ func (s *Service) cleanupExpiredEvents() error {
 }
 
 func (s *Service) cleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(eventRetentionCleanupInterval)
 	defer ticker.Stop()
 
 	for {
@@ -1402,7 +1404,7 @@ func validateCursorNotStale(record *sandboxRecord, afterSequence uint64) error {
 	}
 	return newStatusError(
 		codes.OutOfRange,
-		ReasonSandboxEventCursorStale,
+		ReasonSandboxEventCursorExpired,
 		"cursor sequence %d is outside sandbox %s event history",
 		afterSequence,
 		record.handle.GetSandboxId(),
