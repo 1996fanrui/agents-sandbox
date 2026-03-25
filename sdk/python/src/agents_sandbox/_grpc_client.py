@@ -75,6 +75,12 @@ class SandboxGrpcClient:
             service_pb2.DeleteSandboxRequest(sandbox_id=sandbox_id),
         )
 
+    def delete_sandboxes(
+        self,
+        request: service_pb2.DeleteSandboxesRequest,
+    ) -> service_pb2.DeleteSandboxesResponse:
+        return self._call(self._stub.DeleteSandboxes, request)
+
     def subscribe_sandbox_events(
         self,
         sandbox_id: str,

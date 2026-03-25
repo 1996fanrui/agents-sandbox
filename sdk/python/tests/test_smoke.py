@@ -24,6 +24,7 @@ import agents_sandbox.client as client_module
 from agents_sandbox import (
     AgentsSandboxClient,
     CopySpec,
+    DeleteSandboxesResult,
     ExecHandle,
     ExecState,
     HealthcheckConfig,
@@ -36,7 +37,7 @@ from agents_sandbox import (
     ServiceSpec,
 )
 from agents_sandbox._generated import service_pb2, service_pb2_grpc
-from agents_sandbox.conversions import to_exec_handle
+from agents_sandbox.conversions import to_exec_handle, to_sandbox_handle
 from agents_sandbox.client import _resolve_default_socket_path
 from agents_sandbox.types import CallerMetadata
 
@@ -65,6 +66,7 @@ def test_package_root_exports_only_formal_client() -> None:
     exports = set(getattr(agents_sandbox, "__all__", []))
 
     assert "AgentsSandboxClient" in exports
+    assert "DeleteSandboxesResult" in exports
     assert sorted(name for name in exports if name.endswith("SandboxClient")) == ["AgentsSandboxClient"]
     assert "CreateSandboxRequest" not in exports
     assert "CreateExecRequest" not in exports
@@ -105,8 +107,13 @@ def test_public_models_match_protocol_contract() -> None:
     assert "last_event_cursor" in SandboxHandle.__annotations__
     assert "required_services" in SandboxHandle.__annotations__
     assert "optional_services" in SandboxHandle.__annotations__
+    assert "labels" in SandboxHandle.__annotations__
     assert "dependencies" not in SandboxHandle.__annotations__
     assert "resolved_tooling_projections" not in SandboxHandle.__annotations__
+    assert DeleteSandboxesResult.__annotations__ == {
+        "deleted_sandbox_ids": "tuple[str, ...]",
+        "deleted_count": "int",
+    }
 
 
 def test_caller_metadata_rejects_protocol_unsupported_extra_field() -> None:
@@ -198,6 +205,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "resume_sandbox",
         "stop_sandbox",
         "delete_sandbox",
+        "delete_sandboxes",
         "create_exec",
         "run",
         "cancel_exec",
@@ -235,12 +243,16 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "builtin_resources",
         "required_services",
         "optional_services",
+        "labels",
         "wait",
     ]
     assert "request" not in create_signature.parameters
     assert "socket_path" not in inspect.signature(AgentsSandboxClient).parameters
     list_signature = inspect.signature(AgentsSandboxClient.list_sandboxes)
-    assert list(list_signature.parameters) == ["self", "include_deleted"]
+    assert list(list_signature.parameters) == ["self", "include_deleted", "label_selector"]
+    delete_many_signature = inspect.signature(AgentsSandboxClient.delete_sandboxes)
+    assert list(delete_many_signature.parameters) == ["self", "label_selector", "wait"]
+    assert delete_many_signature.parameters["wait"].default is True
     exec_signature = inspect.signature(AgentsSandboxClient.create_exec)
     assert list(exec_signature.parameters) == ["self", "sandbox_id", "command", "exec_id", "cwd", "env_overrides", "wait"]
     assert exec_signature.parameters["cwd"].default == "/workspace"
@@ -309,6 +321,7 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
     assert servicer.subscribe_requests[0].from_cursor == "0"
     assert servicer.create_requests[0].create_spec.image == "python:3.12-slim"
     assert servicer.create_requests[0].sandbox_id == "sandbox-1"
+    assert dict(servicer.create_requests[0].create_spec.labels) == {"team": "sdk", "purpose": "smoke"}
     assert servicer.create_requests[0].create_spec.required_services == [
         service_pb2.ServiceSpec(
             name="postgres",
@@ -328,7 +341,10 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
             image="redis:7",
         )
     ]
+    assert dict(servicer.list_requests[0].label_selector) == {"team": "sdk"}
+    assert dict(servicer.delete_sandboxes_requests[0].label_selector) == {"team": "sdk"}
     assert servicer.create_exec_requests[0].cwd == "/workspace"
+    assert result["deleted_count"] == 1
 
 
 def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,6 +487,170 @@ def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_t
             image="redis:7",
         )
     ]
+
+
+def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeRawSandboxClient:
+        create_requests: list[service_pb2.CreateSandboxRequest] = []
+
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
+            self.create_requests.append(request)
+            return service_pb2.CreateSandboxResponse(
+                sandbox_id="sandbox-1",
+                initial_state=service_pb2.SANDBOX_STATE_PENDING,
+            )
+
+        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
+            return service_pb2.GetSandboxResponse(
+                sandbox=service_pb2.SandboxHandle(
+                    sandbox_id=sandbox_id,
+                    state=service_pb2.SANDBOX_STATE_READY,
+                    last_event_cursor="sandbox-1:1",
+                    labels={"team": "sdk", "purpose": "test"},
+                )
+            )
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        await client.create_sandbox(
+            "python:3.12-slim",
+            labels={"team": "sdk", "purpose": "test"},
+        )
+
+    asyncio.run(run_test())
+
+    assert dict(_FakeRawSandboxClient.create_requests[0].create_spec.labels) == {"team": "sdk", "purpose": "test"}
+
+
+def test_list_sandboxes_with_label_selector(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeRawSandboxClient:
+        list_requests: list[service_pb2.ListSandboxesRequest] = []
+
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def list_sandboxes(self, request: service_pb2.ListSandboxesRequest) -> service_pb2.ListSandboxesResponse:
+            self.list_requests.append(request)
+            return service_pb2.ListSandboxesResponse(
+                sandboxes=[
+                    service_pb2.SandboxHandle(
+                        sandbox_id="sandbox-1",
+                        state=service_pb2.SANDBOX_STATE_READY,
+                        last_event_cursor="sandbox-1:1",
+                        labels={"team": "sdk"},
+                    )
+                ]
+            )
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> list[SandboxHandle]:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        return await client.list_sandboxes(include_deleted=True, label_selector={"team": "sdk"})
+
+    sandboxes = asyncio.run(run_test())
+
+    assert _FakeRawSandboxClient.list_requests == [
+        service_pb2.ListSandboxesRequest(include_deleted=True, label_selector={"team": "sdk"})
+    ]
+    assert sandboxes[0].labels == {"team": "sdk"}
+
+
+def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeRawSandboxClient:
+        delete_requests: list[service_pb2.DeleteSandboxesRequest] = []
+        subscribe_requests: list[tuple[str, str, bool]] = []
+
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+            self._sandbox_reads: dict[str, int] = {"sandbox-1": 0, "sandbox-2": 0}
+
+        def close(self) -> None:
+            return None
+
+        def delete_sandboxes(self, request: service_pb2.DeleteSandboxesRequest) -> service_pb2.DeleteSandboxesResponse:
+            self.delete_requests.append(request)
+            return service_pb2.DeleteSandboxesResponse(
+                deleted_sandbox_ids=["sandbox-1", "sandbox-2"],
+                deleted_count=2,
+            )
+
+        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
+            self._sandbox_reads[sandbox_id] += 1
+            state = service_pb2.SANDBOX_STATE_DELETING
+            cursor = f"{sandbox_id}:1"
+            if self._sandbox_reads[sandbox_id] >= 2:
+                state = service_pb2.SANDBOX_STATE_DELETED
+                cursor = f"{sandbox_id}:2"
+            return service_pb2.GetSandboxResponse(
+                sandbox=service_pb2.SandboxHandle(
+                    sandbox_id=sandbox_id,
+                    state=state,
+                    last_event_cursor=cursor,
+                )
+            )
+
+        def subscribe_sandbox_events(
+            self,
+            sandbox_id: str,
+            *,
+            from_cursor: str = "",
+            include_current_snapshot: bool = False,
+        ) -> Iterator[service_pb2.SandboxEvent]:
+            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            yield _event_pb(
+                sandbox_id=sandbox_id,
+                sequence=2,
+                cursor=f"{sandbox_id}:2",
+                event_type=service_pb2.SANDBOX_DELETED,
+                sandbox_state=service_pb2.SANDBOX_STATE_DELETED,
+            )
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> DeleteSandboxesResult:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        return await client.delete_sandboxes({"team": "sdk"}, wait=True)
+
+    result = asyncio.run(run_test())
+
+    assert isinstance(result, DeleteSandboxesResult)
+    assert result.deleted_sandbox_ids == ("sandbox-1", "sandbox-2")
+    assert result.deleted_count == 2
+    assert _FakeRawSandboxClient.delete_requests == [
+        service_pb2.DeleteSandboxesRequest(label_selector={"team": "sdk"})
+    ]
+    assert _FakeRawSandboxClient.subscribe_requests == [
+        ("sandbox-1", "sandbox-1:1", False),
+        ("sandbox-2", "sandbox-2:1", False),
+    ]
+
+
+def test_sandbox_handle_labels_round_trip() -> None:
+    handle = to_sandbox_handle(
+        service_pb2.SandboxHandle(
+            sandbox_id="sandbox-1",
+            state=service_pb2.SANDBOX_STATE_READY,
+            last_event_cursor="sandbox-1:1",
+            labels={"team": "sdk"},
+        )
+    )
+
+    assert handle.labels == {"team": "sdk"}
 
 
 def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
@@ -1142,9 +1322,11 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
             MountSpec(source="/workspace", target="/workspace", writable=True),
         ),
         builtin_resources=(".claude",),
+        labels={"team": "sdk", "purpose": "smoke"},
         wait=False,
     )
-    sandboxes = await client.list_sandboxes()
+    sandboxes = await client.list_sandboxes(label_selector={"team": "sdk"})
+    delete_result = await client.delete_sandboxes({"team": "sdk"}, wait=False)
     exec_handle = await client.create_exec(
         sandbox.sandbox_id,
         ("echo", "hello"),
@@ -1161,6 +1343,7 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
         "ping": ping,
         "sandbox_state": sandbox.state,
         "exec_state": exec_handle.state,
+        "deleted_count": delete_result.deleted_count,
         "event_types": [event.event_type for event in events],
         "service_names": [event.service_name for event in events],
     }
@@ -1256,6 +1439,8 @@ def _running_server(socket_path: Path, servicer: service_pb2_grpc.SandboxService
 class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
     def __init__(self) -> None:
         self.create_requests: list[service_pb2.CreateSandboxRequest] = []
+        self.list_requests: list[service_pb2.ListSandboxesRequest] = []
+        self.delete_sandboxes_requests: list[service_pb2.DeleteSandboxesRequest] = []
         self.subscribe_requests: list[service_pb2.SubscribeSandboxEventsRequest] = []
         self.create_exec_requests: list[service_pb2.CreateExecRequest] = []
 
@@ -1296,17 +1481,20 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                         image="redis:7",
                     )
                 ],
+                labels={"team": "sdk", "purpose": "smoke"},
                 last_event_cursor="sandbox-1:2",
             )
         )
 
     def ListSandboxes(self, request, context):  # noqa: N802
         del context
+        self.list_requests.append(request)
         return service_pb2.ListSandboxesResponse(
             sandboxes=[
                 service_pb2.SandboxHandle(
                     sandbox_id="sandbox-1",
                     state=service_pb2.SANDBOX_STATE_READY,
+                    labels={"team": "sdk", "purpose": "smoke"},
                     last_event_cursor="sandbox-1:2",
                 )
             ]
@@ -1323,6 +1511,14 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
     def DeleteSandbox(self, request, context):  # noqa: N802
         del request, context
         return service_pb2.AcceptedResponse(accepted=True)
+
+    def DeleteSandboxes(self, request, context):  # noqa: N802
+        del context
+        self.delete_sandboxes_requests.append(request)
+        return service_pb2.DeleteSandboxesResponse(
+            deleted_sandbox_ids=["sandbox-1"],
+            deleted_count=1,
+        )
 
     def SubscribeSandboxEvents(self, request, context):  # noqa: N802
         del context
