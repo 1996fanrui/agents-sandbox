@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ type ServiceConfig struct {
 	DaemonName             string
 	runtimeBackend         runtimeBackend
 	idRegistry             idRegistry
+	eventStore             eventStore
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -126,6 +128,9 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	if config.idRegistry == nil {
 		config.idRegistry = newMemoryIDRegistry()
 	}
+	if config.eventStore == nil {
+		config.eventStore = newMemoryEventStore()
+	}
 	return &Service{
 		config: config,
 		boxes:  make(map[string]*sandboxRecord),
@@ -173,10 +178,12 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 		execCancel:       make(map[string]context.CancelFunc),
 		execArtifacts:    make(map[string]string),
 	}
-	s.boxes[sandboxID] = record
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-	})
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "append SANDBOX_ACCEPTED event: %v", err)
+	}
+	s.boxes[sandboxID] = record
 	go s.completeSandboxCreate(sandboxID)
 
 	return &agboxv1.CreateSandboxResponse{
@@ -227,10 +234,13 @@ func (s *Service) ResumeSandbox(_ context.Context, req *agboxv1.ResumeSandboxReq
 		s.mu.Unlock()
 		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not stopped", req.GetSandboxId())
 	}
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_PENDING
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-	})
+	}); err != nil {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.Internal, "append SANDBOX_ACCEPTED event: %v", err)
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_PENDING
 	s.mu.Unlock()
 	go s.completeSandboxResume(req.GetSandboxId())
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
@@ -247,9 +257,12 @@ func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest
 		s.mu.Unlock()
 		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not ready", req.GetSandboxId())
 	}
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
 		reason: "stop_requested",
-	})
+	}); err != nil {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.Internal, "append SANDBOX_STOP_REQUESTED event: %v", err)
+	}
 	s.mu.Unlock()
 	go s.completeSandboxStop(req.GetSandboxId(), "stop_requested")
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
@@ -266,6 +279,14 @@ func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxReq
 		s.mu.Unlock()
 		return &agboxv1.AcceptedResponse{Accepted: true}, nil
 	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
+		reason:       "delete_requested",
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETING,
+	}); err != nil {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.Internal, "append SANDBOX_DELETE_REQUESTED event: %v", err)
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
 	s.mu.Unlock()
 	go s.completeSandboxDelete(req.GetSandboxId(), "delete_requested")
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
@@ -320,6 +341,10 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 		s.mu.RUnlock()
 		return err
 	}
+	if err := validateCursorNotStale(record, nextSequence); err != nil {
+		s.mu.RUnlock()
+		return err
+	}
 	initialEvents := eventsAfter(record, nextSequence)
 	s.mu.RUnlock()
 
@@ -343,6 +368,10 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 			if !ok {
 				s.mu.RUnlock()
 				return newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", req.GetSandboxId())
+			}
+			if err := validateCursorNotStale(record, nextSequence); err != nil {
+				s.mu.RUnlock()
+				return err
 			}
 			pendingEvents := eventsAfter(record, nextSequence)
 			s.mu.RUnlock()
@@ -387,14 +416,16 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		Cwd:          req.GetCwd(),
 		EnvOverrides: cloneKeyValues(req.GetEnvOverrides()),
 	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_STARTED, eventMutation{
+		execID:    execID,
+		execState: agboxv1.ExecState_EXEC_STATE_RUNNING,
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "append EXEC_STARTED event: %v", err)
+	}
 	record.execs[execID] = execRecord
 	s.execs[execID] = req.GetSandboxId()
 	execContext, cancel := context.WithCancel(context.Background())
 	record.execCancel[execID] = cancel
-	s.appendEventLocked(record, agboxv1.EventType_EXEC_STARTED, eventMutation{
-		execID:    execID,
-		execState: agboxv1.ExecState_EXEC_STATE_RUNNING,
-	})
 	go s.completeExec(execContext, execID)
 	return &agboxv1.CreateExecResponse{ExecId: execID}, nil
 }
@@ -410,8 +441,14 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 	if isExecTerminal(execRecord.GetState()) {
 		return nil, newStatusError(codes.FailedPrecondition, ReasonExecAlreadyTerminal, "exec %s is already terminal", req.GetExecId())
 	}
-	execRecord.State = agboxv1.ExecState_EXEC_STATE_CANCELLED
 	record := s.boxes[sandboxID]
+	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_CANCELLED, eventMutation{
+		execID:    req.GetExecId(),
+		execState: agboxv1.ExecState_EXEC_STATE_CANCELLED,
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "append EXEC_CANCELLED event: %v", err)
+	}
+	execRecord.State = agboxv1.ExecState_EXEC_STATE_CANCELLED
 	if cancel := record.execCancel[req.GetExecId()]; cancel != nil {
 		cancel()
 		delete(record.execCancel, req.GetExecId())
@@ -422,10 +459,6 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 			return nil, status.Errorf(codes.Internal, "write exec artifact: %v", err)
 		}
 	}
-	s.appendEventLocked(record, agboxv1.EventType_EXEC_CANCELLED, eventMutation{
-		execID:    req.GetExecId(),
-		execState: agboxv1.ExecState_EXEC_STATE_CANCELLED,
-	})
 	go s.scheduleIdleStop(sandboxID)
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
@@ -530,10 +563,14 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		s.mu.Unlock()
 		return
 	}
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_PREPARING, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_PREPARING, eventMutation{
 		phase:        "materialize",
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-	})
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_PREPARING, err)
+		s.mu.Unlock()
+		return
+	}
 	s.mu.Unlock()
 
 	result, err := s.config.runtimeBackend.CreateSandbox(context.Background(), record)
@@ -548,22 +585,34 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		return
 	}
 	if err != nil {
-		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+		if appendErr := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
 			errorCode:    "SANDBOX_CREATE_FAILED",
 			errorMessage: err.Error(),
 			sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		})
+		}); appendErr != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_FAILED, appendErr)
+			return
+		}
+		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+		return
+	}
+	if err := s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
+		return
+	}
+	optionalStatuses, optionalStatusesOpen := drainAvailableRuntimeServiceStatuses(result.OptionalServiceStatuses)
+	if err := s.appendServiceEventsLocked(record, optionalStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
+		return
+	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_READY, err)
 		return
 	}
 	record.runtimeState = result.RuntimeState
-	s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
-	optionalStatuses, optionalStatusesOpen := drainAvailableRuntimeServiceStatuses(result.OptionalServiceStatuses)
-	s.appendServiceEventsLocked(record, optionalStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
-	})
 	if optionalStatusesOpen {
 		go s.completeOptionalServiceCreate(sandboxID, result.OptionalServiceStatuses)
 	}
@@ -589,19 +638,28 @@ func (s *Service) completeSandboxResume(sandboxID string) {
 		return
 	}
 	if err != nil {
-		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+		if appendErr := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
 			errorCode:    "SANDBOX_RESUME_FAILED",
 			errorMessage: err.Error(),
 			sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		})
+		}); appendErr != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_FAILED, appendErr)
+			return
+		}
+		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
 		return
 	}
-	s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
+	if err := s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
+		return
+	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
-	})
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_READY, err)
+		return
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
 }
 
 func (s *Service) completeSandboxStop(sandboxID string, reason string) {
@@ -624,19 +682,25 @@ func (s *Service) completeSandboxStop(sandboxID string, reason string) {
 		return
 	}
 	if err != nil {
-		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+		if appendErr := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
 			errorCode:    "SANDBOX_STOP_FAILED",
 			errorMessage: err.Error(),
 			sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		})
+		}); appendErr != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_FAILED, appendErr)
+			return
+		}
+		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+		return
+	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOPPED, eventMutation{
+		reason:       reason,
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_STOPPED, err)
 		return
 	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_STOPPED
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOPPED, eventMutation{
-		reason:       reason,
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
-	})
 }
 
 func (s *Service) completeSandboxDelete(sandboxID string, reason string) {
@@ -659,19 +723,25 @@ func (s *Service) completeSandboxDelete(sandboxID string, reason string) {
 		return
 	}
 	if err != nil {
-		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+		if appendErr := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
 			errorCode:    "SANDBOX_DELETE_FAILED",
 			errorMessage: err.Error(),
 			sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		})
+		}); appendErr != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_FAILED, appendErr)
+			return
+		}
+		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+		return
+	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{
+		reason:       reason,
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETED,
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_DELETED, err)
 		return
 	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETED
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{
-		reason:       reason,
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETED,
-	})
 }
 
 func (s *Service) completeExec(execContext context.Context, execID string) {
@@ -696,51 +766,74 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 		return
 	}
 	record = s.boxes[sandboxID]
-	delete(record.execCancel, execID)
 	if execContext.Err() != nil {
+		delete(record.execCancel, execID)
 		return
 	}
 	if runErr != nil {
-		execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
-		execRecord.ExitCode = result.ExitCode
-		execRecord.Stdout = result.Stdout
-		execRecord.Stderr = result.Stderr
-		execRecord.Error = strings.TrimSpace(strings.Join([]string{result.Stderr, result.Stdout}, "\n"))
-		if execRecord.Error == "" {
-			execRecord.Error = runErr.Error()
+		execErrorMessage := strings.TrimSpace(strings.Join([]string{result.Stderr, result.Stdout}, "\n"))
+		if execErrorMessage == "" {
+			execErrorMessage = runErr.Error()
 		}
-		s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
+		if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
 			execID:       execID,
 			execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
 			exitCode:     result.ExitCode,
 			errorCode:    "EXEC_RUN_FAILED",
-			errorMessage: execRecord.GetError(),
-		})
+			errorMessage: execErrorMessage,
+		}); err != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EXEC_FAILED, err)
+			return
+		}
+		delete(record.execCancel, execID)
+		execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
+		execRecord.ExitCode = result.ExitCode
+		execRecord.Stdout = result.Stdout
+		execRecord.Stderr = result.Stderr
+		execRecord.Error = execErrorMessage
 		return
 	}
+	finishedExec := cloneExec(execRecord)
+	finishedExec.State = agboxv1.ExecState_EXEC_STATE_FINISHED
+	finishedExec.ExitCode = result.ExitCode
+	finishedExec.Stdout = result.Stdout
+	finishedExec.Stderr = result.Stderr
+	if artifactPath := record.execArtifacts[execID]; artifactPath != "" {
+		if err := writeExecArtifact(artifactPath, finishedExec); err != nil {
+			artifactError := fmt.Sprintf("write exec artifact: %v", err)
+			if appendErr := s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
+				execID:       execID,
+				execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
+				errorCode:    "ARTIFACT_OUTPUT_WRITE_FAILED",
+				errorMessage: artifactError,
+			}); appendErr != nil {
+				logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EXEC_FAILED, appendErr)
+				return
+			}
+			delete(record.execCancel, execID)
+			execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
+			execRecord.ExitCode = result.ExitCode
+			execRecord.Stdout = result.Stdout
+			execRecord.Stderr = result.Stderr
+			execRecord.Error = artifactError
+			record.lastTerminalRunFinishedAt = time.Now().UTC()
+			return
+		}
+	}
+	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_FINISHED, eventMutation{
+		execID:    execID,
+		execState: agboxv1.ExecState_EXEC_STATE_FINISHED,
+		exitCode:  result.ExitCode,
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EXEC_FINISHED, err)
+		return
+	}
+	delete(record.execCancel, execID)
 	execRecord.State = agboxv1.ExecState_EXEC_STATE_FINISHED
 	execRecord.ExitCode = result.ExitCode
 	execRecord.Stdout = result.Stdout
 	execRecord.Stderr = result.Stderr
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
-	if artifactPath := record.execArtifacts[execID]; artifactPath != "" {
-		if err := writeExecArtifact(artifactPath, execRecord); err != nil {
-			execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
-			execRecord.Error = fmt.Sprintf("write exec artifact: %v", err)
-			s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
-				execID:       execID,
-				execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
-				errorCode:    "ARTIFACT_OUTPUT_WRITE_FAILED",
-				errorMessage: execRecord.GetError(),
-			})
-			return
-		}
-	}
-	s.appendEventLocked(record, agboxv1.EventType_EXEC_FINISHED, eventMutation{
-		execID:    execID,
-		execState: agboxv1.ExecState_EXEC_STATE_FINISHED,
-		exitCode:  result.ExitCode,
-	})
 	go s.scheduleIdleStop(sandboxID)
 }
 
@@ -1017,9 +1110,13 @@ func (s *Service) scheduleIdleStop(sandboxID string) {
 		s.mu.Unlock()
 		return
 	}
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
 		reason: "idle_ttl",
-	})
+	}); err != nil {
+		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_STOP_REQUESTED, err)
+		s.mu.Unlock()
+		return
+	}
 	s.mu.Unlock()
 	go s.completeSandboxStop(sandboxID, "idle_ttl")
 }
@@ -1059,35 +1156,44 @@ func (s *Service) completeOptionalServiceCreate(sandboxID string, statuses <-cha
 			s.mu.Unlock()
 			continue
 		}
-		s.appendServiceEventsLocked(record, []runtimeServiceStatus{serviceStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY)
+		if err := s.appendServiceEventsLocked(record, []runtimeServiceStatus{serviceStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY); err != nil {
+			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
+			s.mu.Unlock()
+			return
+		}
 		s.mu.Unlock()
 	}
 }
 
-func (s *Service) appendServiceEventsLocked(record *sandboxRecord, statuses []runtimeServiceStatus, sandboxState agboxv1.SandboxState) {
+func (s *Service) appendServiceEventsLocked(record *sandboxRecord, statuses []runtimeServiceStatus, sandboxState agboxv1.SandboxState) error {
 	for _, serviceStatus := range statuses {
 		if serviceStatus.Ready {
-			s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_READY, eventMutation{
+			if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_READY, eventMutation{
 				serviceName:  serviceStatus.Name,
 				sandboxState: sandboxState,
-			})
+			}); err != nil {
+				return err
+			}
 			continue
 		}
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_FAILED, eventMutation{
+		if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_FAILED, eventMutation{
 			serviceName:  serviceStatus.Name,
 			errorCode:    "SANDBOX_SERVICE_FAILED",
 			errorMessage: serviceStatus.Message,
 			sandboxState: sandboxState,
-		})
+		}); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.EventType, mutation eventMutation) {
-	record.nextSequence++
+func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.EventType, mutation eventMutation) error {
+	nextSequence := record.nextSequence + 1
 	event := &agboxv1.SandboxEvent{
-		EventId:      fmt.Sprintf("%s-%d", record.handle.GetSandboxId(), record.nextSequence),
-		Sequence:     record.nextSequence,
-		Cursor:       makeCursor(record.handle.GetSandboxId(), record.nextSequence),
+		EventId:      fmt.Sprintf("%s-%d", record.handle.GetSandboxId(), nextSequence),
+		Sequence:     nextSequence,
+		Cursor:       makeCursor(record.handle.GetSandboxId(), nextSequence),
 		SandboxId:    record.handle.GetSandboxId(),
 		EventType:    eventType,
 		OccurredAt:   timestamppb.Now(),
@@ -1103,8 +1209,13 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 		ExecState:    mutation.execState,
 		ServiceName:  mutation.serviceName,
 	}
+	if err := s.config.eventStore.Append(record.handle.GetSandboxId(), event); err != nil {
+		return err
+	}
+	record.nextSequence = nextSequence
 	record.events = append(record.events, event)
 	record.handle.LastEventCursor = event.GetCursor()
+	return nil
 }
 
 func (s *Service) requireSandboxLocked(sandboxID string) (*sandboxRecord, error) {
@@ -1167,6 +1278,27 @@ func eventsAfter(record *sandboxRecord, afterSequence uint64) []*agboxv1.Sandbox
 		result = append(result, clone)
 	}
 	return result
+}
+
+func validateCursorNotStale(record *sandboxRecord, afterSequence uint64) error {
+	if afterSequence <= record.nextSequence {
+		return nil
+	}
+	return newStatusError(
+		codes.OutOfRange,
+		ReasonSandboxEventCursorStale,
+		"cursor sequence %d is outside sandbox %s event history",
+		afterSequence,
+		record.handle.GetSandboxId(),
+	)
+}
+
+func logAsyncEventAppendFailure(sandboxID string, eventType agboxv1.EventType, err error) {
+	if eventType == agboxv1.EventType_EVENT_TYPE_UNSPECIFIED {
+		log.Printf("append sandbox events for %s: %v", sandboxID, err)
+		return
+	}
+	log.Printf("append %s event for sandbox %s: %v", eventType.String(), sandboxID, err)
 }
 
 func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {

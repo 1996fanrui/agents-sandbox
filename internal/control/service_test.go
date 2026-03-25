@@ -24,6 +24,57 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+type scriptedEventStore struct {
+	appendFn            func(string, *agboxv1.SandboxEvent) error
+	loadEventsFn        func(string) ([]*agboxv1.SandboxEvent, error)
+	loadAllSandboxIDsFn func() ([]string, error)
+	maxSequenceFn       func(string) (uint64, error)
+	markDeletedFn       func(string, time.Time) error
+	cleanupFn           func(time.Duration) ([]string, error)
+}
+
+func (store scriptedEventStore) Append(sandboxID string, event *agboxv1.SandboxEvent) error {
+	if store.appendFn != nil {
+		return store.appendFn(sandboxID, event)
+	}
+	return nil
+}
+
+func (store scriptedEventStore) LoadEvents(sandboxID string) ([]*agboxv1.SandboxEvent, error) {
+	if store.loadEventsFn != nil {
+		return store.loadEventsFn(sandboxID)
+	}
+	return nil, nil
+}
+
+func (store scriptedEventStore) LoadAllSandboxIDs() ([]string, error) {
+	if store.loadAllSandboxIDsFn != nil {
+		return store.loadAllSandboxIDsFn()
+	}
+	return nil, nil
+}
+
+func (store scriptedEventStore) MaxSequence(sandboxID string) (uint64, error) {
+	if store.maxSequenceFn != nil {
+		return store.maxSequenceFn(sandboxID)
+	}
+	return 0, nil
+}
+
+func (store scriptedEventStore) MarkDeleted(sandboxID string, deletedAt time.Time) error {
+	if store.markDeletedFn != nil {
+		return store.markDeletedFn(sandboxID, deletedAt)
+	}
+	return nil
+}
+
+func (store scriptedEventStore) Cleanup(retentionTTL time.Duration) ([]string, error) {
+	if store.cleanupFn != nil {
+		return store.cleanupFn(retentionTTL)
+	}
+	return nil, nil
+}
+
 func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -1262,6 +1313,96 @@ func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
 	}
 }
 
+func TestStaleCursorReturnsExpiredError(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("stale-cursor", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId:  createResp.GetSandboxId(),
+		FromCursor: createResp.GetSandboxId() + ":99",
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+
+	_, err = stream.Recv()
+	if err == nil {
+		t.Fatal("expected stale cursor error")
+	}
+	assertStatusErrorReason(t, err, codes.OutOfRange, ReasonSandboxEventCursorStale)
+}
+
+func TestCreateSandboxFailsWhenAcceptedEventAppendFails(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		eventStore: scriptedEventStore{
+			appendFn: func(_ string, event *agboxv1.SandboxEvent) error {
+				if event.GetEventType() == agboxv1.EventType_SANDBOX_ACCEPTED {
+					return errors.New("append accepted failed")
+				}
+				return nil
+			},
+		},
+	})
+
+	_, err := client.CreateSandbox(context.Background(), createSandboxRequest("append-create-fails", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err == nil {
+		t.Fatal("expected CreateSandbox to fail")
+	}
+	assertStatusCode(t, err, codes.Internal)
+
+	_, getErr := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: "append-create-fails"})
+	if getErr == nil {
+		t.Fatal("expected sandbox to be absent after append failure")
+	}
+	assertStatusErrorReason(t, getErr, codes.NotFound, ReasonSandboxNotFound)
+}
+
+func TestSandboxStaysPendingWhenReadyEventAppendFails(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		eventStore: scriptedEventStore{
+			appendFn: func(_ string, event *agboxv1.SandboxEvent) error {
+				if event.GetEventType() == agboxv1.EventType_SANDBOX_READY {
+					return errors.New("append ready failed")
+				}
+				return nil
+			},
+		},
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("append-ready-fails", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		resp, getErr := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+		if getErr != nil {
+			t.Fatalf("GetSandbox failed: %v", getErr)
+		}
+		if resp.GetSandbox().GetState() == agboxv1.SandboxState_SANDBOX_STATE_PENDING {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	resp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	t.Fatalf("expected sandbox to remain pending, got %s", resp.GetSandbox().GetState())
+}
+
 func TestCancelExecEmitsCancelledEvent(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -1468,6 +1609,29 @@ func collectEventsUntil(t *testing.T, stream agboxv1.SandboxService_SubscribeSan
 	}
 	t.Fatalf("timed out waiting for events: %#v", events)
 	return nil
+}
+
+func assertStatusCode(t *testing.T, err error, want codes.Code) {
+	t.Helper()
+
+	got := status.Code(err)
+	if got != want {
+		t.Fatalf("unexpected gRPC code: got %s want %s", got, want)
+	}
+}
+
+func assertStatusErrorReason(t *testing.T, err error, wantCode codes.Code, wantReason string) {
+	t.Helper()
+
+	assertStatusCode(t, err, wantCode)
+	st := status.Convert(err)
+	for _, detail := range st.Details() {
+		info, ok := detail.(*errdetails.ErrorInfo)
+		if ok && info.GetReason() == wantReason {
+			return
+		}
+	}
+	t.Fatalf("expected reason %q in error details, got %#v", wantReason, st.Details())
 }
 
 type recordingCloser struct {
