@@ -11,6 +11,7 @@ The goal is a portable Docker-first runtime with a strict default security postu
 - Host network, shared bridge reuse, and Docker socket exposure to runtime containers are not supported.
 - Only explicitly declared filesystem inputs may enter the sandbox.
 - Invalid or unsafe runtime inputs must fail fast. The daemon must not silently widen mounts or fall back to weaker isolation.
+- Runtime orchestration uses structured Docker Engine API calls through the daemon's shared runtime client instead of shelling out to Docker CLI subprocesses.
 
 ## Filesystem Ingress Classes
 
@@ -121,6 +122,7 @@ Startup rules:
 - `post_start_on_primary` hooks run only after their owner service is healthy and the primary container is running.
 - `post_start_on_primary` is valid only for `required_services`. `optional_services` must reject it during synchronous validation.
 - Parallel startup of optional services is a performance optimization only; it must not weaken isolation or readiness checks for required services.
+- Service startup, health inspection, and `post_start_on_primary` execution must stay on structured Docker API paths so readiness and exit semantics come from typed container and exec state.
 
 ## Permissions and Runtime User Model
 
@@ -145,3 +147,5 @@ Required rules:
 Docker objects without these labels are never inspected, stopped, or removed by the daemon. This label-based boundary ensures user-created or third-party containers are not affected by daemon lifecycle operations.
 
 The daemon must not require an external product database snapshot to decide whether a service container or network belongs to a live sandbox. Ownership must be derivable from runtime state plus namespaced labels.
+
+Cleanup work must continue on daemon-owned contexts rather than request-scoped cancellation so accepted async delete and failed-create teardown can finish reliably.
