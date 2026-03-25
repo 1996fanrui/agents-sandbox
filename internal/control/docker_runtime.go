@@ -3,7 +3,6 @@ package control
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +20,10 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
+	"github.com/docker/docker/api/types/container"
+	imagetypes "github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 )
 
 type runtimeBackend interface {
@@ -132,11 +135,27 @@ func (fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv
 }
 
 type dockerRuntimeBackend struct {
-	config ServiceConfig
+	config       ServiceConfig
+	dockerClient *client.Client
 }
 
-func newDockerRuntimeBackend(config ServiceConfig) runtimeBackend {
-	return &dockerRuntimeBackend{config: config}
+func newDockerRuntimeBackend(config ServiceConfig) (runtimeBackend, io.Closer, error) {
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize docker client: %w", err)
+	}
+	backend := &dockerRuntimeBackend{
+		config:       config,
+		dockerClient: dockerClient,
+	}
+	return backend, backend, nil
+}
+
+func (backend *dockerRuntimeBackend) Close() error {
+	if backend == nil || backend.dockerClient == nil {
+		return nil
+	}
+	return backend.dockerClient.Close()
 }
 
 func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
@@ -175,16 +194,16 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 
 	cleanupRequired = true
-	if err := ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
+	if err := backend.ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
 	for _, service := range record.requiredServices {
-		if err := ensureDockerImage(ctx, service.GetImage()); err != nil {
+		if err := backend.ensureDockerImage(ctx, service.GetImage()); err != nil {
 			return runtimeCreateResult{}, err
 		}
 	}
 	for _, service := range record.optionalServices {
-		if err := ensureDockerImage(ctx, service.GetImage()); err != nil {
+		if err := backend.ensureDockerImage(ctx, service.GetImage()); err != nil {
 			return runtimeCreateResult{}, err
 		}
 	}
@@ -215,7 +234,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		if err := dockerContainerStart(ctx, containerName); err != nil {
 			return runtimeCreateResult{}, err
 		}
-		if err := dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
+		if err := backend.dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
 			return runtimeCreateResult{}, err
 		}
 		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
@@ -253,7 +272,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := dockerContainerStart(ctx, state.PrimaryContainerName); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	if err := dockerWaitContainerRunning(ctx, state.PrimaryContainerName, 10*time.Second); err != nil {
+	if err := backend.dockerWaitContainerRunning(ctx, state.PrimaryContainerName, 10*time.Second); err != nil {
 		return runtimeCreateResult{}, err
 	}
 	for _, service := range record.requiredServices {
@@ -279,26 +298,26 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	if record.runtimeState == nil {
 		return runtimeResumeResult{}, errors.New("sandbox runtime state is missing")
 	}
-	if err := dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeResumeResult{}, err
 	}
 	for _, serviceContainer := range record.runtimeState.ServiceContainers {
-		if err := dockerContainerMustExist(ctx, serviceContainer.ContainerName); err != nil {
+		if err := backend.dockerContainerMustExist(ctx, serviceContainer.ContainerName); err != nil {
 			return runtimeResumeResult{}, err
 		}
 	}
 	statuses := make([]runtimeServiceStatus, 0, len(record.runtimeState.ServiceContainers))
 	for _, service := range record.requiredServices {
 		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
-		if err := dockerContainerEnsureRunning(ctx, containerName); err != nil {
+		if err := backend.dockerContainerEnsureRunning(ctx, containerName); err != nil {
 			return runtimeResumeResult{}, err
 		}
-		if err := dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
+		if err := backend.dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
 			return runtimeResumeResult{}, err
 		}
 		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
 	}
-	if err := dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeResumeResult{}, err
 	}
 	for _, service := range record.requiredServices {
@@ -313,7 +332,7 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	}
 	for _, service := range record.optionalServices {
 		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
-		if err := dockerContainerEnsureRunning(ctx, containerName); err != nil {
+		if err := backend.dockerContainerEnsureRunning(ctx, containerName); err != nil {
 			statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: false, Message: err.Error()})
 			continue
 		}
@@ -386,11 +405,11 @@ func (backend *dockerRuntimeBackend) StopSandbox(ctx context.Context, record *sa
 		return errors.New("sandbox runtime state is missing")
 	}
 	record.runtimeState.OptionalServiceStarts.CancelAndWait()
-	if err := dockerContainerStop(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerStop(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return err
 	}
 	for _, serviceContainer := range record.runtimeState.ServiceContainers {
-		if err := dockerContainerStop(ctx, serviceContainer.ContainerName); err != nil {
+		if err := backend.dockerContainerStop(ctx, serviceContainer.ContainerName); err != nil {
 			return err
 		}
 	}
@@ -429,10 +448,10 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	if record.runtimeState == nil {
 		return runtimeExecResult{}, errors.New("sandbox runtime state is missing")
 	}
-	if err := dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeExecResult{}, err
 	}
-	if err := dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeExecResult{}, err
 	}
 	output, exitCode, err := dockerExec(ctx, dockerExecSpec{
@@ -858,26 +877,6 @@ type dockerExecSpec struct {
 	Environment   map[string]string
 }
 
-type dockerInspectState struct {
-	Running  bool                 `json:"Running"`
-	Status   string               `json:"Status"`
-	ExitCode int                  `json:"ExitCode"`
-	Health   *dockerInspectHealth `json:"Health"`
-}
-
-type dockerInspectHealth struct {
-	Status        string                   `json:"Status"`
-	FailingStreak int                      `json:"FailingStreak"`
-	Log           []dockerInspectHealthLog `json:"Log"`
-}
-
-type dockerInspectHealthLog struct {
-	Start    time.Time `json:"Start"`
-	End      time.Time `json:"End"`
-	ExitCode int       `json:"ExitCode"`
-	Output   string    `json:"Output"`
-}
-
 func ensureUniqueMountTargets(mounts []dockerMount) error {
 	targets := make(map[string]string, len(mounts))
 	for _, mount := range mounts {
@@ -895,15 +894,24 @@ func ensureUniqueMountTargets(mounts []dockerMount) error {
 	return nil
 }
 
-func ensureDockerImage(ctx context.Context, image string) error {
-	if image == "" {
+func (backend *dockerRuntimeBackend) ensureDockerImage(ctx context.Context, imageRef string) error {
+	if imageRef == "" {
 		return errors.New("sandbox image must be configured")
 	}
-	if _, err := runDocker(ctx, "image", "inspect", image); err == nil {
-		return nil
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
 	}
-	_, err := runDocker(ctx, "pull", image)
-	return err
+	if _, _, err := backend.dockerClient.ImageInspectWithRaw(ctx, imageRef); err == nil {
+		return nil
+	} else if !errdefs.IsNotFound(err) {
+		return err
+	}
+	reader, err := backend.dockerClient.ImagePull(ctx, imageRef, imagetypes.PullOptions{})
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(io.Discard, reader)
+	return errors.Join(copyErr, reader.Close())
 }
 
 func dockerNetworkCreate(ctx context.Context, name string, labels map[string]string) error {
@@ -970,8 +978,8 @@ func dockerContainerStart(ctx context.Context, name string) error {
 	return err
 }
 
-func dockerContainerEnsureRunning(ctx context.Context, name string) error {
-	state, err := dockerContainerState(ctx, name)
+func (backend *dockerRuntimeBackend) dockerContainerEnsureRunning(ctx context.Context, name string) error {
+	state, err := backend.dockerContainerState(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -981,10 +989,10 @@ func dockerContainerEnsureRunning(ctx context.Context, name string) error {
 	if err := dockerContainerStart(ctx, name); err != nil {
 		return err
 	}
-	return dockerWaitContainerRunning(ctx, name, 10*time.Second)
+	return backend.dockerWaitContainerRunning(ctx, name, 10*time.Second)
 }
 
-func dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
+func (backend *dockerRuntimeBackend) dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
 	if healthcheck == nil {
 		return fmt.Errorf("required service %s is missing healthcheck", name)
 	}
@@ -1001,7 +1009,7 @@ func dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthch
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			state, err := dockerContainerState(ctx, name)
+			state, err := backend.dockerContainerState(ctx, name)
 			if err != nil {
 				return err
 			}
@@ -1083,9 +1091,12 @@ func parseHealthDuration(raw string, defaultValue time.Duration) (time.Duration,
 	return time.ParseDuration(raw)
 }
 
-func latestHealthLogTimestamp(items []dockerInspectHealthLog) time.Time {
+func latestHealthLogTimestamp(items []*container.HealthcheckResult) time.Time {
 	var latest time.Time
 	for _, item := range items {
+		if item == nil {
+			continue
+		}
 		candidate := item.End
 		if candidate.IsZero() {
 			candidate = item.Start
@@ -1111,10 +1122,10 @@ func minDuration(left time.Duration, right time.Duration) time.Duration {
 	return right
 }
 
-func dockerWaitContainerRunning(ctx context.Context, name string, timeout time.Duration) error {
+func (backend *dockerRuntimeBackend) dockerWaitContainerRunning(ctx context.Context, name string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		state, err := dockerContainerState(ctx, name)
+		state, err := backend.dockerContainerState(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -1126,13 +1137,13 @@ func dockerWaitContainerRunning(ctx context.Context, name string, timeout time.D
 	return fmt.Errorf("container %s did not become running", name)
 }
 
-func dockerContainerStop(ctx context.Context, name string) error {
+func (backend *dockerRuntimeBackend) dockerContainerStop(ctx context.Context, name string) error {
 	if name == "" {
 		return nil
 	}
-	state, err := dockerContainerState(ctx, name)
+	state, err := backend.dockerContainerState(ctx, name)
 	if err != nil {
-		if strings.Contains(err.Error(), "No such object") {
+		if errdefs.IsNotFound(err) {
 			return nil
 		}
 		return err
@@ -1155,21 +1166,23 @@ func dockerContainerRemove(ctx context.Context, name string) error {
 	return err
 }
 
-func dockerContainerMustExist(ctx context.Context, name string) error {
-	_, err := dockerContainerState(ctx, name)
+func (backend *dockerRuntimeBackend) dockerContainerMustExist(ctx context.Context, name string) error {
+	_, err := backend.dockerContainerState(ctx, name)
 	return err
 }
 
-func dockerContainerState(ctx context.Context, name string) (dockerInspectState, error) {
-	output, err := runDocker(ctx, "inspect", "--format", "{{json .State}}", name)
+func (backend *dockerRuntimeBackend) dockerContainerState(ctx context.Context, name string) (*container.State, error) {
+	if backend == nil || backend.dockerClient == nil {
+		return nil, errors.New("docker client is not initialized")
+	}
+	inspectResponse, err := backend.dockerClient.ContainerInspect(ctx, name)
 	if err != nil {
-		return dockerInspectState{}, err
+		return nil, err
 	}
-	var state dockerInspectState
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &state); err != nil {
-		return dockerInspectState{}, err
+	if inspectResponse.State == nil {
+		return nil, fmt.Errorf("container %s does not expose structured state", name)
 	}
-	return state, nil
+	return inspectResponse.State, nil
 }
 
 type dockerExecOutput struct {

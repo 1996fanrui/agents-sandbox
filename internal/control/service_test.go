@@ -493,6 +493,25 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
 }
 
+func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
+	runtimeErr := errors.New("runtime close failed")
+	registryErr := errors.New("registry close failed")
+	closeOrder := make([]string, 0, 2)
+	closer := joinServiceClosers(
+		recordingCloser{name: "runtime", order: &closeOrder, err: runtimeErr},
+		recordingCloser{name: "registry", order: &closeOrder, err: registryErr},
+	)
+
+	err := closer.Close()
+
+	if !reflect.DeepEqual(closeOrder, []string{"runtime", "registry"}) {
+		t.Fatalf("unexpected closer order: got %v want %v", closeOrder, []string{"runtime", "registry"})
+	}
+	if !errors.Is(err, runtimeErr) || !errors.Is(err, registryErr) {
+		t.Fatalf("expected joined close error, got %v", err)
+	}
+}
+
 func TestSandboxOwnerRemoved(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{})
 
@@ -854,7 +873,7 @@ func TestMaterializeGenericCopiesRejectsExternalSymlink(t *testing.T) {
 		t.Fatalf("Symlink failed: %v", err)
 	}
 
-	backend := newDockerRuntimeBackend(ServiceConfig{StateRoot: t.TempDir()}).(*dockerRuntimeBackend)
+	backend := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
 	state := &sandboxRuntimeState{}
 	_, err := backend.materializeGenericCopies("sandbox-1", []*agboxv1.CopySpec{
 		{Source: sourceRoot, Target: "/workspace/project"},
@@ -873,7 +892,7 @@ func TestMaterializeGenericCopiesAppliesExcludePatterns(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	backend := newDockerRuntimeBackend(ServiceConfig{StateRoot: t.TempDir()}).(*dockerRuntimeBackend)
+	backend := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
 	state := &sandboxRuntimeState{}
 	mounts, err := backend.materializeGenericCopies("sandbox-1", []*agboxv1.CopySpec{
 		{Source: sourceRoot, Target: "/workspace/project", ExcludePatterns: []string{".git"}},
@@ -1116,7 +1135,18 @@ func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxService
 
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	agboxv1.RegisterSandboxServiceServer(server, NewService(config))
+	service, closer, err := NewService(config)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	if closer != nil {
+		t.Cleanup(func() {
+			if closeErr := closer.Close(); closeErr != nil {
+				t.Fatalf("service closer failed: %v", closeErr)
+			}
+		})
+	}
+	agboxv1.RegisterSandboxServiceServer(server, service)
 	go func() {
 		_ = server.Serve(listener)
 	}()
@@ -1155,6 +1185,17 @@ func collectEventsUntil(t *testing.T, stream agboxv1.SandboxService_SubscribeSan
 	}
 	t.Fatalf("timed out waiting for events: %#v", events)
 	return nil
+}
+
+type recordingCloser struct {
+	name  string
+	order *[]string
+	err   error
+}
+
+func (closer recordingCloser) Close() error {
+	*closer.order = append(*closer.order, closer.name)
+	return closer.err
 }
 
 func waitForSandboxState(t *testing.T, client agboxv1.SandboxServiceClient, sandboxID string, expected agboxv1.SandboxState) {
