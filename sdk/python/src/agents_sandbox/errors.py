@@ -8,15 +8,15 @@ class SandboxClientError(RuntimeError):
 
 
 class SandboxConflictError(SandboxClientError):
-    """Raised when a sandbox owner already has an active sandbox."""
+    """Raised when a caller-provided ID already exists."""
 
-    def __init__(self, sandbox_owner: str | None = None):
-        if sandbox_owner is None:
+    def __init__(self, sandbox_id: str | None = None):
+        if sandbox_id is None:
             message = "Sandbox already exists."
         else:
-            message = sandbox_owner
+            message = sandbox_id
         super().__init__(message)
-        self.sandbox_owner = sandbox_owner
+        self.sandbox_id = sandbox_id
 
 
 class SandboxNotFoundError(SandboxClientError):

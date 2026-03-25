@@ -5,7 +5,12 @@
 Create the client with the platform default daemon socket resolution:
 
 ```python
-from agents_sandbox import AgentsSandboxClient, MountSpec
+from agents_sandbox import (
+    AgentsSandboxClient,
+    HealthcheckConfig,
+    MountSpec,
+    ServiceSpec,
+)
 
 client = AgentsSandboxClient()
 ```
@@ -39,11 +44,32 @@ Example:
 ```python
 sandbox = await client.create_sandbox(
     image="ghcr.io/agents-sandbox/coding-runtime:latest",
+    sandbox_id="demo-sandbox",
     mounts=(
         MountSpec(
             source="/path/to/workspace",
             target="/workspace",
             writable=True,
+        ),
+    ),
+    required_services=(
+        ServiceSpec(
+            name="postgres",
+            image="postgres:16",
+            healthcheck=HealthcheckConfig(
+                test=("CMD-SHELL", "pg_isready -U postgres"),
+                interval="5s",
+                retries=5,
+            ),
+            post_start_on_primary=(
+                "python -c \"print('seeded')\"",
+            ),
+        ),
+    ),
+    optional_services=(
+        ServiceSpec(
+            name="redis",
+            image="redis:7",
         ),
     ),
     wait=False,
@@ -69,11 +95,13 @@ Examples:
 ```python
 sandbox = await client.create_sandbox(
     image="ghcr.io/agents-sandbox/coding-runtime:latest",
+    sandbox_id="demo-sandbox",
 )
 
 exec_handle = await client.create_exec(
     sandbox.sandbox_id,
     ("python", "-c", "print('hello')"),
+    exec_id="exec-demo",
     wait=False,
 )
 
@@ -93,7 +121,7 @@ async for event in client.subscribe_sandbox_events(
     sandbox_id,
     from_cursor="0",
 ):
-    print(event.event_type.name, event.sequence)
+    print(event.event_type.name, event.service_name, event.sequence)
 ```
 
 Important rules:
@@ -101,6 +129,7 @@ Important rules:
 - `from_cursor="0"` replays the full ordered event history for one sandbox
 - other cursors must be daemon-issued values from the same sandbox stream
 - callers must treat `cursor` and `sequence` as the ordering source of truth
+- service lifecycle events use `SANDBOX_SERVICE_READY` and `SANDBOX_SERVICE_FAILED`
 
 ## Recommended Usage
 

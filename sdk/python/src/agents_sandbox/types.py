@@ -6,13 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .models import (
-    ExecState,
-    ProjectionMountMode,
-    SandboxEventType,
-    SandboxState,
-    WorkspaceMaterializationMode,
-)
+from .models import ExecState, SandboxEventType, SandboxState
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,31 +23,22 @@ class CallerMetadata:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceMaterializationSpec:
-    mode: WorkspaceMaterializationMode
-    source_root: str | None = None
+class HealthcheckConfig:
+    test: tuple[str, ...]
+    interval: str | None = None
+    timeout: str | None = None
+    retries: int | None = None
+    start_period: str | None = None
+    start_interval: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class DependencySpec:
+class ServiceSpec:
     name: str
     image: str
-    network_alias: str | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class CacheProjectionSpec:
-    capability_id: str
-    enabled: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class ToolingProjectionSpec:
-    capability_id: str
-    writable: bool = False
-    source_root: str | None = None
-    target_path: str | None = None
+    healthcheck: HealthcheckConfig | None = None
+    post_start_on_primary: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,19 +58,17 @@ class CopySpec:
 @dataclass(frozen=True, slots=True)
 class CreateSandboxSpec:
     image: str
-    workspace: WorkspaceMaterializationSpec | None = None
-    dependencies: tuple[DependencySpec, ...] = ()
-    cache_projections: tuple[CacheProjectionSpec, ...] = ()
-    tooling_projections: tuple[ToolingProjectionSpec, ...] = ()
     mounts: tuple[MountSpec, ...] = ()
     copies: tuple[CopySpec, ...] = ()
     builtin_resources: tuple[str, ...] = ()
+    required_services: tuple[ServiceSpec, ...] = ()
+    optional_services: tuple[ServiceSpec, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class CreateSandboxRequest:
-    sandbox_owner: str
     create_spec: CreateSandboxSpec
+    sandbox_id: str | None = None
     caller_metadata: CallerMetadata | None = None
 
 
@@ -93,19 +76,10 @@ class CreateSandboxRequest:
 class CreateExecRequest:
     sandbox_id: str
     command: tuple[str, ...]
+    exec_id: str | None = None
     cwd: str | None = None
     env_overrides: Mapping[str, str] = field(default_factory=dict)
     caller_metadata: CallerMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedProjectionHandle:
-    capability_id: str
-    source_path: str | None
-    target_path: str | None
-    mount_mode: ProjectionMountMode
-    writable: bool
-    write_back: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +93,7 @@ class SandboxEvent:
     replay: bool = False
     snapshot: bool = False
     phase: str | None = None
-    dependency_name: str | None = None
+    service_name: str | None = None
     error_code: str | None = None
     error_message: str | None = None
     reason: str | None = None
@@ -132,11 +106,10 @@ class SandboxEvent:
 @dataclass(frozen=True, slots=True)
 class SandboxHandle:
     sandbox_id: str
-    sandbox_owner: str
     state: SandboxState
-    resolved_tooling_projections: tuple[ResolvedProjectionHandle, ...] = ()
-    dependencies: tuple[DependencySpec, ...] = ()
     last_event_cursor: str = ""
+    required_services: tuple[ServiceSpec, ...] = ()
+    optional_services: tuple[ServiceSpec, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,19 +127,16 @@ class ExecHandle:
 
 
 __all__ = [
-    "CacheProjectionSpec",
     "CallerMetadata",
     "CopySpec",
     "CreateExecRequest",
     "CreateSandboxRequest",
     "CreateSandboxSpec",
-    "DependencySpec",
     "ExecHandle",
+    "HealthcheckConfig",
     "MountSpec",
     "PingInfo",
-    "ResolvedProjectionHandle",
     "SandboxEvent",
     "SandboxHandle",
-    "ToolingProjectionSpec",
-    "WorkspaceMaterializationSpec",
+    "ServiceSpec",
 ]
