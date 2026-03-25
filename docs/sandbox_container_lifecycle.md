@@ -94,9 +94,12 @@ flowchart TB
     C --> D[Create dedicated network]
     D --> E[Materialize filesystem inputs and built-in resources]
     E --> F[Create required and optional service containers]
-    F --> G[Start required services serially; start optional services and primary in parallel]
-    G --> H[Persist runtime handles and resolved projections]
-    H --> I[Emit SANDBOX_READY]
+    F --> G[Start and wait each required service healthy]
+    G --> H[Start primary and optional services]
+    H --> I[Run post_start_on_primary for required services]
+    I --> J[Persist runtime handles]
+    J --> K[Emit SANDBOX_SERVICE_READY / SANDBOX_SERVICE_FAILED]
+    K --> L[Emit SANDBOX_READY]
 ```
 
 Create-path rules:
@@ -105,6 +108,8 @@ Create-path rules:
 - The daemon owns actual materialization; the caller must not infer readiness from the RPC response alone.
 - The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_resources`, invalid service declarations, or unsafe artifact targets.
 - The daemon must return a specific error code when a caller-provided `sandbox_id` duplicates an existing active sandbox.
+- Required services must each pass their healthcheck before the sandbox reaches `READY`.
+- Optional services only report their initial create/start result in V1; they are not restarted or runtime-monitored after readiness is reached.
 
 ## Resume Path
 

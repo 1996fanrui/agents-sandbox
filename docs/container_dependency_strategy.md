@@ -1,6 +1,6 @@
 # Container Dependency Strategy
 
-This document defines how `agents-sandbox` handles projections, services, permissions, and network isolation.
+This document defines how `agents-sandbox` handles filesystem ingress, services, permissions, and network isolation.
 
 The goal is a portable Docker-first runtime with a strict default security posture and no hidden product-specific branches.
 
@@ -91,7 +91,7 @@ Service categories:
 | Category | Startup Behavior | Failure Behavior |
 |----------|-----------------|------------------|
 | `required_services` | Must be healthy before the primary is reported ready | Failure fails the entire sandbox materialization |
-| `optional_services` | Started in parallel with the primary container | Failure emits a warning only; daemon performs best-effort restart |
+| `optional_services` | Started in parallel with the primary container | Failure emits `SANDBOX_SERVICE_FAILED` for the initial create attempt only; the daemon does not restart it in V1 |
 
 Services are generic runtime features. Product-specific config formats that map into these fields stay outside this repository.
 
@@ -117,8 +117,9 @@ flowchart TB
 Startup rules:
 
 - Required services must each pass their healthcheck before the primary is reported ready. A failing required service or failing `post_start_on_primary` hook fails the whole materialization path and triggers cleanup of newly created runtime resources.
-- Optional services start in parallel with the primary container. A failing optional service emits `SANDBOX_SERVICE_FAILED` as a warning; the daemon performs best-effort restart but does not block sandbox readiness.
+- Optional services start in parallel with the primary container. A failing optional service emits `SANDBOX_SERVICE_FAILED` for the initial create attempt only and does not block sandbox readiness.
 - `post_start_on_primary` hooks run only after their owner service is healthy and the primary container is running.
+- `post_start_on_primary` is valid only for `required_services`. `optional_services` must reject it during synchronous validation.
 - Parallel startup of optional services is a performance optimization only; it must not weaken isolation or readiness checks for required services.
 
 ## Permissions and Runtime User Model
