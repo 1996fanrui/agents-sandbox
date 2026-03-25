@@ -32,6 +32,7 @@ The host lock always lives next to the socket so the lock protects the exact run
 | Key | Type | Recommended Default | Override Scope | Purpose |
 |-----|------|---------------------|----------------|---------|
 | `runtime.idle_ttl` | duration string | `"30m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
+| `runtime.event_retention_ttl` | duration string | `"168h"` | Daemon config only | How long deleted sandbox event history remains queryable before cleanup removes it |
 | `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-resource shadow-copy state |
 | `artifacts.exec_output_root` | string | unset | Daemon config only | Root directory where runtime-owned exec output files are created |
 | `artifacts.exec_output_template` | string | `"{sandbox_id}/{exec_id}.log"` | Daemon config only | Relative template expanded against `artifacts.exec_output_root`; supported fields are `sandbox_id` and `exec_id` |
@@ -51,9 +52,10 @@ The northbound API may override only a narrow subset of behavior:
 | `required_services` | Yes | Each sandbox declares the services that must become healthy before the primary is reported ready |
 | `optional_services` | Yes | Each sandbox declares the services whose initial startup result is reported without blocking readiness |
 | `runtime.idle_ttl` | No | Idle stop policy stays daemon-owned |
+| `runtime.event_retention_ttl` | No | Event retention policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |
 
-Replay retention is not an operator-tunable config key in V1. The current daemon keeps per-sandbox event history in memory for the daemon process lifetime, which is enough for `from_cursor="0"` replay while the daemon remains alive.
+The daemon persists sandbox event history in `ids.db` and keeps deleted sandbox streams queryable until `runtime.event_retention_ttl` expires. Cleanup then removes the retained event history and its deletion metadata together.
 
 ## Singleton Deployment Rule
 

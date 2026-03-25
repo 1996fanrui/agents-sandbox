@@ -19,7 +19,7 @@ Product-specific lifecycle semantics such as archive states stay outside this re
 | Primary container | `agents-sandbox` | Main execution target for `CreateExec` |
 | Dedicated network | `agents-sandbox` | One network per sandbox; shared bridge and host network are not supported |
 | Service containers | `agents-sandbox` | Required and optional services declared via `ServiceSpec`, attached to the same dedicated network |
-| In-memory event history | `agents-sandbox` | Source of ordered replayable lifecycle and exec events while the daemon process remains alive |
+| Persistent event history | `agents-sandbox` | Stored in bbolt so lifecycle and exec events survive daemon restart until retention cleanup removes deleted streams |
 | Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
 
 Docker object labels must use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`.
@@ -83,8 +83,9 @@ For one `sandbox_id`:
 - the literal `from_cursor="0"` must replay the full ordered event history since sandbox creation
 - non-zero cursors must be daemon-issued cursors from the same sandbox stream
 - clients must treat `cursor` and `sequence` as the ordering source of truth
+- stale cursors whose sequence is beyond the retained stream must fail with `OUT_OF_RANGE` and reason `SANDBOX_EVENT_CURSOR_EXPIRED`
 
-The current implementation keeps this event history in daemon memory. A daemon restart resets replay history for still-running sandboxes.
+The daemon persists event history in bbolt, reloads it on startup, and marks recovered sandboxes as replay-only records until runtime state is recreated in a later design. Deleted sandbox streams remain queryable until `runtime.event_retention_ttl` expires, after which cleanup removes the retained history.
 
 ## Create Path
 
@@ -157,6 +158,7 @@ Delete-path rules:
 - Delete is asynchronous and immediately acknowledged.
 - Stop and delete continue on daemon-owned background contexts, so teardown is not cancelled when the initiating RPC has already returned.
 - Cleanup removes runtime-owned Docker resources and runtime-owned filesystem state through structured Docker Engine API calls with idempotent not-found handling.
+- After `SANDBOX_DELETED`, the daemon retains the event stream for `runtime.event_retention_ttl` before cleanup removes the retained history.
 - Product-owned metadata cleanup is outside the scope of this repository.
 
 ## Reconciliation

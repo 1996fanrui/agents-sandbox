@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,15 @@ type scriptedEventStore struct {
 	loadEventsFn        func(string) ([]*agboxv1.SandboxEvent, error)
 	loadAllSandboxIDsFn func() ([]string, error)
 	maxSequenceFn       func(string) (uint64, error)
+	deletedAtFn         func(string) (time.Time, bool, error)
 	markDeletedFn       func(string, time.Time) error
 	cleanupFn           func(time.Duration) ([]string, error)
+}
+
+type persistentBufconnHarness struct {
+	service *Service
+	client  agboxv1.SandboxServiceClient
+	close   func()
 }
 
 func (store scriptedEventStore) Append(sandboxID string, event *agboxv1.SandboxEvent) error {
@@ -59,6 +67,13 @@ func (store scriptedEventStore) MaxSequence(sandboxID string) (uint64, error) {
 		return store.maxSequenceFn(sandboxID)
 	}
 	return 0, nil
+}
+
+func (store scriptedEventStore) DeletedAt(sandboxID string) (time.Time, bool, error) {
+	if store.deletedAtFn != nil {
+		return store.deletedAtFn(sandboxID)
+	}
+	return time.Time{}, false, nil
 }
 
 func (store scriptedEventStore) MarkDeleted(sandboxID string, deletedAt time.Time) error {
@@ -542,6 +557,176 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 		t.Fatalf("expected already exists for exec id, got %v", err)
 	}
 	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
+}
+
+func TestEventPersistenceAcrossRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("persist-restart", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	first.close()
+
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		PollInterval: 2 * time.Millisecond,
+	}, dbPath)
+	stream, err := second.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId:  createResp.GetSandboxId(),
+		FromCursor: "0",
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		return len(items) == 3
+	})
+	wantTypes := []agboxv1.EventType{
+		agboxv1.EventType_SANDBOX_ACCEPTED,
+		agboxv1.EventType_SANDBOX_PREPARING,
+		agboxv1.EventType_SANDBOX_READY,
+	}
+	for index, event := range events {
+		if event.GetEventType() != wantTypes[index] {
+			t.Fatalf("unexpected event type at %d: got %s want %s", index, event.GetEventType(), wantTypes[index])
+		}
+		if !event.GetReplay() {
+			t.Fatalf("expected replay event at %d", index)
+		}
+		if event.GetSequence() != uint64(index+1) {
+			t.Fatalf("unexpected sequence at %d: got %d want %d", index, event.GetSequence(), index+1)
+		}
+		if event.GetCursor() != makeCursor(createResp.GetSandboxId(), uint64(index+1)) {
+			t.Fatalf("unexpected cursor at %d: got %s", index, event.GetCursor())
+		}
+	}
+}
+
+func TestDeletedSandboxEventsRetained(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay:   5 * time.Millisecond,
+		PollInterval:      2 * time.Millisecond,
+		EventRetentionTTL: time.Hour,
+	}, dbPath)
+	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("retain-delete", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+		t.Fatalf("DeleteSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+
+	stream, err := harness.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId:  createResp.GetSandboxId(),
+		FromCursor: "0",
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		for _, event := range items {
+			if event.GetEventType() == agboxv1.EventType_SANDBOX_DELETED {
+				return true
+			}
+		}
+		return false
+	})
+	var sawDeleteRequested bool
+	for _, event := range events {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_DELETE_REQUESTED {
+			sawDeleteRequested = true
+		}
+	}
+	if !sawDeleteRequested || events[len(events)-1].GetEventType() != agboxv1.EventType_SANDBOX_DELETED {
+		t.Fatalf("expected delete events to be retained, got %#v", events)
+	}
+}
+
+func TestExpiredEventsCleanedUp(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay:   5 * time.Millisecond,
+		PollInterval:      2 * time.Millisecond,
+		EventRetentionTTL: time.Millisecond,
+	}, dbPath)
+	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-expired", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+		t.Fatalf("DeleteSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+
+	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("MarkDeleted failed: %v", err)
+	}
+	if err := harness.service.cleanupExpiredEvents(); err != nil {
+		t.Fatalf("cleanupExpiredEvents failed: %v", err)
+	}
+
+	_, err = harness.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err == nil {
+		t.Fatal("expected sandbox to be removed after cleanup")
+	}
+	assertStatusErrorReason(t, err, codes.NotFound, ReasonSandboxNotFound)
+}
+
+func TestRecoveredSandboxRejectsExecButAllowsDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("recovered-only", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	first.close()
+
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		PollInterval:      2 * time.Millisecond,
+		runtimeBackend:    &scriptedRuntimeBackend{deleteErr: errors.New("runtime delete should not be called")},
+		EventRetentionTTL: time.Hour,
+	}, dbPath)
+
+	_, err = second.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		Command:   []string{"echo", "blocked"},
+	})
+	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
+
+	_, err = second.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
+
+	_, err = second.client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
+
+	if _, err := second.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+		t.Fatalf("DeleteSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, second.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 }
 
 func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
@@ -1365,6 +1550,36 @@ func TestCreateSandboxFailsWhenAcceptedEventAppendFails(t *testing.T) {
 	assertStatusErrorReason(t, getErr, codes.NotFound, ReasonSandboxNotFound)
 }
 
+func TestCreateSandboxAcceptFailureReleasesSandboxID(t *testing.T) {
+	registry := newMemoryIDRegistry()
+	client := newBufconnClient(t, ServiceConfig{
+		idRegistry: registry,
+		eventStore: scriptedEventStore{
+			appendFn: func(_ string, event *agboxv1.SandboxEvent) error {
+				if event.GetEventType() == agboxv1.EventType_SANDBOX_ACCEPTED {
+					return errors.New("append accepted failed")
+				}
+				return nil
+			},
+		},
+	})
+
+	_, err := client.CreateSandbox(context.Background(), createSandboxRequest("reusable-sandbox", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err == nil {
+		t.Fatal("expected first CreateSandbox to fail")
+	}
+	assertStatusCode(t, err, codes.Internal)
+
+	client = newBufconnClient(t, ServiceConfig{idRegistry: registry})
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("reusable-sandbox", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox retry failed: %v", err)
+	}
+	if createResp.GetSandboxId() != "reusable-sandbox" {
+		t.Fatalf("unexpected sandbox id: %s", createResp.GetSandboxId())
+	}
+}
+
 func TestSandboxStaysPendingWhenReadyEventAppendFails(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -1401,6 +1616,118 @@ func TestSandboxStaysPendingWhenReadyEventAppendFails(t *testing.T) {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
 	t.Fatalf("expected sandbox to remain pending, got %s", resp.GetSandbox().GetState())
+}
+
+func TestDeleteSandboxesFailsWhenDeleteRequestedEventAppendFails(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		eventStore: scriptedEventStore{
+			appendFn: func(_ string, event *agboxv1.SandboxEvent) error {
+				if event.GetEventType() == agboxv1.EventType_SANDBOX_DELETE_REQUESTED {
+					return errors.New("append delete requested failed")
+				}
+				return nil
+			},
+		},
+	})
+
+	request := createSandboxRequest("delete-by-label-append-fails", "ghcr.io/agents-sandbox/coding-runtime:test")
+	request.CreateSpec.Labels = map[string]string{"team": "a"}
+	if _, err := client.CreateSandbox(context.Background(), request); err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, "delete-by-label-append-fails", agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	_, err := client.DeleteSandboxes(context.Background(), &agboxv1.DeleteSandboxesRequest{
+		LabelSelector: map[string]string{"team": "a"},
+	})
+	if err == nil {
+		t.Fatal("expected DeleteSandboxes to fail")
+	}
+	assertStatusCode(t, err, codes.Internal)
+
+	getResp, getErr := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{
+		SandboxId: "delete-by-label-append-fails",
+	})
+	if getErr != nil {
+		t.Fatalf("GetSandbox failed: %v", getErr)
+	}
+	if getResp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("expected sandbox to stay ready after append failure, got %s", getResp.GetSandbox().GetState())
+	}
+}
+
+func TestCreateExecStartFailureReleasesExecIDAndArtifactPath(t *testing.T) {
+	registry := newMemoryIDRegistry()
+	outputRoot := filepath.Join(t.TempDir(), "artifacts")
+	client := newBufconnClient(t, ServiceConfig{
+		idRegistry:             registry,
+		ArtifactOutputRoot:     outputRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("exec-retry-sandbox", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	client = newBufconnClient(t, ServiceConfig{
+		idRegistry:             registry,
+		ArtifactOutputRoot:     outputRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
+		eventStore: scriptedEventStore{
+			appendFn: func(_ string, event *agboxv1.SandboxEvent) error {
+				if event.GetEventType() == agboxv1.EventType_EXEC_STARTED {
+					return errors.New("append exec started failed")
+				}
+				return nil
+			},
+		},
+	})
+
+	createResp, err = client.CreateSandbox(context.Background(), createSandboxRequest("exec-retry-sandbox-2", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "retry-exec",
+		Command:   []string{"echo", "hello"},
+	})
+	if err == nil {
+		t.Fatal("expected CreateExec to fail")
+	}
+	assertStatusCode(t, err, codes.Internal)
+
+	artifactPath := filepath.Join(outputRoot, createResp.GetSandboxId(), "retry-exec.log")
+	if _, statErr := os.Stat(artifactPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected artifact path to be removed, got %v", statErr)
+	}
+
+	client = newBufconnClient(t, ServiceConfig{
+		idRegistry:             registry,
+		ArtifactOutputRoot:     outputRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
+	})
+	createResp, err = client.CreateSandbox(context.Background(), createSandboxRequest("exec-retry-sandbox-3", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "retry-exec",
+		Command:   []string{"echo", "hello"},
+	})
+	if err != nil {
+		t.Fatalf("CreateExec retry failed: %v", err)
+	}
+	if execResp.GetExecId() != "retry-exec" {
+		t.Fatalf("unexpected exec id: %s", execResp.GetExecId())
+	}
 }
 
 func TestCancelExecEmitsCancelledEvent(t *testing.T) {
@@ -1587,6 +1914,54 @@ func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxService
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return agboxv1.NewSandboxServiceClient(conn)
+}
+
+func newPersistentBufconnHarness(t *testing.T, ctx context.Context, config ServiceConfig, dbPath string) persistentBufconnHarness {
+	t.Helper()
+	if config.runtimeBackend == nil {
+		config.runtimeBackend = fakeRuntimeBackend{}
+	}
+
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	service, closer, err := NewServiceWithPersistentIDStore(ctx, config, dbPath)
+	if err != nil {
+		t.Fatalf("NewServiceWithPersistentIDStore failed: %v", err)
+	}
+	agboxv1.RegisterSandboxServiceServer(server, service)
+	go func() {
+		_ = server.Serve(listener)
+	}()
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient failed: %v", err)
+	}
+
+	var once sync.Once
+	closeFn := func() {
+		once.Do(func() {
+			_ = conn.Close()
+			server.Stop()
+			if closer != nil {
+				if closeErr := closer.Close(); closeErr != nil {
+					t.Fatalf("service closer failed: %v", closeErr)
+				}
+			}
+		})
+	}
+	t.Cleanup(closeFn)
+
+	return persistentBufconnHarness{
+		service: service,
+		client:  agboxv1.NewSandboxServiceClient(conn),
+		close:   closeFn,
+	}
 }
 
 func collectEventsUntil(t *testing.T, stream agboxv1.SandboxService_SubscribeSandboxEventsClient, done func([]*agboxv1.SandboxEvent) bool) []*agboxv1.SandboxEvent {

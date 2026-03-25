@@ -31,6 +31,7 @@ type ServiceConfig struct {
 	TransitionDelay        time.Duration
 	PollInterval           time.Duration
 	IdleTTL                time.Duration
+	EventRetentionTTL      time.Duration
 	StateRoot              string
 	ArtifactOutputRoot     string
 	ArtifactOutputTemplate string
@@ -46,6 +47,7 @@ func DefaultServiceConfig() ServiceConfig {
 		TransitionDelay:        10 * time.Millisecond,
 		PollInterval:           10 * time.Millisecond,
 		IdleTTL:                30 * time.Minute,
+		EventRetentionTTL:      168 * time.Hour,
 		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
 		Version:                "0.1.0",
 		DaemonName:             "agboxd",
@@ -80,6 +82,8 @@ type sandboxRecord struct {
 	execArtifacts             map[string]string
 	nextSequence              uint64
 	lastTerminalRunFinishedAt time.Time
+	deletedAtRecorded         bool
+	recoveredOnly             bool
 }
 
 type eventMutation struct {
@@ -106,6 +110,9 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	}
 	if config.IdleTTL <= 0 {
 		config.IdleTTL = defaults.IdleTTL
+	}
+	if config.EventRetentionTTL <= 0 {
+		config.EventRetentionTTL = defaults.EventRetentionTTL
 	}
 	if config.ArtifactOutputTemplate == "" {
 		config.ArtifactOutputTemplate = defaults.ArtifactOutputTemplate
@@ -181,6 +188,9 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
 	}); err != nil {
+		if releaseErr := s.config.idRegistry.ReleaseSandboxID(sandboxID); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("release sandbox id %s: %w", sandboxID, releaseErr))
+		}
 		return nil, status.Errorf(codes.Internal, "append SANDBOX_ACCEPTED event: %v", err)
 	}
 	s.boxes[sandboxID] = record
@@ -230,6 +240,10 @@ func (s *Service) ResumeSandbox(_ context.Context, req *agboxv1.ResumeSandboxReq
 		s.mu.Unlock()
 		return nil, err
 	}
+	if err := requireMutableSandbox(record); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_STOPPED {
 		s.mu.Unlock()
 		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not stopped", req.GetSandboxId())
@@ -250,6 +264,10 @@ func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest
 	s.mu.Lock()
 	record, err := s.requireSandboxLocked(req.GetSandboxId())
 	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if err := requireMutableSandbox(record); err != nil {
 		s.mu.Unlock()
 		return nil, err
 	}
@@ -275,18 +293,34 @@ func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxReq
 		s.mu.Unlock()
 		return nil, err
 	}
-	if !s.markSandboxDeletingLocked(record, "delete_requested") {
+	if record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+		if !record.deletedAtRecorded {
+			if err := s.config.eventStore.MarkDeleted(req.GetSandboxId(), time.Now()); err != nil {
+				s.mu.Unlock()
+				return nil, status.Errorf(codes.Internal, "mark sandbox deleted: %v", err)
+			}
+			record.deletedAtRecorded = true
+		}
 		s.mu.Unlock()
 		return &agboxv1.AcceptedResponse{Accepted: true}, nil
 	}
-	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
-		reason:       "delete_requested",
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETING,
-	}); err != nil {
+	started, err := s.beginSandboxDeleteLocked(record, "delete_requested")
+	if err != nil {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.Internal, "append SANDBOX_DELETE_REQUESTED event: %v", err)
 	}
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
+	if !started {
+		s.mu.Unlock()
+		return &agboxv1.AcceptedResponse{Accepted: true}, nil
+	}
+	if record.recoveredOnly {
+		if err := s.finishRecoveredSandboxDeleteLocked(record, "delete_requested"); err != nil {
+			s.mu.Unlock()
+			return nil, status.Errorf(codes.Internal, "delete recovered sandbox: %v", err)
+		}
+		s.mu.Unlock()
+		return &agboxv1.AcceptedResponse{Accepted: true}, nil
+	}
 	s.mu.Unlock()
 	go s.completeSandboxDelete(req.GetSandboxId(), "delete_requested")
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
@@ -299,19 +333,34 @@ func (s *Service) DeleteSandboxes(_ context.Context, req *agboxv1.DeleteSandboxe
 
 	s.mu.Lock()
 	sandboxIDs := make([]string, 0)
+	asyncDeleteSandboxIDs := make([]string, 0)
 	for sandboxID, record := range s.boxes {
 		if !matchesLabelSelector(record.handle.GetLabels(), req.GetLabelSelector()) {
 			continue
 		}
-		if !s.markSandboxDeletingLocked(record, "delete_requested") {
+		started, err := s.beginSandboxDeleteLocked(record, "delete_requested")
+		if err != nil {
+			s.mu.Unlock()
+			return nil, status.Errorf(codes.Internal, "append SANDBOX_DELETE_REQUESTED event: %v", err)
+		}
+		if !started {
 			continue
 		}
 		sandboxIDs = append(sandboxIDs, sandboxID)
+		if record.recoveredOnly {
+			if err := s.finishRecoveredSandboxDeleteLocked(record, "delete_requested"); err != nil {
+				s.mu.Unlock()
+				return nil, status.Errorf(codes.Internal, "delete recovered sandbox: %v", err)
+			}
+			continue
+		}
+		asyncDeleteSandboxIDs = append(asyncDeleteSandboxIDs, sandboxID)
 	}
 	s.mu.Unlock()
 
 	slices.Sort(sandboxIDs)
-	for _, sandboxID := range sandboxIDs {
+	slices.Sort(asyncDeleteSandboxIDs)
+	for _, sandboxID := range asyncDeleteSandboxIDs {
 		go s.completeSandboxDelete(sandboxID, "delete_requested")
 	}
 
@@ -393,6 +442,9 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := requireMutableSandbox(record); err != nil {
+		return nil, err
+	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
 		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxNotReady, "sandbox %s is not ready", req.GetSandboxId())
 	}
@@ -403,10 +455,9 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	if err != nil {
 		return nil, err
 	}
-	if artifactPath, artifactErr := s.prepareExecArtifactPath(record.handle.GetSandboxId(), execID); artifactErr != nil {
+	artifactPath, artifactErr := s.prepareExecArtifactPath(record.handle.GetSandboxId(), execID)
+	if artifactErr != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "prepare exec artifact output: %v", artifactErr)
-	} else if artifactPath != "" {
-		record.execArtifacts[execID] = artifactPath
 	}
 	execRecord := &agboxv1.ExecStatus{
 		ExecId:       execID,
@@ -420,7 +471,17 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		execID:    execID,
 		execState: agboxv1.ExecState_EXEC_STATE_RUNNING,
 	}); err != nil {
+		cleanupErr := s.config.idRegistry.ReleaseExecID(execID)
+		if artifactPath != "" {
+			cleanupErr = errors.Join(cleanupErr, os.Remove(artifactPath))
+		}
+		if cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		return nil, status.Errorf(codes.Internal, "append EXEC_STARTED event: %v", err)
+	}
+	if artifactPath != "" {
+		record.execArtifacts[execID] = artifactPath
 	}
 	record.execs[execID] = execRecord
 	s.execs[execID] = req.GetSandboxId()
@@ -596,6 +657,7 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
 		return
 	}
+	record.runtimeState = result.RuntimeState
 	if err := s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
 		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
 		return
@@ -611,7 +673,6 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_READY, err)
 		return
 	}
-	record.runtimeState = result.RuntimeState
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
 	if optionalStatusesOpen {
 		go s.completeOptionalServiceCreate(sandboxID, result.OptionalServiceStatuses)
@@ -741,7 +802,12 @@ func (s *Service) completeSandboxDelete(sandboxID string, reason string) {
 		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_DELETED, err)
 		return
 	}
+	if err := s.config.eventStore.MarkDeleted(sandboxID, time.Now()); err != nil {
+		log.Printf("mark sandbox %s deleted: %v", sandboxID, err)
+		return
+	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETED
+	record.deletedAtRecorded = true
 }
 
 func (s *Service) completeExec(execContext context.Context, execID string) {
@@ -1121,6 +1187,44 @@ func (s *Service) scheduleIdleStop(sandboxID string) {
 	go s.completeSandboxStop(sandboxID, "idle_ttl")
 }
 
+func (s *Service) cleanupExpiredEvents() error {
+	removedSandboxIDs, err := s.config.eventStore.Cleanup(s.config.EventRetentionTTL)
+	if err != nil {
+		return err
+	}
+	if len(removedSandboxIDs) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sandboxID := range removedSandboxIDs {
+		record := s.boxes[sandboxID]
+		if record != nil {
+			for execID := range record.execs {
+				delete(s.execs, execID)
+			}
+		}
+		delete(s.boxes, sandboxID)
+	}
+	return nil
+}
+
+func (s *Service) cleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.cleanupExpiredEvents(); err != nil {
+				log.Printf("cleanup expired sandbox events: %v", err)
+			}
+		}
+	}
+}
+
 func hasActiveExec(record *sandboxRecord) bool {
 	for _, execRecord := range record.execs {
 		if !isExecTerminal(execRecord.GetState()) {
@@ -1226,6 +1330,18 @@ func (s *Service) requireSandboxLocked(sandboxID string) (*sandboxRecord, error)
 	return record, nil
 }
 
+func requireMutableSandbox(record *sandboxRecord) error {
+	if !record.recoveredOnly {
+		return nil
+	}
+	return newStatusError(
+		codes.FailedPrecondition,
+		ReasonSandboxRecoveredOnly,
+		"sandbox %s only has recovered event history",
+		record.handle.GetSandboxId(),
+	)
+}
+
 func (s *Service) requireExecLocked(execID string) (string, *agboxv1.ExecStatus, error) {
 	sandboxID, ok := s.execs[execID]
 	if !ok {
@@ -1299,6 +1415,68 @@ func logAsyncEventAppendFailure(sandboxID string, eventType agboxv1.EventType, e
 		return
 	}
 	log.Printf("append %s event for sandbox %s: %v", eventType.String(), sandboxID, err)
+}
+
+func (s *Service) restorePersistedSandboxes() error {
+	sandboxIDs, err := s.config.eventStore.LoadAllSandboxIDs()
+	if err != nil {
+		return fmt.Errorf("load persisted sandbox ids: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sandboxID := range sandboxIDs {
+		events, err := s.config.eventStore.LoadEvents(sandboxID)
+		if err != nil {
+			return fmt.Errorf("load events for sandbox %s: %w", sandboxID, err)
+		}
+		if len(events) == 0 {
+			continue
+		}
+		maxSequence, err := s.config.eventStore.MaxSequence(sandboxID)
+		if err != nil {
+			return fmt.Errorf("load max sequence for sandbox %s: %w", sandboxID, err)
+		}
+		_, deletedRecorded, err := s.config.eventStore.DeletedAt(sandboxID)
+		if err != nil {
+			return fmt.Errorf("load deleted metadata for sandbox %s: %w", sandboxID, err)
+		}
+		record, err := newRecoveredSandboxRecord(events, maxSequence, deletedRecorded)
+		if err != nil {
+			return fmt.Errorf("restore sandbox %s: %w", sandboxID, err)
+		}
+		s.boxes[sandboxID] = record
+	}
+	return nil
+}
+
+func newRecoveredSandboxRecord(events []*agboxv1.SandboxEvent, maxSequence uint64, deletedRecorded bool) (*sandboxRecord, error) {
+	lastEvent := events[len(events)-1]
+	sandboxState := agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].GetSandboxState() == agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+			continue
+		}
+		sandboxState = events[index].GetSandboxState()
+		break
+	}
+	if sandboxState == agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+		return nil, fmt.Errorf("sandbox %s has no recoverable sandbox state", lastEvent.GetSandboxId())
+	}
+	return &sandboxRecord{
+		handle: &agboxv1.SandboxHandle{
+			SandboxId:       lastEvent.GetSandboxId(),
+			State:           sandboxState,
+			LastEventCursor: lastEvent.GetCursor(),
+		},
+		events:            events,
+		execs:             make(map[string]*agboxv1.ExecStatus),
+		execCancel:        make(map[string]context.CancelFunc),
+		execArtifacts:     make(map[string]string),
+		nextSequence:      maxSequence,
+		deletedAtRecorded: deletedRecorded,
+		recoveredOnly:     true,
+	}, nil
 }
 
 func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {
@@ -1452,20 +1630,37 @@ func matchesLabelSelector(labels map[string]string, selector map[string]string) 
 	return true
 }
 
-func (s *Service) markSandboxDeletingLocked(record *sandboxRecord, reason string) bool {
+func (s *Service) beginSandboxDeleteLocked(record *sandboxRecord, reason string) (bool, error) {
 	if record == nil || record.handle == nil {
-		return false
+		return false, nil
 	}
 	switch record.handle.GetState() {
 	case agboxv1.SandboxState_SANDBOX_STATE_DELETED, agboxv1.SandboxState_SANDBOX_STATE_DELETING:
-		return false
+		return false, nil
 	}
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
 		reason:       reason,
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETING,
-	})
-	return true
+	}); err != nil {
+		return false, err
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
+	return true, nil
+}
+
+func (s *Service) finishRecoveredSandboxDeleteLocked(record *sandboxRecord, reason string) error {
+	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{
+		reason:       reason,
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETED,
+	}); err != nil {
+		return err
+	}
+	if err := s.config.eventStore.MarkDeleted(record.handle.GetSandboxId(), time.Now()); err != nil {
+		return err
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETED
+	record.deletedAtRecorded = true
+	return nil
 }
 
 func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {

@@ -33,7 +33,7 @@ func runWithDeps(
 	lookupEnv func(string) (string, bool),
 	acquireLock func(string) (*hostLock, error),
 	listenAndServe func(context.Context, string, *control.Service) error,
-	newService func(control.ServiceConfig, string) (*control.Service, io.Closer, error),
+	newService func(context.Context, control.ServiceConfig, string) (*control.Service, io.Closer, error),
 ) int {
 	startup, err := resolveStartupConfig(args, lookupEnv)
 	if err != nil {
@@ -50,7 +50,7 @@ func runWithDeps(
 			_, _ = fmt.Fprintln(stderr, releaseErr)
 		}
 	}()
-	service, registryCloser, err := newService(startup.serviceConfig, startup.idStorePath)
+	service, registryCloser, err := newService(ctx, startup.serviceConfig, startup.idStorePath)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

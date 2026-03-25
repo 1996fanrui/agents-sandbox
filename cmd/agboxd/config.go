@@ -20,8 +20,9 @@ type startupConfig struct {
 
 type daemonFileConfig struct {
 	Runtime struct {
-		IdleTTL   string `toml:"idle_ttl"`
-		StateRoot string `toml:"state_root"`
+		IdleTTL           string `toml:"idle_ttl"`
+		EventRetentionTTL string `toml:"event_retention_ttl"`
+		StateRoot         string `toml:"state_root"`
 	} `toml:"runtime"`
 	Artifacts struct {
 		ExecOutputRoot     string `toml:"exec_output_root"`
@@ -93,6 +94,13 @@ func applyFileConfig(
 			return control.ServiceConfig{}, fmt.Errorf("parse runtime.idle_ttl from %s: %w", configPath, err)
 		}
 		serviceConfig.IdleTTL = idleTTL
+	}
+	if fileConfig.Runtime.EventRetentionTTL != "" {
+		eventRetentionTTL, err := time.ParseDuration(fileConfig.Runtime.EventRetentionTTL)
+		if err != nil {
+			return control.ServiceConfig{}, fmt.Errorf("parse runtime.event_retention_ttl from %s: %w", configPath, err)
+		}
+		serviceConfig.EventRetentionTTL = eventRetentionTTL
 	}
 	if fileConfig.Runtime.StateRoot != "" {
 		serviceConfig.StateRoot = fileConfig.Runtime.StateRoot
