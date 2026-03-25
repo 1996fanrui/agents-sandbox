@@ -31,6 +31,7 @@ go.work.sum
 .env
 
 # Local-only files
+.local/
 requirements/
 CLAUDE.md
 AGENTS.md

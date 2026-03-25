@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1"
+	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/control"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
