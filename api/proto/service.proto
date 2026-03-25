@@ -14,6 +14,7 @@ service SandboxService {
   rpc ResumeSandbox(ResumeSandboxRequest) returns (AcceptedResponse);
   rpc StopSandbox(StopSandboxRequest) returns (AcceptedResponse);
   rpc DeleteSandbox(DeleteSandboxRequest) returns (AcceptedResponse);
+  rpc DeleteSandboxes(DeleteSandboxesRequest) returns (DeleteSandboxesResponse);
   rpc SubscribeSandboxEvents(SubscribeSandboxEventsRequest) returns (stream SandboxEvent);
   rpc CreateExec(CreateExecRequest) returns (CreateExecResponse);
   rpc CancelExec(CancelExecRequest) returns (AcceptedResponse);
@@ -113,6 +114,7 @@ message CreateSpec {
   repeated string builtin_resources = 8;
   repeated ServiceSpec required_services = 9;
   repeated ServiceSpec optional_services = 10;
+  map<string, string> labels = 11;
 }
 
 message SandboxHandle {
@@ -123,6 +125,7 @@ message SandboxHandle {
   string last_event_cursor = 6;
   repeated ServiceSpec required_services = 7;
   repeated ServiceSpec optional_services = 8;
+  map<string, string> labels = 9;
 }
 
 message SandboxEvent {
@@ -182,6 +185,7 @@ message GetSandboxResponse {
 message ListSandboxesRequest {
   reserved 1;
   bool include_deleted = 2;
+  map<string, string> label_selector = 3;
 }
 
 message ListSandboxesResponse {
@@ -198,6 +202,15 @@ message StopSandboxRequest {
 
 message DeleteSandboxRequest {
   string sandbox_id = 1;
+}
+
+message DeleteSandboxesRequest {
+  map<string, string> label_selector = 1;
+}
+
+message DeleteSandboxesResponse {
+  repeated string deleted_sandbox_ids = 1;
+  uint32 deleted_count = 2;
 }
 
 message AcceptedResponse {

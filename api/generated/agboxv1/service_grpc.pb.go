@@ -26,6 +26,7 @@ const (
 	SandboxService_ResumeSandbox_FullMethodName          = "/agbox.v1.SandboxService/ResumeSandbox"
 	SandboxService_StopSandbox_FullMethodName            = "/agbox.v1.SandboxService/StopSandbox"
 	SandboxService_DeleteSandbox_FullMethodName          = "/agbox.v1.SandboxService/DeleteSandbox"
+	SandboxService_DeleteSandboxes_FullMethodName        = "/agbox.v1.SandboxService/DeleteSandboxes"
 	SandboxService_SubscribeSandboxEvents_FullMethodName = "/agbox.v1.SandboxService/SubscribeSandboxEvents"
 	SandboxService_CreateExec_FullMethodName             = "/agbox.v1.SandboxService/CreateExec"
 	SandboxService_CancelExec_FullMethodName             = "/agbox.v1.SandboxService/CancelExec"
@@ -44,6 +45,7 @@ type SandboxServiceClient interface {
 	ResumeSandbox(ctx context.Context, in *ResumeSandboxRequest, opts ...grpc.CallOption) (*AcceptedResponse, error)
 	StopSandbox(ctx context.Context, in *StopSandboxRequest, opts ...grpc.CallOption) (*AcceptedResponse, error)
 	DeleteSandbox(ctx context.Context, in *DeleteSandboxRequest, opts ...grpc.CallOption) (*AcceptedResponse, error)
+	DeleteSandboxes(ctx context.Context, in *DeleteSandboxesRequest, opts ...grpc.CallOption) (*DeleteSandboxesResponse, error)
 	SubscribeSandboxEvents(ctx context.Context, in *SubscribeSandboxEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SandboxEvent], error)
 	CreateExec(ctx context.Context, in *CreateExecRequest, opts ...grpc.CallOption) (*CreateExecResponse, error)
 	CancelExec(ctx context.Context, in *CancelExecRequest, opts ...grpc.CallOption) (*AcceptedResponse, error)
@@ -129,6 +131,16 @@ func (c *sandboxServiceClient) DeleteSandbox(ctx context.Context, in *DeleteSand
 	return out, nil
 }
 
+func (c *sandboxServiceClient) DeleteSandboxes(ctx context.Context, in *DeleteSandboxesRequest, opts ...grpc.CallOption) (*DeleteSandboxesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteSandboxesResponse)
+	err := c.cc.Invoke(ctx, SandboxService_DeleteSandboxes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sandboxServiceClient) SubscribeSandboxEvents(ctx context.Context, in *SubscribeSandboxEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SandboxEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &SandboxService_ServiceDesc.Streams[0], SandboxService_SubscribeSandboxEvents_FullMethodName, cOpts...)
@@ -199,6 +211,7 @@ type SandboxServiceServer interface {
 	ResumeSandbox(context.Context, *ResumeSandboxRequest) (*AcceptedResponse, error)
 	StopSandbox(context.Context, *StopSandboxRequest) (*AcceptedResponse, error)
 	DeleteSandbox(context.Context, *DeleteSandboxRequest) (*AcceptedResponse, error)
+	DeleteSandboxes(context.Context, *DeleteSandboxesRequest) (*DeleteSandboxesResponse, error)
 	SubscribeSandboxEvents(*SubscribeSandboxEventsRequest, grpc.ServerStreamingServer[SandboxEvent]) error
 	CreateExec(context.Context, *CreateExecRequest) (*CreateExecResponse, error)
 	CancelExec(context.Context, *CancelExecRequest) (*AcceptedResponse, error)
@@ -234,6 +247,9 @@ func (UnimplementedSandboxServiceServer) StopSandbox(context.Context, *StopSandb
 }
 func (UnimplementedSandboxServiceServer) DeleteSandbox(context.Context, *DeleteSandboxRequest) (*AcceptedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSandbox not implemented")
+}
+func (UnimplementedSandboxServiceServer) DeleteSandboxes(context.Context, *DeleteSandboxesRequest) (*DeleteSandboxesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteSandboxes not implemented")
 }
 func (UnimplementedSandboxServiceServer) SubscribeSandboxEvents(*SubscribeSandboxEventsRequest, grpc.ServerStreamingServer[SandboxEvent]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeSandboxEvents not implemented")
@@ -397,6 +413,24 @@ func _SandboxService_DeleteSandbox_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SandboxService_DeleteSandboxes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSandboxesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).DeleteSandboxes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_DeleteSandboxes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).DeleteSandboxes(ctx, req.(*DeleteSandboxesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SandboxService_SubscribeSandboxEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(SubscribeSandboxEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -514,6 +548,10 @@ var SandboxService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteSandbox",
 			Handler:    _SandboxService_DeleteSandbox_Handler,
+		},
+		{
+			MethodName: "DeleteSandboxes",
+			Handler:    _SandboxService_DeleteSandboxes_Handler,
 		},
 		{
 			MethodName: "CreateExec",
