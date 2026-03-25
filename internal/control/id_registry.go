@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,8 @@ type idRegistry interface {
 	io.Closer
 	ReserveSandboxID(string, time.Time) error
 	ReserveExecID(string, time.Time) error
+	ReleaseSandboxID(string) error
+	ReleaseExecID(string) error
 }
 
 type memoryIDRegistry struct {
@@ -51,6 +54,20 @@ func (registry *memoryIDRegistry) ReserveExecID(id string, createdAt time.Time) 
 	return registry.reserve(registry.execIDs, id, createdAt, errExecIDAlreadyExists)
 }
 
+func (registry *memoryIDRegistry) ReleaseSandboxID(id string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	delete(registry.sandboxIDs, id)
+	return nil
+}
+
+func (registry *memoryIDRegistry) ReleaseExecID(id string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	delete(registry.execIDs, id)
+	return nil
+}
+
 func (registry *memoryIDRegistry) reserve(ids map[string]string, id string, createdAt time.Time, duplicateErr error) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -62,7 +79,8 @@ func (registry *memoryIDRegistry) reserve(ids map[string]string, id string, crea
 }
 
 type persistentIDRegistry struct {
-	db *bbolt.DB
+	db      *bbolt.DB
+	closeDB bool
 }
 
 type combinedServiceCloser struct {
@@ -97,7 +115,7 @@ func joinServiceClosers(runtimeCloser io.Closer, registryCloser io.Closer) io.Cl
 	}
 }
 
-func openPersistentIDRegistry(path string) (*persistentIDRegistry, error) {
+func openBoltDB(path string) (*bbolt.DB, error) {
 	if path == "" {
 		return nil, errors.New("id store path is required")
 	}
@@ -115,15 +133,33 @@ func openPersistentIDRegistry(path string) (*persistentIDRegistry, error) {
 		if _, err := tx.CreateBucketIfNotExists(execIDBucket); err != nil {
 			return fmt.Errorf("create bucket %q: %w", execIDBucket, err)
 		}
+		if _, err := tx.CreateBucketIfNotExists(eventMetaBucket); err != nil {
+			return fmt.Errorf("create bucket %q: %w", eventMetaBucket, err)
+		}
 		return nil
 	}); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &persistentIDRegistry{db: db}, nil
+	return db, nil
+}
+
+func newPersistentIDRegistry(db *bbolt.DB) *persistentIDRegistry {
+	return &persistentIDRegistry{db: db}
+}
+
+func openPersistentIDRegistry(path string) (*persistentIDRegistry, error) {
+	db, err := openBoltDB(path)
+	if err != nil {
+		return nil, err
+	}
+	return &persistentIDRegistry{db: db, closeDB: true}, nil
 }
 
 func (registry *persistentIDRegistry) Close() error {
+	if !registry.closeDB {
+		return nil
+	}
 	return registry.db.Close()
 }
 
@@ -133,6 +169,14 @@ func (registry *persistentIDRegistry) ReserveSandboxID(id string, createdAt time
 
 func (registry *persistentIDRegistry) ReserveExecID(id string, createdAt time.Time) error {
 	return registry.reserve(execIDBucket, id, createdAt, errExecIDAlreadyExists)
+}
+
+func (registry *persistentIDRegistry) ReleaseSandboxID(id string) error {
+	return registry.release(sandboxIDBucket, id)
+}
+
+func (registry *persistentIDRegistry) ReleaseExecID(id string) error {
+	return registry.release(execIDBucket, id)
 }
 
 func (registry *persistentIDRegistry) reserve(bucketName []byte, id string, createdAt time.Time, duplicateErr error) error {
@@ -149,16 +193,37 @@ func (registry *persistentIDRegistry) reserve(bucketName []byte, id string, crea
 	})
 }
 
-// NewServiceWithPersistentIDStore builds a service backed by a persistent ID registry.
-func NewServiceWithPersistentIDStore(config ServiceConfig, path string) (*Service, io.Closer, error) {
-	registry, err := openPersistentIDRegistry(path)
+func (registry *persistentIDRegistry) release(bucketName []byte, id string) error {
+	return registry.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(bucketName)
+		if bucket == nil {
+			return fmt.Errorf("bucket %q is missing", bucketName)
+		}
+		return bucket.Delete([]byte(id))
+	})
+}
+
+// NewServiceWithPersistentIDStore builds a service backed by persistent ID and event stores.
+func NewServiceWithPersistentIDStore(ctx context.Context, config ServiceConfig, path string) (*Service, io.Closer, error) {
+	db, err := openBoltDB(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize id store %s: %w", path, err)
 	}
-	config.idRegistry = registry
+	config.idRegistry = newPersistentIDRegistry(db)
+	config.eventStore = newPersistentEventStore(db)
 	service, runtimeCloser, err := NewService(config)
 	if err != nil {
-		return nil, nil, errors.Join(err, registry.Close())
+		return nil, nil, errors.Join(err, db.Close())
 	}
-	return service, joinServiceClosers(runtimeCloser, registry), nil
+	if err := service.restorePersistedSandboxes(); err != nil {
+		return nil, nil, errors.Join(err, closeCloser(runtimeCloser), db.Close())
+	}
+	if err := service.cleanupExpiredEvents(); err != nil {
+		return nil, nil, errors.Join(err, closeCloser(runtimeCloser), db.Close())
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go service.cleanupLoop(ctx)
+	return service, joinServiceClosers(runtimeCloser, db), nil
 }

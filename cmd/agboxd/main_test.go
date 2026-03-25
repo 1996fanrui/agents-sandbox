@@ -100,6 +100,39 @@ idle_ttl = "never"
 	}
 }
 
+func TestEventRetentionTTLConfig(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
+	}
+
+	t.Run("explicit", func(t *testing.T) {
+		lookupEnv := fixedPathLookupEnv(t)
+		writeDaemonConfig(t, lookupEnv, `
+[runtime]
+event_retention_ttl = "24h"
+`)
+
+		startup, err := resolveStartupConfig(nil, lookupEnv)
+		if err != nil {
+			t.Fatalf("resolveStartupConfig returned error: %v", err)
+		}
+		if startup.serviceConfig.EventRetentionTTL != 24*time.Hour {
+			t.Fatalf("unexpected event retention ttl: got %s want %s", startup.serviceConfig.EventRetentionTTL, 24*time.Hour)
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		lookupEnv := fixedPathLookupEnv(t)
+		startup, err := resolveStartupConfig(nil, lookupEnv)
+		if err != nil {
+			t.Fatalf("resolveStartupConfig returned error: %v", err)
+		}
+		if startup.serviceConfig.EventRetentionTTL != 168*time.Hour {
+			t.Fatalf("unexpected default event retention ttl: got %s want %s", startup.serviceConfig.EventRetentionTTL, 168*time.Hour)
+		}
+	})
+}
+
 func TestRunWithDepsUsesResolvedLockPath(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS uses a shared fixed home-directory config path")
