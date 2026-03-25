@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
+	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -71,6 +72,9 @@ func resolveStartupConfig(args []string, lookupEnv func(string) (string, bool)) 
 	}
 	if parsedFlags.socketPathFromEnv || parsedFlags.socketPathProvided {
 		socketPath = parsedFlags.socketPath
+	}
+	if serviceConfig.ArtifactOutputRoot == "" {
+		serviceConfig.ArtifactOutputRoot = defaultArtifactOutputRoot(lookupEnv)
 	}
 	return startupConfig{
 		socketPath:    socketPath,
@@ -137,26 +141,11 @@ func loadDaemonFileConfig(path string) (daemonFileConfig, error) {
 }
 
 func detectDefaultConfigPath(lookupEnv func(string) (string, bool)) string {
-	var candidate string
-	switch runtime.GOOS {
-	case "darwin":
-		if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
-			candidate = filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "config.toml")
-		}
-	default:
-		configRoot := ""
-		if envValue, ok := lookupEnv("XDG_CONFIG_HOME"); ok && envValue != "" {
-			configRoot = envValue
-		} else if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
-			configRoot = filepath.Join(homeDir, ".config")
-		}
-		if configRoot != "" {
-			candidate = filepath.Join(configRoot, "agents-sandbox", "config.toml")
-		}
-	}
-	if candidate == "" {
+	configRoot := platform.ConfigDir(lookupEnv)
+	if configRoot == "" {
 		return ""
 	}
+	candidate := filepath.Join(configRoot, "agents-sandbox", "config.toml")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}
@@ -166,15 +155,22 @@ func detectDefaultConfigPath(lookupEnv func(string) (string, bool)) string {
 func defaultSocketPathForPlatform(lookupEnv func(string) (string, bool)) string {
 	switch runtime.GOOS {
 	case "darwin":
-		if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
-			return filepath.Join(homeDir, "Library", "Application Support", "agbox", "run", "agboxd.sock")
+		if appSupport := platform.RuntimeDir(lookupEnv); appSupport != "" {
+			return filepath.Join(appSupport, "agbox", "run", "agboxd.sock")
 		}
 	default:
-		if runtimeDir, ok := lookupEnv("XDG_RUNTIME_DIR"); ok && runtimeDir != "" {
+		if runtimeDir := platform.RuntimeDir(lookupEnv); runtimeDir != "" {
 			return filepath.Join(runtimeDir, "agbox", "agboxd.sock")
 		}
 	}
 	return defaultSocketPath
+}
+
+func defaultArtifactOutputRoot(lookupEnv func(string) (string, bool)) string {
+	if dataDir := platform.DataDir(lookupEnv); dataDir != "" {
+		return filepath.Join(dataDir, "agents-sandbox", "artifacts")
+	}
+	return ""
 }
 
 func applyFileConfig(

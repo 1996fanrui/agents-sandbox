@@ -40,7 +40,7 @@ func DefaultServiceConfig() ServiceConfig {
 		TransitionDelay:        10 * time.Millisecond,
 		PollInterval:           10 * time.Millisecond,
 		IdleTTL:                30 * time.Minute,
-		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.jsonl",
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
 		Version:                "0.1.0",
 		DaemonName:             "agboxd",
 	}

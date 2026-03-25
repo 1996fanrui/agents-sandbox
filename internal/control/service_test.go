@@ -101,7 +101,7 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 		TransitionDelay:        5 * time.Millisecond,
 		PollInterval:           2 * time.Millisecond,
 		ArtifactOutputRoot:     artifactRoot,
-		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.jsonl",
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("workspace-1", "ghcr.io/agents-sandbox/coding-runtime:test"))
@@ -119,7 +119,7 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 	}
 	waitForExecState(t, client, execResp.GetExecId(), agboxv1.ExecState_EXEC_STATE_FINISHED)
 
-	artifactPath := filepath.Join(artifactRoot, createResp.GetSandboxId(), execResp.GetExecId()+".jsonl")
+	artifactPath := filepath.Join(artifactRoot, createResp.GetSandboxId(), execResp.GetExecId()+".log")
 	content, err := os.ReadFile(artifactPath)
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
@@ -140,7 +140,7 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 func TestCreateExecFailsFastWhenArtifactTemplateEscapesRoot(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		ArtifactOutputRoot:     t.TempDir(),
-		ArtifactOutputTemplate: "../escape.jsonl",
+		ArtifactOutputTemplate: "../escape.log",
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("workspace-escape", "ghcr.io/agents-sandbox/coding-runtime:test"))

@@ -31,7 +31,7 @@ flowchart LR
 ### Primary request and event flow
 
 1. A client sends a gRPC request over the Unix socket.
-2. The service performs synchronous fail-fast validation for invalid owners, create inputs, dependencies, builtin resource IDs, and exec command shape.
+2. The service performs synchronous fail-fast validation for create inputs, service declarations, builtin resource IDs, duplicate caller-provided IDs, and exec command shape.
 3. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
 4. The runtime backend performs Docker-side work and reports results back to the service.
 5. The service updates authoritative sandbox or exec state, appends ordered events with `cursor` and `sequence`, and exposes the latest snapshot through `GetSandbox` and `GetExec`.
@@ -45,7 +45,7 @@ The daemon creates, resumes, stops, deletes, and lists sandboxes. Each sandbox g
 
 - one primary container
 - one dedicated Docker network
-- zero or more dependency containers
+- zero or more service containers (required and optional)
 - ordered lifecycle and exec events
 
 This is the core path for products that need an isolated coding or execution environment with explicit lifecycle ownership.
@@ -74,7 +74,7 @@ These cover common scenarios such as:
 - copying seed files or fixture data into a sandbox
 - exposing operator tooling such as `.claude`, `.codex`, `gh-auth`, `uv`, or `ssh-agent`
 
-Dependencies are declared explicitly and become sibling containers on the sandbox network. This supports cases such as adding a database or service sidecar next to the primary runtime image.
+Services are declared explicitly as `required_services` or `optional_services` and become sibling containers on the sandbox network. Required services must be healthy before the primary is reported ready; optional services start in parallel and only emit warnings on failure. This supports cases such as adding a database or service sidecar next to the primary runtime image.
 
 ### Event subscription and replay
 
@@ -92,8 +92,8 @@ This supports long-running orchestration, reconnect after temporary client loss,
 ### Runtime and deployment constraints
 
 - The system is Docker-first. Runtime lifecycle, networking, container creation, and exec execution depend on a reachable Docker daemon.
-- The daemon is a single-writer local control plane. It acquires an exclusive host lock derived from the effective socket path and refuses to start if another daemon already owns that lock.
-- gRPC transport is exposed over a Unix domain socket only. The public defaults are `AGBOX_SOCKET` first, then platform-specific local paths.
+- The daemon is a single-writer local control plane. It acquires an exclusive host lock at a hardcoded platform path and refuses to start if another daemon already owns that lock.
+- gRPC transport is exposed over a Unix domain socket only, at a hardcoded platform-specific path (not configurable).
 - The current service keeps sandbox records, exec records, and event history in memory. Event replay works for the daemon process lifetime, but a daemon restart resets replay history for active sandboxes.
 
 ### Filesystem and security constraints
@@ -136,7 +136,7 @@ Capabilities such as `.claude`, `.codex`, `uv`, `npm`, and `ssh-agent` are resol
 
 ### Cleanup and ownership stay runtime-local
 
-The daemon derives ownership from in-memory sandbox state plus namespaced Docker labels, and it removes primary containers, dependency containers, dedicated networks, and daemon-owned filesystem state during delete and failed create cleanup. This keeps runtime cleanup independent from any external product database.
+The daemon derives ownership from in-memory sandbox state plus namespaced Docker labels, and it removes primary containers, service containers (both required and optional), dedicated networks, and daemon-owned filesystem state during delete and failed create cleanup. This keeps runtime cleanup independent from any external product database.
 
 ## Proto Generation
 

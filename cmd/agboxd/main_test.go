@@ -56,7 +56,7 @@ idle_ttl = "75s"
 
 [artifacts]
 exec_output_root = "/tmp/artifacts"
-exec_output_template = "{sandbox_id}/{exec_id}.jsonl"
+exec_output_template = "{sandbox_id}/{exec_id}.log"
 `), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -80,6 +80,25 @@ exec_output_template = "{sandbox_id}/{exec_id}.jsonl"
 	}
 	if startup.serviceConfig.ArtifactOutputRoot != "/tmp/artifacts" {
 		t.Fatalf("unexpected artifact output root: got %q", startup.serviceConfig.ArtifactOutputRoot)
+	}
+}
+
+func TestResolveStartupConfigDefaultArtifactOutputRoot(t *testing.T) {
+	dataHome := t.TempDir()
+	startup, err := resolveStartupConfig(nil, func(key string) (string, bool) {
+		switch key {
+		case "XDG_DATA_HOME":
+			return dataHome, true
+		default:
+			return "", false
+		}
+	})
+	if err != nil {
+		t.Fatalf("resolveStartupConfig returned error: %v", err)
+	}
+	want := filepath.Join(dataHome, "agents-sandbox", "artifacts")
+	if startup.serviceConfig.ArtifactOutputRoot != want {
+		t.Fatalf("unexpected default artifact output root: got %q want %q", startup.serviceConfig.ArtifactOutputRoot, want)
 	}
 }
 
