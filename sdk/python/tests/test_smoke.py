@@ -37,7 +37,7 @@ from agents_sandbox import (
 )
 from agents_sandbox._generated import service_pb2, service_pb2_grpc
 from agents_sandbox.conversions import to_exec_handle
-from agents_sandbox.high_level_client import _resolve_default_socket_path
+from agents_sandbox.client import _resolve_default_socket_path
 from agents_sandbox.types import CallerMetadata
 
 
@@ -284,8 +284,8 @@ def test_create_sandbox_sandbox_owner_serializes_explicit_and_generated_owner(
                 )
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
-    monkeypatch.setattr("agents_sandbox.high_level_client.uuid.uuid4", lambda: "generated-owner")
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.uuid.uuid4", lambda: "generated-owner")
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -330,7 +330,7 @@ def test_create_sandbox_mounts_copies_and_builtin_resources_serialize_to_proto(
                 )
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -393,7 +393,7 @@ def test_create_exec_cwd_and_env_overrides_default_to_workspace_and_empty_map(
                 )
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -469,7 +469,7 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
                 exit_code=0,
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> ExecHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -552,7 +552,7 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
                 sandbox_state=service_pb2.SANDBOX_STATE_READY,
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> SandboxHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -599,7 +599,7 @@ def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_termina
             _FakeRawSandboxClient.subscribe_calls += 1
             raise AssertionError("subscribe should not run when the baseline is already terminal")
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> SandboxHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -738,7 +738,7 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
                 sandbox_state=service_pb2.SANDBOX_STATE_DELETED,
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> tuple[SandboxHandle, SandboxHandle, SandboxHandle, SandboxHandle, SandboxHandle, SandboxHandle]:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -852,7 +852,7 @@ def test_agents_sandbox_client_waits_for_exec_terminal_with_replay_dedupe(
                 exit_code=0,
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> ExecHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
@@ -932,7 +932,7 @@ def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
                 exit_code=0,
             )
 
-    monkeypatch.setattr("agents_sandbox.high_level_client.RawSandboxClient", _FakeRawSandboxClient)
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> tuple[ExecHandle, ExecHandle]:
         client = _new_client("/tmp/agents-sandbox.sock")
