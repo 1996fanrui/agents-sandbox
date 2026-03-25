@@ -8,12 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -25,6 +23,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 type runtimeBackend interface {
@@ -278,7 +277,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 	for _, service := range record.requiredServices {
 		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, _, err := dockerExec(ctx, dockerExecSpec{
+			if _, _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: state.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
 			}); err != nil {
@@ -323,7 +322,7 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	}
 	for _, service := range record.requiredServices {
 		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, _, err := dockerExec(ctx, dockerExecSpec{
+			if _, _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: record.runtimeState.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
 			}); err != nil {
@@ -455,7 +454,7 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeExecResult{}, err
 	}
-	output, exitCode, err := dockerExec(ctx, dockerExecSpec{
+	output, exitCode, err := backend.dockerExec(ctx, dockerExecSpec{
 		ContainerName: record.runtimeState.PrimaryContainerName,
 		Command:       execRecord.GetCommand(),
 		Workdir:       execRecord.GetCwd(),
@@ -1225,21 +1224,62 @@ type dockerExecOutput struct {
 	Stderr string
 }
 
-func dockerExec(ctx context.Context, spec dockerExecSpec) (dockerExecOutput, int32, error) {
+func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec dockerExecSpec) (dockerExecOutput, int32, error) {
 	if len(spec.Command) == 0 {
 		return dockerExecOutput{}, 0, errors.New("exec command must not be empty")
 	}
-	args := []string{"exec"}
-	if spec.Workdir != "" {
-		args = append(args, "--workdir", spec.Workdir)
+	if backend == nil || backend.dockerClient == nil {
+		return dockerExecOutput{}, 0, errors.New("docker client is not initialized")
 	}
-	for key, value := range spec.Environment {
-		args = append(args, "--env", key+"="+value)
+
+	createResponse, err := backend.dockerClient.ContainerExecCreate(ctx, spec.ContainerName, container.ExecOptions{
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          false,
+		Env:          envMapToSlice(spec.Environment),
+		WorkingDir:   spec.Workdir,
+		Cmd:          spec.Command,
+	})
+	if err != nil {
+		return dockerExecOutput{}, 0, err
 	}
-	args = append(args, spec.ContainerName)
-	args = append(args, spec.Command...)
-	output, exitCode, err := runDockerWithExitCode(ctx, args...)
-	return output, exitCode, err
+
+	attachResponse, err := backend.dockerClient.ContainerExecAttach(ctx, createResponse.ID, container.ExecAttachOptions{Tty: false})
+	if err != nil {
+		return dockerExecOutput{}, 0, err
+	}
+	defer attachResponse.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, attachResponse.Reader); err != nil {
+		if ctx.Err() != nil {
+			return dockerExecOutput{}, -1, ctx.Err()
+		}
+		return dockerExecOutput{
+			Stdout: strings.TrimSpace(stdout.String()),
+			Stderr: strings.TrimSpace(stderr.String()),
+		}, -1, fmt.Errorf("read docker exec output: %w", err)
+	}
+
+	inspectResponse, err := backend.dockerClient.ContainerExecInspect(ctx, createResponse.ID)
+	output := dockerExecOutput{
+		Stdout: strings.TrimSpace(stdout.String()),
+		Stderr: strings.TrimSpace(stderr.String()),
+	}
+	if err != nil {
+		return output, -1, err
+	}
+
+	exitCode := int32(inspectResponse.ExitCode)
+	if exitCode != 0 {
+		message := strings.TrimSpace(strings.Join([]string{output.Stderr, output.Stdout}, "\n"))
+		if message == "" {
+			message = fmt.Sprintf("exit code %d", exitCode)
+		}
+		return output, exitCode, fmt.Errorf("docker exec failed: %s", message)
+	}
+	return output, exitCode, nil
 }
 
 func toContainerHealthConfig(healthcheck *agboxv1.HealthcheckConfig) (*container.HealthConfig, error) {
@@ -1296,37 +1336,4 @@ func envMapToSlice(environment map[string]string) []string {
 
 func ptrTo[T any](value T) *T {
 	return &value
-}
-
-func runDocker(ctx context.Context, args ...string) (string, error) {
-	output, _, err := runDockerWithExitCode(ctx, args...)
-	return output.Stdout, err
-}
-
-func runDockerWithExitCode(ctx context.Context, args ...string) (dockerExecOutput, int32, error) {
-	command := exec.CommandContext(ctx, "docker", args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-	output := dockerExecOutput{
-		Stdout: strings.TrimSpace(stdout.String()),
-		Stderr: strings.TrimSpace(stderr.String()),
-	}
-	if err == nil {
-		return output, 0, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		message := strings.TrimSpace(strings.Join([]string{output.Stderr, output.Stdout}, "\n"))
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-			return output, int32(status.ExitStatus()), fmt.Errorf("docker %s failed: %s", strings.Join(args, " "), message)
-		}
-		return output, int32(exitErr.ExitCode()), fmt.Errorf("docker %s failed: %s", strings.Join(args, " "), message)
-	}
-	if ctx.Err() != nil {
-		return output, -1, ctx.Err()
-	}
-	return output, -1, fmt.Errorf("docker %s failed: %w", strings.Join(args, " "), err)
 }

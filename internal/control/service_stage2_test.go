@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -542,6 +544,108 @@ func TestDockerContainerStopReturnsNilForMissingContainer(t *testing.T) {
 	}
 }
 
+func TestDockerExecUsesSDKAndPreservesStreams(t *testing.T) {
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		switch {
+		case r.Method == http.MethodPost && path == "/containers/primary/exec":
+			var request container.ExecOptions
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode exec create request failed: %v", err)
+			}
+			if !reflect.DeepEqual(request.Cmd, []string{"sh", "-lc", "echo hello"}) {
+				t.Fatalf("unexpected exec command: %#v", request.Cmd)
+			}
+			if request.WorkingDir != "/workspace" {
+				t.Fatalf("unexpected working dir: %q", request.WorkingDir)
+			}
+			if !slices.Equal(request.Env, []string{"FOO=bar"}) {
+				t.Fatalf("unexpected env: %#v", request.Env)
+			}
+			if !request.AttachStdout || !request.AttachStderr || request.Tty {
+				t.Fatalf("unexpected attach settings: %#v", request)
+			}
+			writeDockerJSON(t, w, map[string]string{"Id": "exec-1"})
+		case r.Method == http.MethodPost && path == "/exec/exec-1/start":
+			var request container.ExecStartOptions
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode exec start request failed: %v", err)
+			}
+			if request.Detach || request.Tty {
+				t.Fatalf("unexpected exec start options: %#v", request)
+			}
+			writeHijackedDockerStream(t, w, func(writer io.Writer) {
+				if _, err := stdcopy.NewStdWriter(writer, stdcopy.Stdout).Write([]byte("hello")); err != nil {
+					t.Fatalf("write stdout stream failed: %v", err)
+				}
+				if _, err := stdcopy.NewStdWriter(writer, stdcopy.Stderr).Write([]byte("warning")); err != nil {
+					t.Fatalf("write stderr stream failed: %v", err)
+				}
+			})
+		case r.Method == http.MethodGet && path == "/exec/exec-1/json":
+			writeDockerJSON(t, w, container.ExecInspect{ExecID: "exec-1", Running: false, ExitCode: 0})
+		default:
+			t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	output, exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
+		ContainerName: "primary",
+		Command:       []string{"sh", "-lc", "echo hello"},
+		Workdir:       "/workspace",
+		Environment:   map[string]string{"FOO": "bar"},
+	})
+	if err != nil {
+		t.Fatalf("dockerExec returned error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("unexpected exit code: %d", exitCode)
+	}
+	if output.Stdout != "hello" || output.Stderr != "warning" {
+		t.Fatalf("unexpected exec output: %#v", output)
+	}
+}
+
+func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		switch {
+		case r.Method == http.MethodPost && path == "/containers/primary/exec":
+			writeDockerJSON(t, w, map[string]string{"Id": "exec-2"})
+		case r.Method == http.MethodPost && path == "/exec/exec-2/start":
+			writeHijackedDockerStream(t, w, func(writer io.Writer) {
+				if _, err := stdcopy.NewStdWriter(writer, stdcopy.Stdout).Write([]byte("partial")); err != nil {
+					t.Fatalf("write stdout stream failed: %v", err)
+				}
+				if _, err := stdcopy.NewStdWriter(writer, stdcopy.Stderr).Write([]byte("boom")); err != nil {
+					t.Fatalf("write stderr stream failed: %v", err)
+				}
+			})
+		case r.Method == http.MethodGet && path == "/exec/exec-2/json":
+			writeDockerJSON(t, w, container.ExecInspect{ExecID: "exec-2", Running: false, ExitCode: 42})
+		default:
+			t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	output, exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
+		ContainerName: "primary",
+		Command:       []string{"false"},
+	})
+	if err == nil {
+		t.Fatal("expected dockerExec to fail for non-zero exit code")
+	}
+	if exitCode != 42 {
+		t.Fatalf("unexpected exit code: %d err=%v output=%#v", exitCode, err, output)
+	}
+	if output.Stdout != "partial" || output.Stderr != "boom" {
+		t.Fatalf("unexpected exec output: %#v", output)
+	}
+	if !strings.Contains(err.Error(), "docker exec failed") {
+		t.Fatalf("unexpected exec error: %v", err)
+	}
+}
+
 func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWriter, *http.Request)) *dockerRuntimeBackend {
 	t.Helper()
 
@@ -576,6 +680,34 @@ func writeDockerJSON(t *testing.T, w http.ResponseWriter, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		t.Fatalf("encode Docker API response failed: %v", err)
 	}
+}
+
+func writeHijackedDockerStream(t *testing.T, w http.ResponseWriter, writePayload func(io.Writer)) {
+	t.Helper()
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		t.Fatal("response writer does not support hijacking")
+	}
+	conn, buffer, err := hijacker.Hijack()
+	if err != nil {
+		t.Fatalf("hijack failed: %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := buffer.WriteString(
+		"HTTP/1.1 101 UPGRADED\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Upgrade: tcp\r\n" +
+			"Content-Type: application/vnd.docker.raw-stream\r\n\r\n",
+	); err != nil {
+		t.Fatalf("write hijack headers failed: %v", err)
+	}
+	if err := buffer.Flush(); err != nil {
+		t.Fatalf("flush hijack headers failed: %v", err)
+	}
+
+	writePayload(conn)
 }
 
 func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
