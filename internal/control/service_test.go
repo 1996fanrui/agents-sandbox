@@ -685,6 +685,271 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.
 	}
 }
 
+func TestCreateSandboxWithLabels(t *testing.T) {
+	runtime := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  runtime,
+	})
+	request := createSandboxRequest("session-with-labels", "ghcr.io/agents-sandbox/coding-runtime:test")
+	request.CreateSpec.Labels = map[string]string{
+		"owner": "team-a",
+		"env":   "dev",
+	}
+
+	createResp, err := client.CreateSandbox(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	request.CreateSpec.Labels["owner"] = "mutated"
+	request.CreateSpec.Labels["new"] = "value"
+	if !reflect.DeepEqual(runtime.lastCreateSpec.GetLabels(), map[string]string{"owner": "team-a", "env": "dev"}) {
+		t.Fatalf("runtime labels were not cloned: %#v", runtime.lastCreateSpec.GetLabels())
+	}
+
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if !reflect.DeepEqual(getResp.GetSandbox().GetLabels(), map[string]string{"owner": "team-a", "env": "dev"}) {
+		t.Fatalf("unexpected sandbox labels: %#v", getResp.GetSandbox().GetLabels())
+	}
+
+	getResp.Sandbox.Labels["owner"] = "changed"
+	verifyResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err != nil {
+		t.Fatalf("GetSandbox verify failed: %v", err)
+	}
+	if verifyResp.GetSandbox().GetLabels()["owner"] != "team-a" {
+		t.Fatalf("sandbox labels should be returned as clones: %#v", verifyResp.GetSandbox().GetLabels())
+	}
+}
+
+func TestCreateSandboxWithoutLabels(t *testing.T) {
+	runtime := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  runtime,
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-without-labels", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if len(getResp.GetSandbox().GetLabels()) != 0 {
+		t.Fatalf("expected no labels, got %#v", getResp.GetSandbox().GetLabels())
+	}
+	if len(runtime.lastCreateSpec.GetLabels()) != 0 {
+		t.Fatalf("expected runtime labels to stay empty, got %#v", runtime.lastCreateSpec.GetLabels())
+	}
+}
+
+func TestCreateSandboxLabelsNoValidation(t *testing.T) {
+	runtime := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  runtime,
+	})
+	longKey := strings.Repeat("k", 1024)
+	longValue := strings.Repeat("v", 2048)
+	request := createSandboxRequest("session-labels-no-validation", "ghcr.io/agents-sandbox/coding-runtime:test")
+	request.CreateSpec.Labels = map[string]string{longKey: longValue}
+
+	createResp, err := client.CreateSandbox(context.Background(), request)
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if got := getResp.GetSandbox().GetLabels()[longKey]; got != longValue {
+		t.Fatalf("unexpected long label value: got %q want %q", got, longValue)
+	}
+}
+
+func TestListSandboxesWithLabelSelector(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	for _, item := range []struct {
+		sandboxID string
+		labels    map[string]string
+	}{
+		{sandboxID: "selector-api-dev", labels: map[string]string{"env": "dev", "tier": "api"}},
+		{sandboxID: "selector-worker-dev", labels: map[string]string{"env": "dev", "tier": "worker"}},
+		{sandboxID: "selector-api-prod", labels: map[string]string{"env": "prod", "tier": "api"}},
+	} {
+		request := createSandboxRequest(item.sandboxID, "ghcr.io/agents-sandbox/coding-runtime:test")
+		request.CreateSpec.Labels = item.labels
+		if _, err := client.CreateSandbox(context.Background(), request); err != nil {
+			t.Fatalf("CreateSandbox(%s) failed: %v", item.sandboxID, err)
+		}
+		waitForSandboxState(t, client, item.sandboxID, agboxv1.SandboxState_SANDBOX_STATE_READY)
+	}
+
+	listAll, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{})
+	if err != nil {
+		t.Fatalf("ListSandboxes(all) failed: %v", err)
+	}
+	if got := sandboxIDs(listAll.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-dev", "selector-api-prod", "selector-worker-dev"}) {
+		t.Fatalf("unexpected all sandboxes: %#v", got)
+	}
+
+	listEnv, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{
+		LabelSelector: map[string]string{"env": "dev"},
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxes(env) failed: %v", err)
+	}
+	if got := sandboxIDs(listEnv.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-dev", "selector-worker-dev"}) {
+		t.Fatalf("unexpected env selector result: %#v", got)
+	}
+
+	listAnd, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{
+		LabelSelector: map[string]string{"env": "dev", "tier": "api"},
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxes(and) failed: %v", err)
+	}
+	if got := sandboxIDs(listAnd.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-dev"}) {
+		t.Fatalf("unexpected AND selector result: %#v", got)
+	}
+
+	listNone, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{
+		LabelSelector: map[string]string{"env": "stage"},
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxes(none) failed: %v", err)
+	}
+	if len(listNone.GetSandboxes()) != 0 {
+		t.Fatalf("expected no sandboxes, got %#v", sandboxIDs(listNone.GetSandboxes()))
+	}
+}
+
+func TestListSandboxesReturnsLabels(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+	request := createSandboxRequest("session-list-labels", "ghcr.io/agents-sandbox/coding-runtime:test")
+	request.CreateSpec.Labels = map[string]string{"owner": "team-a", "env": "dev"}
+
+	if _, err := client.CreateSandbox(context.Background(), request); err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, "session-list-labels", agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	listResp, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{})
+	if err != nil {
+		t.Fatalf("ListSandboxes failed: %v", err)
+	}
+	if len(listResp.GetSandboxes()) != 1 {
+		t.Fatalf("expected 1 sandbox, got %d", len(listResp.GetSandboxes()))
+	}
+	if !reflect.DeepEqual(listResp.GetSandboxes()[0].GetLabels(), map[string]string{"owner": "team-a", "env": "dev"}) {
+		t.Fatalf("unexpected labels in list response: %#v", listResp.GetSandboxes()[0].GetLabels())
+	}
+}
+
+func TestDeleteSandboxesByLabels(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 100 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	for _, item := range []struct {
+		sandboxID string
+		labels    map[string]string
+	}{
+		{sandboxID: "delete-team-a-1", labels: map[string]string{"team": "a", "env": "dev"}},
+		{sandboxID: "delete-team-a-2", labels: map[string]string{"team": "a", "env": "prod"}},
+		{sandboxID: "delete-team-a-skip", labels: map[string]string{"team": "a", "env": "stage"}},
+		{sandboxID: "delete-team-b", labels: map[string]string{"team": "b", "env": "dev"}},
+	} {
+		request := createSandboxRequest(item.sandboxID, "ghcr.io/agents-sandbox/coding-runtime:test")
+		request.CreateSpec.Labels = item.labels
+		if _, err := client.CreateSandbox(context.Background(), request); err != nil {
+			t.Fatalf("CreateSandbox(%s) failed: %v", item.sandboxID, err)
+		}
+		waitForSandboxState(t, client, item.sandboxID, agboxv1.SandboxState_SANDBOX_STATE_READY)
+	}
+
+	if _, err := client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: "delete-team-a-skip"}); err != nil {
+		t.Fatalf("DeleteSandbox(skip) failed: %v", err)
+	}
+
+	deleteResp, err := client.DeleteSandboxes(context.Background(), &agboxv1.DeleteSandboxesRequest{
+		LabelSelector: map[string]string{"team": "a"},
+	})
+	if err != nil {
+		t.Fatalf("DeleteSandboxes failed: %v", err)
+	}
+	if got := deleteResp.GetDeletedSandboxIds(); !reflect.DeepEqual(got, []string{"delete-team-a-1", "delete-team-a-2"}) {
+		t.Fatalf("unexpected deleted sandbox ids: %#v", got)
+	}
+	if deleteResp.GetDeletedCount() != 2 {
+		t.Fatalf("unexpected deleted count: %d", deleteResp.GetDeletedCount())
+	}
+
+	for _, sandboxID := range deleteResp.GetDeletedSandboxIds() {
+		getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: sandboxID})
+		if err != nil {
+			t.Fatalf("GetSandbox(%s) failed: %v", sandboxID, err)
+		}
+		if getResp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_DELETING {
+			t.Fatalf("expected sandbox %s to be deleting, got %s", sandboxID, getResp.GetSandbox().GetState())
+		}
+	}
+
+	skipResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: "delete-team-a-skip"})
+	if err != nil {
+		t.Fatalf("GetSandbox(skip) failed: %v", err)
+	}
+	if skipResp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_DELETING {
+		t.Fatalf("expected skipped sandbox to stay deleting, got %s", skipResp.GetSandbox().GetState())
+	}
+
+	keepResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: "delete-team-b"})
+	if err != nil {
+		t.Fatalf("GetSandbox(keep) failed: %v", err)
+	}
+	if keepResp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("expected non-matching sandbox to stay ready, got %s", keepResp.GetSandbox().GetState())
+	}
+
+	for _, sandboxID := range deleteResp.GetDeletedSandboxIds() {
+		waitForSandboxState(t, client, sandboxID, agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+	}
+}
+
+func TestDeleteSandboxesEmptySelector(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	_, err := client.DeleteSandboxes(context.Background(), &agboxv1.DeleteSandboxesRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+}
+
 func TestCreateSandboxRejectsConflictingGenericTargets(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -1294,6 +1559,14 @@ func createSandboxRequest(sandboxID string, image string) *agboxv1.CreateSandbox
 
 func createSpecWithImage(image string) *agboxv1.CreateSpec {
 	return &agboxv1.CreateSpec{Image: image}
+}
+
+func sandboxIDs(handles []*agboxv1.SandboxHandle) []string {
+	ids := make([]string, 0, len(handles))
+	for _, handle := range handles {
+		ids = append(ids, handle.GetSandboxId())
+	}
+	return ids
 }
 
 func assertErrorReason(t *testing.T, err error, want string) {

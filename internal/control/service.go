@@ -162,6 +162,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 		handle: &agboxv1.SandboxHandle{
 			SandboxId:        sandboxID,
 			State:            agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+			Labels:           cloneStringMap(req.GetCreateSpec().GetLabels()),
 			RequiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
 			OptionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
 		},
@@ -202,6 +203,9 @@ func (s *Service) ListSandboxes(_ context.Context, req *agboxv1.ListSandboxesReq
 	var handles []*agboxv1.SandboxHandle
 	for _, record := range s.boxes {
 		if !req.GetIncludeDeleted() && record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+			continue
+		}
+		if !matchesLabelSelector(record.handle.GetLabels(), req.GetLabelSelector()) {
 			continue
 		}
 		handles = append(handles, cloneHandle(record.handle))
@@ -258,18 +262,42 @@ func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxReq
 		s.mu.Unlock()
 		return nil, err
 	}
-	if record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+	if !s.markSandboxDeletingLocked(record, "delete_requested") {
 		s.mu.Unlock()
 		return &agboxv1.AcceptedResponse{Accepted: true}, nil
 	}
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
-	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
-		reason:       "delete_requested",
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETING,
-	})
 	s.mu.Unlock()
 	go s.completeSandboxDelete(req.GetSandboxId(), "delete_requested")
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
+}
+
+func (s *Service) DeleteSandboxes(_ context.Context, req *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error) {
+	if len(req.GetLabelSelector()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "label_selector must not be empty")
+	}
+
+	s.mu.Lock()
+	sandboxIDs := make([]string, 0)
+	for sandboxID, record := range s.boxes {
+		if !matchesLabelSelector(record.handle.GetLabels(), req.GetLabelSelector()) {
+			continue
+		}
+		if !s.markSandboxDeletingLocked(record, "delete_requested") {
+			continue
+		}
+		sandboxIDs = append(sandboxIDs, sandboxID)
+	}
+	s.mu.Unlock()
+
+	slices.Sort(sandboxIDs)
+	for _, sandboxID := range sandboxIDs {
+		go s.completeSandboxDelete(sandboxID, "delete_requested")
+	}
+
+	return &agboxv1.DeleteSandboxesResponse{
+		DeletedSandboxIds: sandboxIDs,
+		DeletedCount:      uint32(len(sandboxIDs)),
+	}, nil
 }
 
 func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequest, stream agboxv1.SandboxService_SubscribeSandboxEventsServer) error {
@@ -1213,12 +1241,24 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	}
 	return &agboxv1.CreateSpec{
 		Image:            spec.GetImage(),
+		Labels:           cloneStringMap(spec.GetLabels()),
 		Mounts:           cloneMounts(spec.GetMounts()),
 		Copies:           cloneCopies(spec.GetCopies()),
 		BuiltinResources: slices.Clone(spec.GetBuiltinResources()),
 		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
 	}
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func cloneKeyValues(items []*agboxv1.KeyValue) []*agboxv1.KeyValue {
@@ -1265,9 +1305,35 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		SandboxId:        handle.GetSandboxId(),
 		State:            handle.GetState(),
 		LastEventCursor:  handle.GetLastEventCursor(),
+		Labels:           cloneStringMap(handle.GetLabels()),
 		RequiredServices: cloneServiceSpecs(handle.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(handle.GetOptionalServices()),
 	}
+}
+
+func matchesLabelSelector(labels map[string]string, selector map[string]string) bool {
+	for key, want := range selector {
+		if got, ok := labels[key]; !ok || got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) markSandboxDeletingLocked(record *sandboxRecord, reason string) bool {
+	if record == nil || record.handle == nil {
+		return false
+	}
+	switch record.handle.GetState() {
+	case agboxv1.SandboxState_SANDBOX_STATE_DELETED, agboxv1.SandboxState_SANDBOX_STATE_DELETING:
+		return false
+	}
+	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
+	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETE_REQUESTED, eventMutation{
+		reason:       reason,
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETING,
+	})
+	return true
 }
 
 func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {
