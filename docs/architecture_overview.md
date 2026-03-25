@@ -12,8 +12,7 @@ flowchart LR
     CLI[agbox CLI] --> RPC
     RPC --> Daemon[AgentsSandbox daemon]
     Daemon --> Service[control.Service]
-    Service --> IDDB[Persistent historical ID registry\nids.db]
-    Service --> EventDB[Persistent sandbox event store\nids.db]
+    Service --> Persistence[Persistent ids.db\nID registry + event store buckets]
     Service --> Runtime[Docker runtime backend]
     Runtime --> Docker[Docker daemon\nvia Engine API SDK]
     Service --> Memory[In-memory sandbox and exec state\nplus recovered-only projections]
