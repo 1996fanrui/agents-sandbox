@@ -71,6 +71,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
             builtin_resources=list(request.create_spec.builtin_resources),
             required_services=[to_proto_service(item) for item in request.create_spec.required_services],
             optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
+            labels=dict(request.create_spec.labels),
         ),
         caller_metadata=(
             None if request.caller_metadata is None else to_proto_caller_metadata(request.caller_metadata)
@@ -142,6 +143,7 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         last_event_cursor=handle.last_event_cursor,
         required_services=tuple(to_service(item) for item in handle.required_services),
         optional_services=tuple(to_service(item) for item in handle.optional_services),
+        labels=dict(handle.labels),
     )
 
 

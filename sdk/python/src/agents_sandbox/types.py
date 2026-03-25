@@ -63,6 +63,10 @@ class CreateSandboxSpec:
     builtin_resources: tuple[str, ...] = ()
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "labels", dict(self.labels))
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +114,16 @@ class SandboxHandle:
     last_event_cursor: str = ""
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "labels", dict(self.labels))
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteSandboxesResult:
+    deleted_sandbox_ids: tuple[str, ...]
+    deleted_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +146,7 @@ __all__ = [
     "CreateExecRequest",
     "CreateSandboxRequest",
     "CreateSandboxSpec",
+    "DeleteSandboxesResult",
     "ExecHandle",
     "HealthcheckConfig",
     "MountSpec",

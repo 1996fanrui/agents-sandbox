@@ -34,6 +34,7 @@ from .types import (
     CreateExecRequest,
     CreateSandboxRequest,
     CreateSandboxSpec,
+    DeleteSandboxesResult,
     ExecHandle,
     MountSpec,
     PingInfo,
@@ -116,6 +117,7 @@ class AgentsSandboxClient:
         builtin_resources: tuple[str, ...] = (),
         required_services: tuple[ServiceSpec, ...] = (),
         optional_services: tuple[ServiceSpec, ...] = (),
+        labels: Mapping[str, str] | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
         request = CreateSandboxRequest(
@@ -127,6 +129,7 @@ class AgentsSandboxClient:
                 builtin_resources=builtin_resources,
                 required_services=required_services,
                 optional_services=optional_services,
+                labels={} if labels is None else dict(labels),
             ),
         )
         try:
@@ -156,10 +159,14 @@ class AgentsSandboxClient:
         self,
         *,
         include_deleted: bool = False,
+        label_selector: Mapping[str, str] | None = None,
     ) -> list[SandboxHandle]:
         response = await asyncio.to_thread(
             self._rpc_client.list_sandboxes,
-            service_pb2.ListSandboxesRequest(include_deleted=include_deleted),
+            service_pb2.ListSandboxesRequest(
+                include_deleted=include_deleted,
+                label_selector={} if label_selector is None else dict(label_selector),
+            ),
         )
         return [to_sandbox_handle(item) for item in response.sandboxes]
 
@@ -213,6 +220,36 @@ class AgentsSandboxClient:
             target_state=SandboxState.DELETED,
             operation_name="delete_sandbox",
         )
+
+    async def delete_sandboxes(
+        self,
+        label_selector: Mapping[str, str],
+        *,
+        wait: bool = True,
+    ) -> DeleteSandboxesResult:
+        response = await asyncio.to_thread(
+            self._rpc_client.delete_sandboxes,
+            service_pb2.DeleteSandboxesRequest(label_selector=dict(label_selector)),
+        )
+        result = DeleteSandboxesResult(
+            deleted_sandbox_ids=tuple(response.deleted_sandbox_ids),
+            deleted_count=response.deleted_count,
+        )
+        if not wait or not result.deleted_sandbox_ids:
+            return result
+        baselines = await asyncio.gather(*(self.get_sandbox(sandbox_id) for sandbox_id in result.deleted_sandbox_ids))
+        await asyncio.gather(
+            *(
+                self._wait_for_sandbox_state(
+                    sandbox_id=sandbox_id,
+                    baseline=baseline,
+                    target_state=SandboxState.DELETED,
+                    operation_name="delete_sandboxes",
+                )
+                for sandbox_id, baseline in zip(result.deleted_sandbox_ids, baselines, strict=True)
+            )
+        )
+        return result
 
     async def create_exec(
         self,

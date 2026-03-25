@@ -19,6 +19,7 @@ from .models import (
 )
 from .types import (
     CopySpec,
+    DeleteSandboxesResult,
     ExecHandle,
     HealthcheckConfig,
     MountSpec,
@@ -31,6 +32,7 @@ from .types import (
 __all__ = [
     "AgentsSandboxClient",
     "CopySpec",
+    "DeleteSandboxesResult",
     "ExecAlreadyTerminalError",
     "ExecHandle",
     "ExecNotFoundError",
