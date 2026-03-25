@@ -12,6 +12,7 @@ flowchart LR
     CLI[agbox CLI] --> RPC
     RPC --> Daemon[AgentsSandbox daemon]
     Daemon --> Service[control.Service]
+    Service --> IDDB[Persistent historical ID registry\nids.db]
     Service --> Runtime[Docker runtime backend]
     Runtime --> Docker[Docker daemon]
     Service --> Memory[In-memory sandbox, exec,\nand event state]
@@ -23,6 +24,7 @@ flowchart LR
 
 - `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, and serves gRPC over a Unix domain socket.
 - `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, cursor generation, and async operation orchestration.
+- `internal/control/id_registry.go` owns the persistent bbolt-backed historical ID registry that reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
 - `internal/profile` defines daemon-managed built-in resources such as `.claude`, `.codex`, `uv`, `npm`, `apt`, `gh-auth`, and `ssh-agent`.
 - `api/proto/service.proto` is the transport contract shared by Go and Python.
@@ -31,11 +33,12 @@ flowchart LR
 ### Primary request and event flow
 
 1. A client sends a gRPC request over the Unix socket.
-2. The service performs synchronous fail-fast validation for create inputs, service declarations, builtin resource IDs, duplicate caller-provided IDs, and exec command shape.
-3. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
-4. The runtime backend performs Docker-side work and reports results back to the service.
-5. The service updates authoritative sandbox or exec state, appends ordered events with `cursor` and `sequence`, and exposes the latest snapshot through `GetSandbox` and `GetExec`.
-6. The Python SDK optionally waits on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`.
+2. The service performs synchronous fail-fast validation for create inputs, service declarations, builtin resource IDs, historical ID reuse, and exec command shape.
+3. During `CreateSandbox` and `CreateExec`, the daemon reserves the final `sandbox_id` or `exec_id` in the persistent historical ID registry before accepting the request. When the caller omits an ID, the daemon generates and reserves a UUID v4 first.
+4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
+5. The runtime backend performs Docker-side work and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
+6. The service updates authoritative sandbox or exec state, appends ordered events with `cursor` and `sequence`, and exposes the latest snapshot through `GetSandbox` and `GetExec`.
+7. The Python SDK optionally waits on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`.
 
 ## Core Capabilities And Usage Scenarios
 
@@ -74,7 +77,7 @@ These cover common scenarios such as:
 - copying seed files or fixture data into a sandbox
 - exposing operator tooling such as `.claude`, `.codex`, `gh-auth`, `uv`, or `ssh-agent`
 
-Services are declared explicitly as `required_services` or `optional_services` and become sibling containers on the sandbox network. Required services must be healthy before the primary is reported ready; optional services start in parallel and only emit warnings on failure. This supports cases such as adding a database or service sidecar next to the primary runtime image.
+Services are declared explicitly as `required_services` or `optional_services` and become sibling containers on the sandbox network. Required services must be healthy before the primary is reported ready; optional services start in parallel and report their initial ready or failed result through sandbox events without blocking the primary ready transition. This supports cases such as adding a database or service sidecar next to the primary runtime image.
 
 ### Event subscription and replay
 
@@ -95,12 +98,13 @@ This supports long-running orchestration, reconnect after temporary client loss,
 - The daemon is a single-writer local control plane. It acquires an exclusive host lock at a hardcoded platform path and refuses to start if another daemon already owns that lock.
 - gRPC transport is exposed over a Unix domain socket only, at a hardcoded platform-specific path (not configurable).
 - The current service keeps sandbox records, exec records, and event history in memory. Event replay works for the daemon process lifetime, but a daemon restart resets replay history for active sandboxes.
+- Caller-visible ID uniqueness is stronger than in-memory lifecycle state: the daemon persists historical `sandbox_id` and `exec_id` reservations in a platform-derived `ids.db` file so old IDs remain unavailable after daemon restart.
 
 ### Filesystem and security constraints
 
 - Unsafe or invalid create inputs are rejected at the RPC boundary instead of being accepted and failing later in the background.
 - `mounts` and `copies` require absolute container targets and real host file or directory sources.
-- `copies` and shadow-copy projections require `runtime.state_root` because the daemon materializes copied content into daemon-owned filesystem state.
+- `copies` and builtin-resource shadow copies require `runtime.state_root` because the daemon materializes copied content into daemon-owned filesystem state.
 - Runtime exec assumes a non-root sandbox user model. Writable paths must remain writable to that runtime user.
 - Built-in resources are daemon-defined. Callers can select capability IDs but cannot replace them with arbitrary hidden host paths through the public SDK surface.
 
@@ -117,6 +121,10 @@ This supports long-running orchestration, reconnect after temporary client loss,
 ### Accepted operations stay distinct from completed state
 
 Slow operations return after acceptance, not after completion. The service then exposes authoritative state through `GetSandbox` and `GetExec`, plus ordered events through `SubscribeSandboxEvents`. This keeps the protocol honest about asynchronous runtime work while still allowing the SDK to offer convenient waiting.
+
+### Historical IDs are reserved persistently, not only while a sandbox is live
+
+Caller-provided `sandbox_id` and `exec_id` values are part of the external contract, so the daemon does not treat them as temporary in-memory handles. It reserves them in a persistent registry before accepting create operations, which prevents accidental ID reuse after daemon restart and keeps conflict detection independent from Docker object discovery or any external product database.
 
 ### The public Python SDK is direct-parameter, not request-wrapper driven
 

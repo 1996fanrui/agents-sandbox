@@ -69,6 +69,10 @@ request must still pass `image` explicitly.
 
 Python SDK example:
 
+On Linux, `AgentsSandboxClient()` resolves the daemon socket from the fixed
+`$XDG_RUNTIME_DIR/agbox/agboxd.sock` path. Run the example from a session where
+`XDG_RUNTIME_DIR` is set and the daemon uses the same runtime directory.
+
 ```python
 import asyncio
 
