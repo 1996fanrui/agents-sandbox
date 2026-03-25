@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/docker/docker/api/types/container"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -429,7 +430,7 @@ func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
 	})
 
 	<-started
-	backend := newDockerRuntimeBackend(ServiceConfig{}).(*dockerRuntimeBackend)
+	backend := &dockerRuntimeBackend{config: ServiceConfig{}}
 	if err := backend.DeleteSandbox(context.Background(), &sandboxRecord{
 		runtimeState: &sandboxRuntimeState{
 			OptionalServiceStarts: starts,
@@ -440,6 +441,18 @@ func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
 	statuses := collectRuntimeServiceStatuses(starts.Statuses)
 	if len(statuses) != 1 || statuses[0].Ready || !strings.Contains(statuses[0].Message, context.Canceled.Error()) {
 		t.Fatalf("expected delete to cancel optional startup, got %#v", statuses)
+	}
+}
+
+func TestLatestHealthLogTimestampUsesNewestNonNilEntry(t *testing.T) {
+	now := time.Now().UTC()
+	latest := latestHealthLogTimestamp([]*container.HealthcheckResult{
+		nil,
+		{Start: now.Add(-3 * time.Second), End: now.Add(-2 * time.Second)},
+		{Start: now.Add(-1 * time.Second)},
+	})
+	if !latest.Equal(now.Add(-1 * time.Second)) {
+		t.Fatalf("unexpected latest health log timestamp: got %s want %s", latest, now.Add(-1*time.Second))
 	}
 }
 
@@ -685,7 +698,7 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceRoot, "keep.txt"), []byte("keep"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
-	backendWithoutState := newDockerRuntimeBackend(ServiceConfig{}).(*dockerRuntimeBackend)
+	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
 	if _, err := backendWithoutState.materializeGenericCopies(
 		"sandbox-copy",
 		[]*agboxv1.CopySpec{{Source: sourceRoot, Target: "/workspace/project"}},
@@ -713,7 +726,7 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 		t.Fatalf("expected builtin shadow copy state_root error, got %v", err)
 	}
 
-	backendWithState := newDockerRuntimeBackend(ServiceConfig{StateRoot: t.TempDir()}).(*dockerRuntimeBackend)
+	backendWithState := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
 	runtimeState := &sandboxRuntimeState{}
 	mounts, err := backendWithState.materializeBuiltinResources("sandbox-builtin", []string{".claude"}, runtimeState)
 	if err != nil {

@@ -65,6 +65,38 @@ type persistentIDRegistry struct {
 	db *bbolt.DB
 }
 
+type combinedServiceCloser struct {
+	runtime  io.Closer
+	registry io.Closer
+}
+
+func (closer combinedServiceCloser) Close() error {
+	return errors.Join(
+		closeCloser(closer.runtime),
+		closeCloser(closer.registry),
+	)
+}
+
+func closeCloser(closer io.Closer) error {
+	if closer == nil {
+		return nil
+	}
+	return closer.Close()
+}
+
+func joinServiceClosers(runtimeCloser io.Closer, registryCloser io.Closer) io.Closer {
+	if runtimeCloser == nil {
+		return registryCloser
+	}
+	if registryCloser == nil {
+		return runtimeCloser
+	}
+	return combinedServiceCloser{
+		runtime:  runtimeCloser,
+		registry: registryCloser,
+	}
+}
+
 func openPersistentIDRegistry(path string) (*persistentIDRegistry, error) {
 	if path == "" {
 		return nil, errors.New("id store path is required")
@@ -124,5 +156,9 @@ func NewServiceWithPersistentIDStore(config ServiceConfig, path string) (*Servic
 		return nil, nil, fmt.Errorf("initialize id store %s: %w", path, err)
 	}
 	config.idRegistry = registry
-	return NewService(config), registry, nil
+	service, runtimeCloser, err := NewService(config)
+	if err != nil {
+		return nil, nil, errors.Join(err, registry.Close())
+	}
+	return service, joinServiceClosers(runtimeCloser, registry), nil
 }

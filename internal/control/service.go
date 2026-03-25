@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,7 +94,7 @@ type eventMutation struct {
 
 var callerProvidedIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-func NewService(config ServiceConfig) *Service {
+func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	defaults := DefaultServiceConfig()
 	if config.TransitionDelay <= 0 {
 		config.TransitionDelay = defaults.TransitionDelay
@@ -113,8 +114,14 @@ func NewService(config ServiceConfig) *Service {
 	if config.DaemonName == "" {
 		config.DaemonName = defaults.DaemonName
 	}
+	var runtimeCloser io.Closer
 	if config.runtimeBackend == nil {
-		config.runtimeBackend = newDockerRuntimeBackend(config)
+		runtimeBackend, closer, err := newDockerRuntimeBackend(config)
+		if err != nil {
+			return nil, nil, err
+		}
+		config.runtimeBackend = runtimeBackend
+		runtimeCloser = closer
 	}
 	if config.idRegistry == nil {
 		config.idRegistry = newMemoryIDRegistry()
@@ -123,7 +130,7 @@ func NewService(config ServiceConfig) *Service {
 		config: config,
 		boxes:  make(map[string]*sandboxRecord),
 		execs:  make(map[string]string),
-	}
+	}, runtimeCloser, nil
 }
 
 func (s *Service) Ping(context.Context, *agboxv1.PingRequest) (*agboxv1.PingResponse, error) {

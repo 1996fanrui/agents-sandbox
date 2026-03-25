@@ -37,8 +37,19 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	service, closer, err := control.NewService(control.DefaultServiceConfig())
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	if closer != nil {
+		t.Cleanup(func() {
+			if closeErr := closer.Close(); closeErr != nil {
+				t.Fatalf("service closer failed: %v", closeErr)
+			}
+		})
+	}
 	go func() {
-		_ = control.ListenAndServe(ctx, socketPath, control.NewService(control.DefaultServiceConfig()))
+		_ = control.ListenAndServe(ctx, socketPath, service)
 	}()
 	waitForSocket(t, lookupEnv)
 
