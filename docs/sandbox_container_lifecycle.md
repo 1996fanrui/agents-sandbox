@@ -23,6 +23,7 @@ Product-specific lifecycle semantics such as archive states stay outside this re
 | Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
 
 Docker object labels must use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`.
+User-defined sandbox labels are propagated to the dedicated network, primary container, and service containers with the user namespace prefix `io.github.1996fanrui.agents-sandbox.user.<key>`.
 
 ## Lifecycle States
 
