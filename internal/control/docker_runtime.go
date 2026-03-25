@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,16 +25,42 @@ import (
 
 type runtimeBackend interface {
 	CreateSandbox(context.Context, *sandboxRecord) (runtimeCreateResult, error)
-	ResumeSandbox(context.Context, *sandboxRecord) error
+	ResumeSandbox(context.Context, *sandboxRecord) (runtimeResumeResult, error)
 	StopSandbox(context.Context, *sandboxRecord) error
 	DeleteSandbox(context.Context, *sandboxRecord) error
 	RunExec(context.Context, *sandboxRecord, *agboxv1.ExecStatus) (runtimeExecResult, error)
 }
 
 type runtimeCreateResult struct {
-	ResolvedTooling []*agboxv1.ResolvedProjectionHandle
-	DependencyNames []string
-	RuntimeState    *sandboxRuntimeState
+	ServiceStatuses         []runtimeServiceStatus
+	OptionalServiceStatuses <-chan runtimeServiceStatus
+	RuntimeState            *sandboxRuntimeState
+}
+
+type runtimeResumeResult struct {
+	ServiceStatuses []runtimeServiceStatus
+}
+
+type runtimeServiceStatus struct {
+	Name     string
+	Required bool
+	Ready    bool
+	Message  string
+}
+
+type optionalServiceStarts struct {
+	Statuses <-chan runtimeServiceStatus
+	done     <-chan struct{}
+	cancel   context.CancelFunc
+}
+
+func (starts optionalServiceStarts) CancelAndWait() {
+	if starts.cancel != nil {
+		starts.cancel()
+	}
+	if starts.done != nil {
+		<-starts.done
+	}
 }
 
 type runtimeExecResult struct {
@@ -43,33 +70,60 @@ type runtimeExecResult struct {
 }
 
 type sandboxRuntimeState struct {
-	NetworkName             string
-	PrimaryContainerName    string
-	DependencyContainerName []string
-	WorkspaceHostPath       string
-	WorkspaceOwned          bool
-	ShadowRoot              string
+	NetworkName           string
+	PrimaryContainerName  string
+	ServiceContainers     []runtimeServiceContainer
+	ShadowRoot            string
+	OptionalServiceStarts optionalServiceStarts
+}
+
+type runtimeServiceContainer struct {
+	Name          string
+	ContainerName string
+	Required      bool
 }
 
 type fakeRuntimeBackend struct{}
 
 func (fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
-	dependencyNames := make([]string, 0, len(record.dependencies))
-	for _, dependency := range record.dependencies {
-		dependencyNames = append(dependencyNames, dependency.GetDependencyName())
+	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
+	containers := make([]runtimeServiceContainer, 0, len(record.requiredServices)+len(record.optionalServices))
+	for _, service := range record.requiredServices {
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
+		containers = append(containers, runtimeServiceContainer{
+			Name:          service.GetName(),
+			ContainerName: "fake-service-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(service.GetName()),
+			Required:      true,
+		})
+	}
+	for _, service := range record.optionalServices {
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
+		containers = append(containers, runtimeServiceContainer{
+			Name:          service.GetName(),
+			ContainerName: "fake-service-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(service.GetName()),
+			Required:      false,
+		})
 	}
 	return runtimeCreateResult{
-		ResolvedTooling: resolveTooling(record.createSpec.GetToolingProjections()),
-		DependencyNames: dependencyNames,
+		ServiceStatuses: statuses,
 		RuntimeState: &sandboxRuntimeState{
-			NetworkName:             "fake-network-" + record.handle.GetSandboxId(),
-			PrimaryContainerName:    "fake-primary-" + record.handle.GetSandboxId(),
-			DependencyContainerName: slices.Clone(dependencyNames),
+			NetworkName:          "fake-network-" + record.handle.GetSandboxId(),
+			PrimaryContainerName: "fake-primary-" + record.handle.GetSandboxId(),
+			ServiceContainers:    containers,
 		},
 	}, nil
 }
 
-func (fakeRuntimeBackend) ResumeSandbox(context.Context, *sandboxRecord) error { return nil }
+func (fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord) (runtimeResumeResult, error) {
+	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
+	for _, service := range record.requiredServices {
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
+	}
+	for _, service := range record.optionalServices {
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
+	}
+	return runtimeResumeResult{ServiceStatuses: statuses}, nil
+}
 func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error   { return nil }
 func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error { return nil }
 
@@ -91,37 +145,21 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		PrimaryContainerName: dockerPrimaryContainerName(record.handle.GetSandboxId()),
 	}
 	cleanupRequired := false
+	var optionalStarts optionalServiceStarts
 	defer func() {
 		if !cleanupRequired {
 			return
 		}
+		optionalStarts.CancelAndWait()
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
 	}()
 
-	workspaceHostPath, workspaceOwned, shadowRoot, err := backend.materializeWorkspace(record.handle.GetSandboxId(), record.createSpec.GetWorkspace())
+	mounts, err := backend.materializeBuiltinResources(record.handle.GetSandboxId(), record.createSpec.GetBuiltinResources(), state)
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
-	state.WorkspaceHostPath = workspaceHostPath
-	state.WorkspaceOwned = workspaceOwned
-	state.ShadowRoot = shadowRoot
-
-	resolvedTooling, mounts, err := backend.materializeTooling(record.handle.GetSandboxId(), record.createSpec.GetToolingProjections(), state)
-	if err != nil {
-		return runtimeCreateResult{}, err
-	}
-	builtinRequests, err := backend.buildBuiltinResourceRequests(record.createSpec.GetBuiltinResources())
-	if err != nil {
-		return runtimeCreateResult{}, err
-	}
-	resolvedBuiltin, builtinMounts, err := backend.materializeTooling(record.handle.GetSandboxId(), builtinRequests, state)
-	if err != nil {
-		return runtimeCreateResult{}, err
-	}
-	resolvedTooling = append(resolvedTooling, resolvedBuiltin...)
-	mounts = append(mounts, builtinMounts...)
 	genericMounts, err := backend.materializeGenericMounts(record.createSpec.GetMounts())
 	if err != nil {
 		return runtimeCreateResult{}, err
@@ -132,13 +170,6 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 	mounts = append(mounts, copyMounts...)
-	if workspaceHostPath != "" {
-		mounts = append(mounts, dockerMount{
-			Source:   workspaceHostPath,
-			Target:   "/workspace",
-			ReadOnly: false,
-		})
-	}
 	if err := ensureUniqueMountTargets(mounts); err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -147,45 +178,67 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	if err := dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.sandboxOwner, "default")); err != nil {
+	for _, service := range record.requiredServices {
+		if err := ensureDockerImage(ctx, service.GetImage()); err != nil {
+			return runtimeCreateResult{}, err
+		}
+	}
+	for _, service := range record.optionalServices {
+		if err := ensureDockerImage(ctx, service.GetImage()); err != nil {
+			return runtimeCreateResult{}, err
+		}
+	}
+	if err := dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default")); err != nil {
 		return runtimeCreateResult{}, err
 	}
 
-	dependencyNames := make([]string, 0, len(record.dependencies))
-	state.DependencyContainerName = make([]string, 0, len(record.dependencies))
-	for _, dependency := range record.dependencies {
-		if dependency.GetDependencyName() == "" || dependency.GetImage() == "" {
-			return runtimeCreateResult{}, fmt.Errorf("dependency name and image are required")
-		}
-		dependencyNames = append(dependencyNames, dependency.GetDependencyName())
-		containerName := dockerDependencyContainerName(record.handle.GetSandboxId(), dependency.GetDependencyName())
-		state.DependencyContainerName = append(state.DependencyContainerName, containerName)
-		if err := ensureDockerImage(ctx, dependency.GetImage()); err != nil {
-			return runtimeCreateResult{}, err
-		}
+	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
+	state.ServiceContainers = make([]runtimeServiceContainer, 0, len(record.requiredServices)+len(record.optionalServices))
+	for _, service := range record.requiredServices {
+		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
+		state.ServiceContainers = append(state.ServiceContainers, runtimeServiceContainer{
+			Name:          service.GetName(),
+			ContainerName: containerName,
+			Required:      true,
+		})
 		if err := dockerContainerCreate(ctx, dockerContainerSpec{
 			Name:         containerName,
-			Image:        dependency.GetImage(),
+			Image:        service.GetImage(),
 			NetworkName:  state.NetworkName,
-			NetworkAlias: firstNonEmpty(dependency.GetNetworkAlias(), dependency.GetDependencyName()),
-			Labels:       runtimedocker.DependencyLabels(record.handle.GetSandboxId(), record.sandboxOwner, dependency.GetDependencyName()),
-			Environment:  keyValuesToMap(dependency.GetEnvironment()),
+			NetworkAlias: service.GetName(),
+			Labels:       runtimedocker.ServiceLabels(record.handle.GetSandboxId(), service.GetName()),
+			Environment:  keyValuesToMap(service.GetEnvironment()),
+			Healthcheck:  service.GetHealthcheck(),
 		}); err != nil {
 			return runtimeCreateResult{}, err
 		}
 		if err := dockerContainerStart(ctx, containerName); err != nil {
 			return runtimeCreateResult{}, err
 		}
-		if err := dockerWaitContainerRunning(ctx, containerName, 10*time.Second); err != nil {
+		if err := dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
 			return runtimeCreateResult{}, err
 		}
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
+	}
+
+	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, record.optionalServices, func(ctx context.Context, spec dockerContainerSpec) error {
+		return dockerContainerCreate(ctx, spec)
+	}, func(ctx context.Context, name string) error {
+		return dockerContainerStart(ctx, name)
+	})
+	for _, service := range record.optionalServices {
+		state.ServiceContainers = append(state.ServiceContainers, runtimeServiceContainer{
+			Name:          service.GetName(),
+			ContainerName: dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName()),
+			Required:      false,
+		})
 	}
 
 	if err := dockerContainerCreate(ctx, dockerContainerSpec{
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
 		NetworkName: state.NetworkName,
-		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.sandboxOwner, "default"),
+		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default"),
 		Mounts:      mounts,
 		Environment: primaryContainerEnvironment(mounts),
 		Workdir:     "/workspace",
@@ -203,44 +256,141 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := dockerWaitContainerRunning(ctx, state.PrimaryContainerName, 10*time.Second); err != nil {
 		return runtimeCreateResult{}, err
 	}
-
+	for _, service := range record.requiredServices {
+		for _, hook := range service.GetPostStartOnPrimary() {
+			if _, _, err := dockerExec(ctx, dockerExecSpec{
+				ContainerName: state.PrimaryContainerName,
+				Command:       []string{"sh", "-lc", hook},
+			}); err != nil {
+				return runtimeCreateResult{}, err
+			}
+		}
+	}
 	cleanupRequired = false
+	state.OptionalServiceStarts = optionalStarts
 	return runtimeCreateResult{
-		ResolvedTooling: resolvedTooling,
-		DependencyNames: dependencyNames,
-		RuntimeState:    state,
+		ServiceStatuses:         statuses,
+		OptionalServiceStatuses: optionalStarts.Statuses,
+		RuntimeState:            state,
 	}, nil
 }
 
-func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *sandboxRecord) error {
+func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *sandboxRecord) (runtimeResumeResult, error) {
 	if record.runtimeState == nil {
-		return errors.New("sandbox runtime state is missing")
+		return runtimeResumeResult{}, errors.New("sandbox runtime state is missing")
 	}
 	if err := dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
-		return err
+		return runtimeResumeResult{}, err
 	}
-	for _, containerName := range record.runtimeState.DependencyContainerName {
-		if err := dockerContainerMustExist(ctx, containerName); err != nil {
-			return err
+	for _, serviceContainer := range record.runtimeState.ServiceContainers {
+		if err := dockerContainerMustExist(ctx, serviceContainer.ContainerName); err != nil {
+			return runtimeResumeResult{}, err
 		}
 	}
-	for _, containerName := range record.runtimeState.DependencyContainerName {
+	statuses := make([]runtimeServiceStatus, 0, len(record.runtimeState.ServiceContainers))
+	for _, service := range record.requiredServices {
+		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
 		if err := dockerContainerEnsureRunning(ctx, containerName); err != nil {
-			return err
+			return runtimeResumeResult{}, err
+		}
+		if err := dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
+			return runtimeResumeResult{}, err
+		}
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
+	}
+	if err := dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
+		return runtimeResumeResult{}, err
+	}
+	for _, service := range record.requiredServices {
+		for _, hook := range service.GetPostStartOnPrimary() {
+			if _, _, err := dockerExec(ctx, dockerExecSpec{
+				ContainerName: record.runtimeState.PrimaryContainerName,
+				Command:       []string{"sh", "-lc", hook},
+			}); err != nil {
+				return runtimeResumeResult{}, err
+			}
 		}
 	}
-	return dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName)
+	for _, service := range record.optionalServices {
+		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
+		if err := dockerContainerEnsureRunning(ctx, containerName); err != nil {
+			statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: false, Message: err.Error()})
+			continue
+		}
+		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
+	}
+	return runtimeResumeResult{ServiceStatuses: statuses}, nil
+}
+
+func startOptionalServicesAsync(
+	ctx context.Context,
+	sandboxID string,
+	networkName string,
+	services []*agboxv1.ServiceSpec,
+	createContainer func(context.Context, dockerContainerSpec) error,
+	startContainer func(context.Context, string) error,
+) optionalServiceStarts {
+	optionalCtx, cancel := context.WithCancel(ctx)
+	results := make(chan runtimeServiceStatus, len(services))
+	done := make(chan struct{})
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(services))
+	for _, service := range services {
+		containerName := dockerServiceContainerName(sandboxID, service.GetName())
+		go func(service *agboxv1.ServiceSpec, containerName string) {
+			defer waitGroup.Done()
+			status := runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true}
+			if err := createContainer(optionalCtx, dockerContainerSpec{
+				Name:         containerName,
+				Image:        service.GetImage(),
+				NetworkName:  networkName,
+				NetworkAlias: service.GetName(),
+				Labels:       runtimedocker.ServiceLabels(sandboxID, service.GetName()),
+				Environment:  keyValuesToMap(service.GetEnvironment()),
+				Healthcheck:  service.GetHealthcheck(),
+			}); err != nil {
+				status.Ready = false
+				status.Message = err.Error()
+				results <- status
+				return
+			}
+			if err := startContainer(optionalCtx, containerName); err != nil {
+				status.Ready = false
+				status.Message = err.Error()
+			}
+			results <- status
+		}(service, containerName)
+	}
+	go func() {
+		waitGroup.Wait()
+		close(results)
+		close(done)
+	}()
+	return optionalServiceStarts{
+		Statuses: results,
+		done:     done,
+		cancel:   cancel,
+	}
+}
+
+func collectRuntimeServiceStatuses(results <-chan runtimeServiceStatus) []runtimeServiceStatus {
+	statuses := make([]runtimeServiceStatus, 0)
+	for result := range results {
+		statuses = append(statuses, result)
+	}
+	return statuses
 }
 
 func (backend *dockerRuntimeBackend) StopSandbox(ctx context.Context, record *sandboxRecord) error {
 	if record.runtimeState == nil {
 		return errors.New("sandbox runtime state is missing")
 	}
+	record.runtimeState.OptionalServiceStarts.CancelAndWait()
 	if err := dockerContainerStop(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return err
 	}
-	for _, containerName := range record.runtimeState.DependencyContainerName {
-		if err := dockerContainerStop(ctx, containerName); err != nil {
+	for _, serviceContainer := range record.runtimeState.ServiceContainers {
+		if err := dockerContainerStop(ctx, serviceContainer.ContainerName); err != nil {
 			return err
 		}
 	}
@@ -251,6 +401,7 @@ func (backend *dockerRuntimeBackend) DeleteSandbox(ctx context.Context, record *
 	if record.runtimeState == nil {
 		return nil
 	}
+	record.runtimeState.OptionalServiceStarts.CancelAndWait()
 	return backend.deleteRuntimeArtifacts(ctx, record.runtimeState)
 }
 
@@ -262,14 +413,11 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 	if state.PrimaryContainerName != "" {
 		joined = append(joined, dockerContainerRemove(ctx, state.PrimaryContainerName))
 	}
-	for _, containerName := range state.DependencyContainerName {
-		joined = append(joined, dockerContainerRemove(ctx, containerName))
+	for _, serviceContainer := range state.ServiceContainers {
+		joined = append(joined, dockerContainerRemove(ctx, serviceContainer.ContainerName))
 	}
 	if state.NetworkName != "" {
 		joined = append(joined, dockerNetworkRemove(ctx, state.NetworkName))
-	}
-	if state.WorkspaceOwned && state.WorkspaceHostPath != "" {
-		joined = append(joined, os.RemoveAll(state.WorkspaceHostPath))
 	}
 	if state.ShadowRoot != "" {
 		joined = append(joined, os.RemoveAll(state.ShadowRoot))
@@ -298,40 +446,6 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 		Stdout:   output.Stdout,
 		Stderr:   output.Stderr,
 	}, err
-}
-
-func (backend *dockerRuntimeBackend) materializeWorkspace(
-	sandboxID string,
-	workspace *agboxv1.WorkspaceSpec,
-) (hostPath string, owned bool, shadowRoot string, err error) {
-	if workspace == nil || workspace.GetPath() == "" {
-		return "", false, "", nil
-	}
-	sourceRoot, err := filepath.Abs(workspace.GetPath())
-	if err != nil {
-		return "", false, "", err
-	}
-	switch workspace.GetMode() {
-	case agboxv1.WorkspaceMaterializationMode_WORKSPACE_MATERIALIZATION_MODE_BIND:
-		return sourceRoot, false, "", nil
-	case agboxv1.WorkspaceMaterializationMode_WORKSPACE_MATERIALIZATION_MODE_DURABLE_COPY, agboxv1.WorkspaceMaterializationMode_WORKSPACE_MATERIALIZATION_MODE_UNSPECIFIED:
-		if backend.config.StateRoot == "" {
-			return "", false, "", errors.New("runtime.state_root is required for durable_copy workspaces")
-		}
-		if err := runtimedocker.ValidateWorkspaceTree(sourceRoot); err != nil {
-			return "", false, "", err
-		}
-		targetRoot := filepath.Join(backend.config.StateRoot, "sandboxes", sandboxID, "workspace")
-		if err := os.RemoveAll(targetRoot); err != nil {
-			return "", false, "", err
-		}
-		if err := copyTree(sourceRoot, targetRoot); err != nil {
-			return "", false, "", err
-		}
-		return targetRoot, true, "", nil
-	default:
-		return "", false, "", fmt.Errorf("unsupported workspace materialization mode %s", workspace.GetMode())
-	}
 }
 
 func (backend *dockerRuntimeBackend) materializeGenericMounts(
@@ -426,116 +540,85 @@ func (backend *dockerRuntimeBackend) materializeGenericCopies(
 	return mounts, nil
 }
 
-func (backend *dockerRuntimeBackend) buildBuiltinResourceRequests(resources []string) ([]*agboxv1.ToolingProjectionRequest, error) {
+func (backend *dockerRuntimeBackend) materializeBuiltinResources(
+	sandboxID string,
+	resources []string,
+	state *sandboxRuntimeState,
+) ([]dockerMount, error) {
 	if len(resources) == 0 {
 		return nil, nil
 	}
-	requests := make([]*agboxv1.ToolingProjectionRequest, 0, len(resources))
-	seen := make(map[string]struct{}, len(resources))
+	mounts := make([]dockerMount, 0, len(resources))
 	for _, resource := range resources {
-		if resource == "" {
-			return nil, errors.New("builtin resource id must not be empty")
-		}
-		if _, exists := seen[resource]; exists {
-			return nil, fmt.Errorf("duplicate builtin resource %q", resource)
-		}
-		if _, ok := profile.CapabilityByID(resource); !ok {
-			return nil, fmt.Errorf("unknown builtin resource %q", resource)
-		}
-		seen[resource] = struct{}{}
-		requests = append(requests, &agboxv1.ToolingProjectionRequest{CapabilityId: resource})
-	}
-	return requests, nil
-}
-
-func (backend *dockerRuntimeBackend) materializeTooling(
-	sandboxID string,
-	requests []*agboxv1.ToolingProjectionRequest,
-	state *sandboxRuntimeState,
-) ([]*agboxv1.ResolvedProjectionHandle, []dockerMount, error) {
-	if len(requests) == 0 {
-		return nil, nil, nil
-	}
-	resolved := make([]*agboxv1.ResolvedProjectionHandle, 0, len(requests))
-	mounts := make([]dockerMount, 0, len(requests))
-	for _, request := range requests {
-		capability, ok := profile.CapabilityByID(request.GetCapabilityId())
+		capability, ok := profile.CapabilityByID(resource)
 		if !ok {
-			return nil, nil, fmt.Errorf("unknown tooling capability %q", request.GetCapabilityId())
+			return nil, fmt.Errorf("unknown builtin resource %q", resource)
 		}
 		sourcePath, err := resolveCapabilitySource(capability)
 		if err != nil {
-			return nil, nil, err
-		}
-		if request.GetSourcePath() != "" {
-			requestSource, err := filepath.Abs(request.GetSourcePath())
-			if err != nil {
-				return nil, nil, err
-			}
-			if requestSource != sourcePath {
-				return nil, nil, fmt.Errorf("custom source path is not supported for capability %q", capability.ID)
-			}
-		}
-		targetPath := firstNonEmpty(request.GetTargetPath(), capability.ContainerTarget)
-		writable, err := resolveCapabilityWritable(capability, request)
-		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		switch capability.Mode {
 		case profile.CapabilityModeSocket:
 			if err := requireSocketPath(sourcePath); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			mounts = append(mounts, dockerMount{Source: sourcePath, Target: targetPath, ReadOnly: false})
-			resolved = append(resolved, &agboxv1.ResolvedProjectionHandle{
-				CapabilityId: capability.ID,
-				SourcePath:   sourcePath,
-				TargetPath:   targetPath,
-				MountMode:    agboxv1.ProjectionMountMode_PROJECTION_MOUNT_MODE_BIND,
-				Writable:     false,
-				WriteBack:    false,
+			mounts = append(mounts, dockerMount{
+				Source:   sourcePath,
+				Target:   capability.ContainerTarget,
+				ReadOnly: false,
 			})
 		default:
-			info, err := os.Stat(sourcePath)
+			writable := capability.Mode == profile.CapabilityModeReadWrite
+			actualSource, readOnly, err := backend.materializeBuiltinResourcePath(sandboxID, capability, sourcePath, writable, state)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			mode := agboxv1.ProjectionMountMode_PROJECTION_MOUNT_MODE_BIND
-			writeBack := writable
-			actualSource := sourcePath
-			if info.IsDir() {
-				resolution, err := runtimedocker.ResolveProjectionMode(sourcePath, []string{sourcePath}, writable)
-				if err != nil {
-					return nil, nil, err
-				}
-				if resolution.Mode == runtimedocker.ProjectionModeShadowCopy {
-					if backend.config.StateRoot == "" {
-						return nil, nil, errors.New("runtime.state_root is required for shadow_copy projections")
-					}
-					state.ShadowRoot = filepath.Join(backend.config.StateRoot, "sandboxes", sandboxID, "shadow")
-					actualSource = filepath.Join(state.ShadowRoot, sanitizeRuntimeName(capability.ID))
-					if err := os.RemoveAll(actualSource); err != nil {
-						return nil, nil, err
-					}
-					if err := copyTree(sourcePath, actualSource); err != nil {
-						return nil, nil, err
-					}
-					mode = agboxv1.ProjectionMountMode_PROJECTION_MOUNT_MODE_SHADOW_COPY
-					writeBack = false
-				}
-			}
-			mounts = append(mounts, dockerMount{Source: actualSource, Target: targetPath, ReadOnly: !writable})
-			resolved = append(resolved, &agboxv1.ResolvedProjectionHandle{
-				CapabilityId: capability.ID,
-				SourcePath:   actualSource,
-				TargetPath:   targetPath,
-				MountMode:    mode,
-				Writable:     writable,
-				WriteBack:    writeBack,
+			mounts = append(mounts, dockerMount{
+				Source:   actualSource,
+				Target:   capability.ContainerTarget,
+				ReadOnly: readOnly,
 			})
 		}
 	}
-	return resolved, mounts, nil
+	return mounts, nil
+}
+
+func (backend *dockerRuntimeBackend) materializeBuiltinResourcePath(
+	sandboxID string,
+	capability profile.ToolingCapability,
+	sourcePath string,
+	writable bool,
+	state *sandboxRuntimeState,
+) (string, bool, error) {
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", false, err
+	}
+	actualSource := sourcePath
+	readOnly := !writable
+	if info.IsDir() {
+		resolution, err := runtimedocker.ResolveProjectionMode(sourcePath, []string{sourcePath}, writable)
+		if err != nil {
+			return "", false, err
+		}
+		if resolution.Mode == runtimedocker.ProjectionModeShadowCopy {
+			if backend.config.StateRoot == "" {
+				return "", false, errors.New("runtime.state_root is required for builtin resource shadow copies")
+			}
+			if state.ShadowRoot == "" {
+				state.ShadowRoot = filepath.Join(backend.config.StateRoot, "sandboxes", sandboxID, "shadow")
+			}
+			actualSource = filepath.Join(state.ShadowRoot, "builtin", sanitizeRuntimeName(capability.ID))
+			if err := os.RemoveAll(actualSource); err != nil {
+				return "", false, err
+			}
+			if err := copyTreeAllowExternalSymlinks(sourcePath, actualSource); err != nil {
+				return "", false, err
+			}
+		}
+	}
+	return actualSource, readOnly, nil
 }
 
 func resolveCapabilitySource(capability profile.ToolingCapability) (string, error) {
@@ -547,26 +630,6 @@ func resolveCapabilitySource(capability profile.ToolingCapability) (string, erro
 		return filepath.Abs(socketPath)
 	}
 	return expandHomePath(capability.DefaultHostPath)
-}
-
-func resolveCapabilityWritable(capability profile.ToolingCapability, request *agboxv1.ToolingProjectionRequest) (bool, error) {
-	switch capability.Mode {
-	case profile.CapabilityModeReadOnly:
-		if request.GetWritable() {
-			return false, fmt.Errorf("capability %q is read-only", capability.ID)
-		}
-		return false, nil
-	case profile.CapabilityModeSocket:
-		if request.GetWritable() {
-			return false, fmt.Errorf("capability %q does not support writable mounts", capability.ID)
-		}
-		return false, nil
-	default:
-		if request.GetSourcePath() == "" && request.GetTargetPath() == "" && !request.GetWritable() {
-			return true, nil
-		}
-		return true, nil
-	}
 }
 
 func requireSocketPath(path string) error {
@@ -619,8 +682,8 @@ func dockerPrimaryContainerName(sandboxID string) string {
 	return "agbox-primary-" + sanitizeRuntimeName(sandboxID)
 }
 
-func dockerDependencyContainerName(sandboxID string, dependencyName string) string {
-	return "agbox-dep-" + sanitizeRuntimeName(sandboxID) + "-" + sanitizeRuntimeName(dependencyName)
+func dockerServiceContainerName(sandboxID string, serviceName string) string {
+	return "agbox-svc-" + sanitizeRuntimeName(sandboxID) + "-" + sanitizeRuntimeName(serviceName)
 }
 
 func sanitizeRuntimeName(value string) string {
@@ -628,20 +691,19 @@ func sanitizeRuntimeName(value string) string {
 	return replacer.Replace(value)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
+func copyTree(sourceRoot string, targetRoot string) error {
+	return copyTreeWithOptions(sourceRoot, targetRoot, nil, false)
 }
 
-func copyTree(sourceRoot string, targetRoot string) error {
-	return copyTreeWithPatterns(sourceRoot, targetRoot, nil)
+func copyTreeAllowExternalSymlinks(sourceRoot string, targetRoot string) error {
+	return copyTreeWithOptions(sourceRoot, targetRoot, nil, true)
 }
 
 func copyTreeWithPatterns(sourceRoot string, targetRoot string, excludePatterns []string) error {
+	return copyTreeWithOptions(sourceRoot, targetRoot, excludePatterns, false)
+}
+
+func copyTreeWithOptions(sourceRoot string, targetRoot string, excludePatterns []string, allowExternalSymlinks bool) error {
 	sourceInfo, err := os.Stat(sourceRoot)
 	if err != nil {
 		return err
@@ -679,9 +741,19 @@ func copyTreeWithPatterns(sourceRoot string, targetRoot string, excludePatterns 
 			return os.MkdirAll(currentTarget, info.Mode())
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			target, err := rewriteCopiedSymlink(rootAbs, targetRoot, currentSource, currentTarget)
+			target, copyResolved, resolvedTarget, err := rewriteCopiedSymlink(rootAbs, targetRoot, currentSource, currentTarget, allowExternalSymlinks)
 			if err != nil {
 				return err
+			}
+			if copyResolved {
+				resolvedInfo, err := os.Stat(resolvedTarget)
+				if err != nil {
+					return err
+				}
+				if resolvedInfo.IsDir() {
+					return copyTreeWithOptions(resolvedTarget, currentTarget, nil, allowExternalSymlinks)
+				}
+				return copyFile(resolvedTarget, currentTarget, resolvedInfo.Mode())
 			}
 			if err := os.MkdirAll(filepath.Dir(currentTarget), 0o755); err != nil {
 				return err
@@ -692,26 +764,36 @@ func copyTreeWithPatterns(sourceRoot string, targetRoot string, excludePatterns 
 	})
 }
 
-func rewriteCopiedSymlink(sourceRoot string, targetRoot string, currentSource string, currentTarget string) (string, error) {
+func rewriteCopiedSymlink(
+	sourceRoot string,
+	targetRoot string,
+	currentSource string,
+	currentTarget string,
+	allowExternalSymlinks bool,
+) (string, bool, string, error) {
 	target, err := os.Readlink(currentSource)
 	if err != nil {
-		return "", err
+		return "", false, "", err
 	}
 	resolvedTarget, err := runtimedocker.ResolveLinkTarget(currentSource)
 	if err != nil {
-		return "", err
+		return "", false, "", err
 	}
 	if !pathWithinRoot(sourceRoot, resolvedTarget) {
-		return "", fmt.Errorf("copy source contains external symlink: %s", currentSource)
+		if !allowExternalSymlinks {
+			return "", false, "", fmt.Errorf("copy source contains external symlink: %s", currentSource)
+		}
+		return "", true, resolvedTarget, nil
 	}
 	if filepath.IsAbs(target) {
 		relativeTarget, err := filepath.Rel(sourceRoot, resolvedTarget)
 		if err != nil {
-			return "", err
+			return "", false, "", err
 		}
-		return filepath.Rel(filepath.Dir(currentTarget), filepath.Join(targetRoot, relativeTarget))
+		rewrittenTarget, err := filepath.Rel(filepath.Dir(currentTarget), filepath.Join(targetRoot, relativeTarget))
+		return rewrittenTarget, false, "", err
 	}
-	return target, nil
+	return target, false, "", nil
 }
 
 func matchesExcludePattern(relativePath string, patterns []string) bool {
@@ -763,6 +845,7 @@ type dockerContainerSpec struct {
 	NetworkAlias string
 	Labels       map[string]string
 	Environment  map[string]string
+	Healthcheck  *agboxv1.HealthcheckConfig
 	Mounts       []dockerMount
 	Workdir      string
 	Command      []string
@@ -776,9 +859,23 @@ type dockerExecSpec struct {
 }
 
 type dockerInspectState struct {
-	Running  bool   `json:"Running"`
-	Status   string `json:"Status"`
-	ExitCode int    `json:"ExitCode"`
+	Running  bool                 `json:"Running"`
+	Status   string               `json:"Status"`
+	ExitCode int                  `json:"ExitCode"`
+	Health   *dockerInspectHealth `json:"Health"`
+}
+
+type dockerInspectHealth struct {
+	Status        string                   `json:"Status"`
+	FailingStreak int                      `json:"FailingStreak"`
+	Log           []dockerInspectHealthLog `json:"Log"`
+}
+
+type dockerInspectHealthLog struct {
+	Start    time.Time `json:"Start"`
+	End      time.Time `json:"End"`
+	ExitCode int       `json:"ExitCode"`
+	Output   string    `json:"Output"`
 }
 
 func ensureUniqueMountTargets(mounts []dockerMount) error {
@@ -843,6 +940,7 @@ func dockerContainerCreate(ctx context.Context, spec dockerContainerSpec) error 
 	for key, value := range spec.Environment {
 		args = append(args, "--env", key+"="+value)
 	}
+	args = appendDockerHealthcheckArgs(args, spec.Healthcheck)
 	for _, mount := range spec.Mounts {
 		mountArg := fmt.Sprintf("type=bind,src=%s,dst=%s", mount.Source, mount.Target)
 		if mount.ReadOnly {
@@ -884,6 +982,133 @@ func dockerContainerEnsureRunning(ctx context.Context, name string) error {
 		return err
 	}
 	return dockerWaitContainerRunning(ctx, name, 10*time.Second)
+}
+
+func dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
+	if healthcheck == nil {
+		return fmt.Errorf("required service %s is missing healthcheck", name)
+	}
+	upperBound, err := requiredServiceHealthWaitUpperBound(healthcheck)
+	if err != nil {
+		return fmt.Errorf("compute health wait upper bound for %s: %w", name, err)
+	}
+	deadline := time.Now().Add(upperBound)
+	var lastLogTime time.Time
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			state, err := dockerContainerState(ctx, name)
+			if err != nil {
+				return err
+			}
+			if !state.Running {
+				return fmt.Errorf("container %s is not running while waiting for health", name)
+			}
+			if state.Health == nil {
+				return fmt.Errorf("container %s does not expose structured health state", name)
+			}
+			// Structured health fields are the source of truth.
+			healthStatus := strings.ToLower(strings.TrimSpace(state.Health.Status))
+			failingStreak := state.Health.FailingStreak
+			latestLogTime := latestHealthLogTimestamp(state.Health.Log)
+			if !latestLogTime.IsZero() {
+				lastLogTime = latestLogTime
+			}
+			if healthStatus == "healthy" {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf(
+					"service %s did not become healthy within %s (status=%s failing_streak=%d last_log=%s)",
+					name,
+					upperBound,
+					healthStatus,
+					failingStreak,
+					lastLogTime.UTC().Format(time.RFC3339Nano),
+				)
+			}
+		}
+	}
+}
+
+func requiredServiceHealthWaitUpperBound(healthcheck *agboxv1.HealthcheckConfig) (time.Duration, error) {
+	const (
+		defaultInterval      = 30 * time.Second
+		defaultTimeout       = 30 * time.Second
+		defaultStartInterval = 5 * time.Second
+		defaultRetries       = uint32(3)
+		maxUpperBound        = 5 * time.Minute
+	)
+	startPeriod, err := parseHealthDuration(healthcheck.GetStartPeriod(), 0)
+	if err != nil {
+		return 0, err
+	}
+	interval, err := parseHealthDuration(healthcheck.GetInterval(), defaultInterval)
+	if err != nil {
+		return 0, err
+	}
+	timeout, err := parseHealthDuration(healthcheck.GetTimeout(), defaultTimeout)
+	if err != nil {
+		return 0, err
+	}
+	startIntervalDefault := time.Duration(0)
+	if startPeriod > 0 {
+		startIntervalDefault = defaultStartInterval
+	}
+	startInterval, err := parseHealthDuration(healthcheck.GetStartInterval(), startIntervalDefault)
+	if err != nil {
+		return 0, err
+	}
+	retries := healthcheck.GetRetries()
+	if retries == 0 {
+		retries = defaultRetries
+	}
+	startupGraceCheckWindow := time.Duration(0)
+	if startPeriod > 0 {
+		startupGraceCheckWindow = maxDuration(startInterval, timeout)
+	}
+	countedCheckWindow := maxDuration(interval, timeout)
+	theoreticalUpperBound := startPeriod + startupGraceCheckWindow + countedCheckWindow*time.Duration(retries+1)
+	return minDuration(theoreticalUpperBound, maxUpperBound), nil
+}
+
+func parseHealthDuration(raw string, defaultValue time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return defaultValue, nil
+	}
+	return time.ParseDuration(raw)
+}
+
+func latestHealthLogTimestamp(items []dockerInspectHealthLog) time.Time {
+	var latest time.Time
+	for _, item := range items {
+		candidate := item.End
+		if candidate.IsZero() {
+			candidate = item.Start
+		}
+		if candidate.After(latest) {
+			latest = candidate
+		}
+	}
+	return latest
+}
+
+func maxDuration(left time.Duration, right time.Duration) time.Duration {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func minDuration(left time.Duration, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func dockerWaitContainerRunning(ctx context.Context, name string, timeout time.Duration) error {
@@ -977,6 +1202,44 @@ func appendDockerLabels(args []string, labels map[string]string) []string {
 	slices.Sort(keys)
 	for _, key := range keys {
 		args = append(args, "--label", key+"="+labels[key])
+	}
+	return args
+}
+
+func appendDockerHealthcheckArgs(args []string, healthcheck *agboxv1.HealthcheckConfig) []string {
+	if healthcheck == nil {
+		return args
+	}
+	if len(healthcheck.GetTest()) == 0 {
+		return args
+	}
+	command := healthcheck.GetTest()[0]
+	switch command {
+	case "NONE":
+		args = append(args, "--no-healthcheck")
+	case "CMD":
+		if len(healthcheck.GetTest()) > 1 {
+			args = append(args, "--health-cmd", strings.Join(healthcheck.GetTest()[1:], " "))
+		}
+	case "CMD-SHELL":
+		if len(healthcheck.GetTest()) > 1 {
+			args = append(args, "--health-cmd", strings.Join(healthcheck.GetTest()[1:], " "))
+		}
+	}
+	if healthcheck.GetInterval() != "" {
+		args = append(args, "--health-interval", healthcheck.GetInterval())
+	}
+	if healthcheck.GetTimeout() != "" {
+		args = append(args, "--health-timeout", healthcheck.GetTimeout())
+	}
+	if healthcheck.GetRetries() > 0 {
+		args = append(args, "--health-retries", strconv.FormatUint(uint64(healthcheck.GetRetries()), 10))
+	}
+	if healthcheck.GetStartPeriod() != "" {
+		args = append(args, "--health-start-period", healthcheck.GetStartPeriod())
+	}
+	if healthcheck.GetStartInterval() != "" {
+		args = append(args, "--health-start-interval", healthcheck.GetStartInterval())
 	}
 	return args
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +35,7 @@ type ServiceConfig struct {
 	Version                string
 	DaemonName             string
 	runtimeBackend         runtimeBackend
+	idRegistry             idRegistry
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -49,12 +52,10 @@ func DefaultServiceConfig() ServiceConfig {
 type Service struct {
 	agboxv1.UnimplementedSandboxServiceServer
 
-	mu       sync.RWMutex
-	config   ServiceConfig
-	nextBox  uint64
-	nextExec uint64
-	boxes    map[string]*sandboxRecord
-	execs    map[string]string
+	mu     sync.RWMutex
+	config ServiceConfig
+	boxes  map[string]*sandboxRecord
+	execs  map[string]string
 }
 
 var (
@@ -67,8 +68,8 @@ var (
 type sandboxRecord struct {
 	handle                    *agboxv1.SandboxHandle
 	createSpec                *agboxv1.CreateSpec
-	sandboxOwner              string
-	dependencies              []*agboxv1.DependencySpec
+	requiredServices          []*agboxv1.ServiceSpec
+	optionalServices          []*agboxv1.ServiceSpec
 	runtimeState              *sandboxRuntimeState
 	events                    []*agboxv1.SandboxEvent
 	execs                     map[string]*agboxv1.ExecStatus
@@ -79,16 +80,18 @@ type sandboxRecord struct {
 }
 
 type eventMutation struct {
-	phase          string
-	dependencyName string
-	errorCode      string
-	errorMessage   string
-	reason         string
-	execID         string
-	exitCode       int32
-	sandboxState   agboxv1.SandboxState
-	execState      agboxv1.ExecState
+	phase        string
+	serviceName  string
+	errorCode    string
+	errorMessage string
+	reason       string
+	execID       string
+	exitCode     int32
+	sandboxState agboxv1.SandboxState
+	execState    agboxv1.ExecState
 }
+
+var callerProvidedIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func NewService(config ServiceConfig) *Service {
 	defaults := DefaultServiceConfig()
@@ -113,6 +116,9 @@ func NewService(config ServiceConfig) *Service {
 	if config.runtimeBackend == nil {
 		config.runtimeBackend = newDockerRuntimeBackend(config)
 	}
+	if config.idRegistry == nil {
+		config.idRegistry = newMemoryIDRegistry()
+	}
 	return &Service{
 		config: config,
 		boxes:  make(map[string]*sandboxRecord),
@@ -128,9 +134,6 @@ func (s *Service) Ping(context.Context, *agboxv1.PingRequest) (*agboxv1.PingResp
 }
 
 func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-	if req.GetSandboxOwner() == "" {
-		return nil, status.Error(codes.InvalidArgument, "sandbox_owner is required")
-	}
 	if req.GetCreateSpec() == nil {
 		return nil, status.Error(codes.InvalidArgument, "create_spec is required")
 	}
@@ -144,27 +147,23 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, record := range s.boxes {
-		if record.sandboxOwner == req.GetSandboxOwner() && record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_DELETED {
-			return nil, newStatusError(codes.AlreadyExists, ReasonSandboxConflict, "sandbox already exists for owner %s", req.GetSandboxOwner())
-		}
+	sandboxID, err := s.allocateSandboxID(req.GetSandboxId())
+	if err != nil {
+		return nil, err
 	}
-
-	s.nextBox++
-	sandboxID := fmt.Sprintf("sandbox-%d", s.nextBox)
 	record := &sandboxRecord{
 		handle: &agboxv1.SandboxHandle{
-			SandboxId:    sandboxID,
-			SandboxOwner: req.GetSandboxOwner(),
-			State:        agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-			Dependencies: cloneDependencies(req.GetCreateSpec().GetDependencies()),
+			SandboxId:        sandboxID,
+			State:            agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+			RequiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
+			OptionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
 		},
-		createSpec:    cloneCreateSpec(req.GetCreateSpec()),
-		sandboxOwner:  req.GetSandboxOwner(),
-		dependencies:  cloneDependencies(req.GetCreateSpec().GetDependencies()),
-		execs:         make(map[string]*agboxv1.ExecStatus),
-		execCancel:    make(map[string]context.CancelFunc),
-		execArtifacts: make(map[string]string),
+		createSpec:       cloneCreateSpec(req.GetCreateSpec()),
+		requiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
+		optionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
+		execs:            make(map[string]*agboxv1.ExecStatus),
+		execCancel:       make(map[string]context.CancelFunc),
+		execArtifacts:    make(map[string]string),
 	}
 	s.boxes[sandboxID] = record
 	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
@@ -193,13 +192,9 @@ func (s *Service) ListSandboxes(_ context.Context, req *agboxv1.ListSandboxesReq
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	filterOwner := req.GetSandboxOwner() != ""
 	var handles []*agboxv1.SandboxHandle
 	for _, record := range s.boxes {
 		if !req.GetIncludeDeleted() && record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
-			continue
-		}
-		if filterOwner && record.sandboxOwner != req.GetSandboxOwner() {
 			continue
 		}
 		handles = append(handles, cloneHandle(record.handle))
@@ -340,8 +335,10 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	if len(req.GetCommand()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "command must not be empty")
 	}
-	s.nextExec++
-	execID := fmt.Sprintf("exec-%d", s.nextExec)
+	execID, err := s.allocateExecID(req.GetExecId())
+	if err != nil {
+		return nil, err
+	}
 	if artifactPath, artifactErr := s.prepareExecArtifactPath(record.handle.GetSandboxId(), execID); artifactErr != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "prepare exec artifact output: %v", artifactErr)
 	} else if artifactPath != "" {
@@ -409,6 +406,64 @@ func (s *Service) GetExec(_ context.Context, req *agboxv1.GetExecRequest) (*agbo
 	return &agboxv1.GetExecResponse{Exec: cloneExec(execRecord)}, nil
 }
 
+func (s *Service) allocateSandboxID(requestedID string) (string, error) {
+	return s.allocateID(
+		requestedID,
+		s.config.idRegistry.ReserveSandboxID,
+		ReasonSandboxIDAlreadyExists,
+		"sandbox_id",
+	)
+}
+
+func (s *Service) allocateExecID(requestedID string) (string, error) {
+	return s.allocateID(
+		requestedID,
+		s.config.idRegistry.ReserveExecID,
+		ReasonExecIDAlreadyExists,
+		"exec_id",
+	)
+}
+
+func (s *Service) allocateID(
+	requestedID string,
+	reserve func(string, time.Time) error,
+	duplicateReason string,
+	fieldName string,
+) (string, error) {
+	if requestedID != "" {
+		if err := validateCallerProvidedID(fieldName, requestedID); err != nil {
+			return "", err
+		}
+		if err := reserve(requestedID, time.Now().UTC()); err != nil {
+			if errors.Is(err, errSandboxIDAlreadyExists) || errors.Is(err, errExecIDAlreadyExists) {
+				return "", newStatusError(codes.AlreadyExists, duplicateReason, "%s %s already exists", fieldName, requestedID)
+			}
+			return "", status.Errorf(codes.Internal, "reserve %s: %v", fieldName, err)
+		}
+		return requestedID, nil
+	}
+	for {
+		generatedID := uuid.NewString()
+		if err := reserve(generatedID, time.Now().UTC()); err != nil {
+			if errors.Is(err, errSandboxIDAlreadyExists) || errors.Is(err, errExecIDAlreadyExists) {
+				continue
+			}
+			return "", status.Errorf(codes.Internal, "reserve %s: %v", fieldName, err)
+		}
+		return generatedID, nil
+	}
+}
+
+func validateCallerProvidedID(fieldName string, id string) error {
+	if len(id) < 4 {
+		return status.Errorf(codes.InvalidArgument, "%s must be at least 4 characters", fieldName)
+	}
+	if !callerProvidedIDPattern.MatchString(id) {
+		return status.Errorf(codes.InvalidArgument, "%s must match %s", fieldName, callerProvidedIDPattern.String())
+	}
+	return nil
+}
+
 func (s *Service) ListActiveExecs(_ context.Context, req *agboxv1.ListActiveExecsRequest) (*agboxv1.ListActiveExecsResponse, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -467,17 +522,16 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		return
 	}
 	record.runtimeState = result.RuntimeState
-	record.handle.ResolvedToolingProjections = cloneResolvedProjections(result.ResolvedTooling)
-	for _, dependencyName := range result.DependencyNames {
-		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DEPENDENCY_READY, eventMutation{
-			dependencyName: dependencyName,
-			sandboxState:   agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-		})
-	}
+	s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
+	optionalStatuses, optionalStatusesOpen := drainAvailableRuntimeServiceStatuses(result.OptionalServiceStatuses)
+	s.appendServiceEventsLocked(record, optionalStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
 	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
 	})
+	if optionalStatusesOpen {
+		go s.completeOptionalServiceCreate(sandboxID, result.OptionalServiceStatuses)
+	}
 }
 
 func (s *Service) completeSandboxResume(sandboxID string) {
@@ -491,7 +545,7 @@ func (s *Service) completeSandboxResume(sandboxID string) {
 	}
 	s.mu.RUnlock()
 
-	err := s.config.runtimeBackend.ResumeSandbox(context.Background(), record)
+	result, err := s.config.runtimeBackend.ResumeSandbox(context.Background(), record)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -508,6 +562,7 @@ func (s *Service) completeSandboxResume(sandboxID string) {
 		})
 		return
 	}
+	s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING)
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
 	s.appendEventLocked(record, agboxv1.EventType_SANDBOX_READY, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
@@ -670,7 +725,7 @@ func (s *Service) prepareExecArtifactPath(sandboxID string, execID string) (stri
 
 func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 	targets := make(map[string]string)
-	seenDependencyNames := make(map[string]struct{}, len(spec.GetDependencies()))
+	seenServiceNames := make(map[string]struct{}, len(spec.GetRequiredServices())+len(spec.GetOptionalServices()))
 	registerTarget := func(kind string, target string) error {
 		if target == "" {
 			return fmt.Errorf("%s target is required", kind)
@@ -683,11 +738,6 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 		}
 		targets[target] = kind
 		return nil
-	}
-	if workspace := spec.GetWorkspace(); workspace != nil && workspace.GetPath() != "" {
-		if err := registerTarget("workspace", "/workspace"); err != nil {
-			return err
-		}
 	}
 	for _, mount := range spec.GetMounts() {
 		if mount.GetSource() == "" {
@@ -711,17 +761,11 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return err
 		}
 	}
-	for _, dependency := range spec.GetDependencies() {
-		if dependency.GetDependencyName() == "" {
-			return errors.New("dependency name is required")
-		}
-		if dependency.GetImage() == "" {
-			return fmt.Errorf("dependency %q image is required", dependency.GetDependencyName())
-		}
-		if _, exists := seenDependencyNames[dependency.GetDependencyName()]; exists {
-			return fmt.Errorf("duplicate dependency name %q", dependency.GetDependencyName())
-		}
-		seenDependencyNames[dependency.GetDependencyName()] = struct{}{}
+	if err := validateServiceSpecs(spec.GetRequiredServices(), true, seenServiceNames); err != nil {
+		return err
+	}
+	if err := validateServiceSpecs(spec.GetOptionalServices(), false, seenServiceNames); err != nil {
+		return err
 	}
 	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinResources()))
 	for _, builtin := range spec.GetBuiltinResources() {
@@ -735,6 +779,71 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return fmt.Errorf("unknown builtin resource %q", builtin)
 		}
 		seenBuiltin[builtin] = struct{}{}
+	}
+	return nil
+}
+
+func validateServiceSpecs(items []*agboxv1.ServiceSpec, required bool, seen map[string]struct{}) error {
+	for _, service := range items {
+		if service.GetName() == "" {
+			return errors.New("service name is required")
+		}
+		if service.GetImage() == "" {
+			return fmt.Errorf("service %q image is required", service.GetName())
+		}
+		if _, exists := seen[service.GetName()]; exists {
+			return fmt.Errorf("duplicate service name %q", service.GetName())
+		}
+		seen[service.GetName()] = struct{}{}
+		if required && service.GetHealthcheck() == nil {
+			return fmt.Errorf("required service %q must define healthcheck", service.GetName())
+		}
+		if !required && len(service.GetPostStartOnPrimary()) > 0 {
+			return fmt.Errorf("optional service %q must not define post_start_on_primary", service.GetName())
+		}
+		if err := validateHealthcheck(service.GetName(), service.GetHealthcheck(), required); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateHealthcheck(serviceName string, healthcheck *agboxv1.HealthcheckConfig, required bool) error {
+	if healthcheck == nil {
+		return nil
+	}
+	if len(healthcheck.GetTest()) == 0 {
+		return fmt.Errorf("service %q healthcheck.test must not be empty", serviceName)
+	}
+	command := healthcheck.GetTest()[0]
+	allowed := map[string]struct{}{
+		"CMD":       {},
+		"CMD-SHELL": {},
+	}
+	if !required {
+		allowed["NONE"] = struct{}{}
+	}
+	if _, ok := allowed[command]; !ok {
+		return fmt.Errorf("service %q healthcheck.test[0] %q is invalid", serviceName, command)
+	}
+	if command == "NONE" && len(healthcheck.GetTest()) > 1 {
+		return fmt.Errorf("service %q healthcheck.test must not include extra args when NONE is used", serviceName)
+	}
+	if (command == "CMD" || command == "CMD-SHELL") && len(healthcheck.GetTest()) < 2 {
+		return fmt.Errorf("service %q healthcheck.test for %s must include a command", serviceName, command)
+	}
+	for _, raw := range []string{
+		healthcheck.GetInterval(),
+		healthcheck.GetTimeout(),
+		healthcheck.GetStartPeriod(),
+		healthcheck.GetStartInterval(),
+	} {
+		if raw == "" {
+			continue
+		}
+		if _, err := time.ParseDuration(raw); err != nil {
+			return fmt.Errorf("service %q healthcheck duration %q is invalid: %w", serviceName, raw, err)
+		}
 	}
 	return nil
 }
@@ -889,26 +998,75 @@ func hasActiveExec(record *sandboxRecord) bool {
 	return false
 }
 
+func drainAvailableRuntimeServiceStatuses(statuses <-chan runtimeServiceStatus) ([]runtimeServiceStatus, bool) {
+	if statuses == nil {
+		return nil, false
+	}
+	drained := make([]runtimeServiceStatus, 0)
+	for {
+		select {
+		case status, ok := <-statuses:
+			if !ok {
+				return drained, false
+			}
+			drained = append(drained, status)
+		default:
+			return drained, true
+		}
+	}
+}
+
+func (s *Service) completeOptionalServiceCreate(sandboxID string, statuses <-chan runtimeServiceStatus) {
+	for serviceStatus := range statuses {
+		s.mu.Lock()
+		record, ok := s.boxes[sandboxID]
+		if !ok || record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+			s.mu.Unlock()
+			continue
+		}
+		s.appendServiceEventsLocked(record, []runtimeServiceStatus{serviceStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY)
+		s.mu.Unlock()
+	}
+}
+
+func (s *Service) appendServiceEventsLocked(record *sandboxRecord, statuses []runtimeServiceStatus, sandboxState agboxv1.SandboxState) {
+	for _, serviceStatus := range statuses {
+		if serviceStatus.Ready {
+			s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_READY, eventMutation{
+				serviceName:  serviceStatus.Name,
+				sandboxState: sandboxState,
+			})
+			continue
+		}
+		s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_FAILED, eventMutation{
+			serviceName:  serviceStatus.Name,
+			errorCode:    "SANDBOX_SERVICE_FAILED",
+			errorMessage: serviceStatus.Message,
+			sandboxState: sandboxState,
+		})
+	}
+}
+
 func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.EventType, mutation eventMutation) {
 	record.nextSequence++
 	event := &agboxv1.SandboxEvent{
-		EventId:        fmt.Sprintf("%s-%d", record.handle.GetSandboxId(), record.nextSequence),
-		Sequence:       record.nextSequence,
-		Cursor:         makeCursor(record.handle.GetSandboxId(), record.nextSequence),
-		SandboxId:      record.handle.GetSandboxId(),
-		EventType:      eventType,
-		OccurredAt:     timestamppb.Now(),
-		Replay:         false,
-		Snapshot:       false,
-		Phase:          mutation.phase,
-		DependencyName: mutation.dependencyName,
-		ErrorCode:      mutation.errorCode,
-		ErrorMessage:   mutation.errorMessage,
-		Reason:         mutation.reason,
-		ExecId:         mutation.execID,
-		ExitCode:       mutation.exitCode,
-		SandboxState:   mutation.sandboxState,
-		ExecState:      mutation.execState,
+		EventId:      fmt.Sprintf("%s-%d", record.handle.GetSandboxId(), record.nextSequence),
+		Sequence:     record.nextSequence,
+		Cursor:       makeCursor(record.handle.GetSandboxId(), record.nextSequence),
+		SandboxId:    record.handle.GetSandboxId(),
+		EventType:    eventType,
+		OccurredAt:   timestamppb.Now(),
+		Replay:       false,
+		Snapshot:     false,
+		Phase:        mutation.phase,
+		ErrorCode:    mutation.errorCode,
+		ErrorMessage: mutation.errorMessage,
+		Reason:       mutation.reason,
+		ExecId:       mutation.execID,
+		ExitCode:     mutation.exitCode,
+		SandboxState: mutation.sandboxState,
+		ExecState:    mutation.execState,
+		ServiceName:  mutation.serviceName,
 	}
 	record.events = append(record.events, event)
 	record.handle.LastEventCursor = event.GetCursor()
@@ -1018,19 +1176,6 @@ func eventTypeForExec(state agboxv1.ExecState) agboxv1.EventType {
 	}
 }
 
-func cloneDependencies(items []*agboxv1.DependencySpec) []*agboxv1.DependencySpec {
-	result := make([]*agboxv1.DependencySpec, 0, len(items))
-	for _, item := range items {
-		result = append(result, &agboxv1.DependencySpec{
-			DependencyName: item.GetDependencyName(),
-			Image:          item.GetImage(),
-			NetworkAlias:   item.GetNetworkAlias(),
-			Environment:    cloneKeyValues(item.GetEnvironment()),
-		})
-	}
-	return result
-}
-
 func cloneMounts(items []*agboxv1.MountSpec) []*agboxv1.MountSpec {
 	result := make([]*agboxv1.MountSpec, 0, len(items))
 	for _, item := range items {
@@ -1060,49 +1205,13 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		return &agboxv1.CreateSpec{}
 	}
 	return &agboxv1.CreateSpec{
-		Workspace:          cloneWorkspace(spec.GetWorkspace()),
-		CacheProjections:   cloneCacheProjections(spec.GetCacheProjections()),
-		ToolingProjections: cloneToolingProjections(spec.GetToolingProjections()),
-		Dependencies:       cloneDependencies(spec.GetDependencies()),
-		Image:              spec.GetImage(),
-		Mounts:             cloneMounts(spec.GetMounts()),
-		Copies:             cloneCopies(spec.GetCopies()),
-		BuiltinResources:   slices.Clone(spec.GetBuiltinResources()),
+		Image:            spec.GetImage(),
+		Mounts:           cloneMounts(spec.GetMounts()),
+		Copies:           cloneCopies(spec.GetCopies()),
+		BuiltinResources: slices.Clone(spec.GetBuiltinResources()),
+		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
+		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
 	}
-}
-
-func cloneWorkspace(workspace *agboxv1.WorkspaceSpec) *agboxv1.WorkspaceSpec {
-	if workspace == nil {
-		return nil
-	}
-	return &agboxv1.WorkspaceSpec{
-		Path: workspace.GetPath(),
-		Mode: workspace.GetMode(),
-	}
-}
-
-func cloneCacheProjections(items []*agboxv1.CacheProjectionRequest) []*agboxv1.CacheProjectionRequest {
-	result := make([]*agboxv1.CacheProjectionRequest, 0, len(items))
-	for _, item := range items {
-		result = append(result, &agboxv1.CacheProjectionRequest{
-			CacheId: item.GetCacheId(),
-			Enabled: item.GetEnabled(),
-		})
-	}
-	return result
-}
-
-func cloneToolingProjections(items []*agboxv1.ToolingProjectionRequest) []*agboxv1.ToolingProjectionRequest {
-	result := make([]*agboxv1.ToolingProjectionRequest, 0, len(items))
-	for _, item := range items {
-		result = append(result, &agboxv1.ToolingProjectionRequest{
-			CapabilityId: item.GetCapabilityId(),
-			Writable:     item.GetWritable(),
-			SourcePath:   item.GetSourcePath(),
-			TargetPath:   item.GetTargetPath(),
-		})
-	}
-	return result
 }
 
 func cloneKeyValues(items []*agboxv1.KeyValue) []*agboxv1.KeyValue {
@@ -1113,16 +1222,29 @@ func cloneKeyValues(items []*agboxv1.KeyValue) []*agboxv1.KeyValue {
 	return result
 }
 
-func resolveTooling(items []*agboxv1.ToolingProjectionRequest) []*agboxv1.ResolvedProjectionHandle {
-	result := make([]*agboxv1.ResolvedProjectionHandle, 0, len(items))
+func cloneHealthcheck(healthcheck *agboxv1.HealthcheckConfig) *agboxv1.HealthcheckConfig {
+	if healthcheck == nil {
+		return nil
+	}
+	return &agboxv1.HealthcheckConfig{
+		Test:          slices.Clone(healthcheck.GetTest()),
+		Interval:      healthcheck.GetInterval(),
+		Timeout:       healthcheck.GetTimeout(),
+		Retries:       healthcheck.GetRetries(),
+		StartPeriod:   healthcheck.GetStartPeriod(),
+		StartInterval: healthcheck.GetStartInterval(),
+	}
+}
+
+func cloneServiceSpecs(items []*agboxv1.ServiceSpec) []*agboxv1.ServiceSpec {
+	result := make([]*agboxv1.ServiceSpec, 0, len(items))
 	for _, item := range items {
-		result = append(result, &agboxv1.ResolvedProjectionHandle{
-			CapabilityId: item.GetCapabilityId(),
-			SourcePath:   item.GetSourcePath(),
-			TargetPath:   item.GetTargetPath(),
-			MountMode:    agboxv1.ProjectionMountMode_PROJECTION_MOUNT_MODE_BIND,
-			Writable:     item.GetWritable(),
-			WriteBack:    item.GetWritable(),
+		result = append(result, &agboxv1.ServiceSpec{
+			Name:               item.GetName(),
+			Image:              item.GetImage(),
+			Environment:        cloneKeyValues(item.GetEnvironment()),
+			Healthcheck:        cloneHealthcheck(item.GetHealthcheck()),
+			PostStartOnPrimary: slices.Clone(item.GetPostStartOnPrimary()),
 		})
 	}
 	return result
@@ -1133,28 +1255,12 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		return nil
 	}
 	return &agboxv1.SandboxHandle{
-		SandboxId:                  handle.GetSandboxId(),
-		SandboxOwner:               handle.GetSandboxOwner(),
-		State:                      handle.GetState(),
-		ResolvedToolingProjections: cloneResolvedProjections(handle.GetResolvedToolingProjections()),
-		Dependencies:               cloneDependencies(handle.GetDependencies()),
-		LastEventCursor:            handle.GetLastEventCursor(),
+		SandboxId:        handle.GetSandboxId(),
+		State:            handle.GetState(),
+		LastEventCursor:  handle.GetLastEventCursor(),
+		RequiredServices: cloneServiceSpecs(handle.GetRequiredServices()),
+		OptionalServices: cloneServiceSpecs(handle.GetOptionalServices()),
 	}
-}
-
-func cloneResolvedProjections(items []*agboxv1.ResolvedProjectionHandle) []*agboxv1.ResolvedProjectionHandle {
-	result := make([]*agboxv1.ResolvedProjectionHandle, 0, len(items))
-	for _, item := range items {
-		result = append(result, &agboxv1.ResolvedProjectionHandle{
-			CapabilityId: item.GetCapabilityId(),
-			SourcePath:   item.GetSourcePath(),
-			TargetPath:   item.GetTargetPath(),
-			MountMode:    item.GetMountMode(),
-			Writable:     item.GetWritable(),
-			WriteBack:    item.GetWriteBack(),
-		})
-	}
-	return result
 }
 
 func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {
@@ -1180,23 +1286,23 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 		return nil
 	}
 	return &agboxv1.SandboxEvent{
-		EventId:        event.GetEventId(),
-		Sequence:       event.GetSequence(),
-		Cursor:         event.GetCursor(),
-		SandboxId:      event.GetSandboxId(),
-		EventType:      event.GetEventType(),
-		OccurredAt:     event.GetOccurredAt(),
-		Replay:         event.GetReplay(),
-		Snapshot:       event.GetSnapshot(),
-		Phase:          event.GetPhase(),
-		DependencyName: event.GetDependencyName(),
-		ErrorCode:      event.GetErrorCode(),
-		ErrorMessage:   event.GetErrorMessage(),
-		Reason:         event.GetReason(),
-		ExecId:         event.GetExecId(),
-		ExitCode:       event.GetExitCode(),
-		SandboxState:   event.GetSandboxState(),
-		ExecState:      event.GetExecState(),
+		EventId:      event.GetEventId(),
+		Sequence:     event.GetSequence(),
+		Cursor:       event.GetCursor(),
+		SandboxId:    event.GetSandboxId(),
+		EventType:    event.GetEventType(),
+		OccurredAt:   event.GetOccurredAt(),
+		Replay:       event.GetReplay(),
+		Snapshot:     event.GetSnapshot(),
+		Phase:        event.GetPhase(),
+		ErrorCode:    event.GetErrorCode(),
+		ErrorMessage: event.GetErrorMessage(),
+		Reason:       event.GetReason(),
+		ExecId:       event.GetExecId(),
+		ExitCode:     event.GetExitCode(),
+		SandboxState: event.GetSandboxState(),
+		ExecState:    event.GetExecState(),
+		ServiceName:  event.GetServiceName(),
 	}
 }
 
