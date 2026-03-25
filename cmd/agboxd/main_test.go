@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,246 +11,159 @@ import (
 	"testing"
 	"time"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/control"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/1996fanrui/agents-sandbox/internal/platform"
 )
 
-func TestResolveStartupConfigDefaultsToStandardSocket(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	lookupEnv := func(key string) (string, bool) {
-		switch key {
-		case "XDG_RUNTIME_DIR":
-			return runtimeDir, true
-		default:
-			return "", false
-		}
+func TestFixedPlatformPaths(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
 	}
+	lookupEnv := fixedPathLookupEnv(t)
+	writeDaemonConfig(t, lookupEnv, `
+[runtime]
+idle_ttl = "75s"
+`)
+
 	startup, err := resolveStartupConfig(nil, lookupEnv)
 	if err != nil {
 		t.Fatalf("resolveStartupConfig returned error: %v", err)
 	}
-	if startup.socketPath != expectedDefaultSocketPathForTest(lookupEnv) {
-		t.Fatalf("unexpected socket path: got %q want %q", startup.socketPath, expectedDefaultSocketPathForTest(lookupEnv))
-	}
-	if startup.serviceConfig.IdleTTL != 30*time.Minute {
-		t.Fatalf("unexpected idle ttl: got %s", startup.serviceConfig.IdleTTL)
-	}
-}
 
-func TestResolveStartupConfigAutoLoadsDiscoveredConfig(t *testing.T) {
-	configRoot := t.TempDir()
-	configDir := filepath.Join(configRoot, "agents-sandbox")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	configPath := filepath.Join(configDir, "config.toml")
-	if err := os.WriteFile(configPath, []byte(`
-[server]
-socket_path = "/tmp/auto-discovered.sock"
-
-[runtime]
-idle_ttl = "75s"
-
-[artifacts]
-exec_output_root = "/tmp/artifacts"
-exec_output_template = "{sandbox_id}/{exec_id}.log"
-`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	startup, err := resolveStartupConfig(nil, func(key string) (string, bool) {
-		switch key {
-		case "XDG_CONFIG_HOME":
-			return configRoot, true
-		default:
-			return "", false
-		}
-	})
+	wantSocket, err := platform.SocketPath(lookupEnv)
 	if err != nil {
-		t.Fatalf("resolveStartupConfig returned error: %v", err)
+		t.Fatalf("SocketPath returned error: %v", err)
 	}
-	if startup.socketPath != "/tmp/auto-discovered.sock" {
-		t.Fatalf("unexpected socket path: got %q", startup.socketPath)
+	wantLock, err := platform.LockPath(lookupEnv)
+	if err != nil {
+		t.Fatalf("LockPath returned error: %v", err)
+	}
+	wantConfig, err := platform.ConfigFilePath(lookupEnv)
+	if err != nil {
+		t.Fatalf("ConfigFilePath returned error: %v", err)
+	}
+	wantIDStore, err := platform.IDStorePath(lookupEnv)
+	if err != nil {
+		t.Fatalf("IDStorePath returned error: %v", err)
+	}
+
+	if startup.socketPath != wantSocket {
+		t.Fatalf("unexpected socket path: got %q want %q", startup.socketPath, wantSocket)
+	}
+	if startup.lockPath != wantLock {
+		t.Fatalf("unexpected lock path: got %q want %q", startup.lockPath, wantLock)
+	}
+	if startup.idStorePath != wantIDStore {
+		t.Fatalf("unexpected id store path: got %q want %q", startup.idStorePath, wantIDStore)
 	}
 	if startup.serviceConfig.IdleTTL != 75*time.Second {
 		t.Fatalf("unexpected idle ttl: got %s", startup.serviceConfig.IdleTTL)
 	}
-	if startup.serviceConfig.ArtifactOutputRoot != "/tmp/artifacts" {
+	if startup.serviceConfig.ArtifactOutputRoot != "" {
 		t.Fatalf("unexpected artifact output root: got %q", startup.serviceConfig.ArtifactOutputRoot)
 	}
+	if _, err := os.Stat(wantConfig); err != nil {
+		t.Fatalf("expected config file to be readable at %q: %v", wantConfig, err)
+	}
 }
 
-func TestResolveStartupConfigDefaultArtifactOutputRoot(t *testing.T) {
-	dataHome := t.TempDir()
-	startup, err := resolveStartupConfig(nil, func(key string) (string, bool) {
-		switch key {
-		case "XDG_DATA_HOME":
-			return dataHome, true
-		default:
-			return "", false
+func TestDaemonRejectsLegacyPathOverrides(t *testing.T) {
+	lookupEnv := fixedPathLookupEnv(t)
+
+	for _, args := range [][]string{
+		{"--socket", "/tmp/from-flag.sock"},
+		{"--config", "/tmp/from-config.toml"},
+	} {
+		_, err := resolveStartupConfig(args, lookupEnv)
+		if err == nil {
+			t.Fatalf("expected args %v to be rejected", args)
 		}
-	})
-	if err != nil {
-		t.Fatalf("resolveStartupConfig returned error: %v", err)
-	}
-	want := filepath.Join(dataHome, "agents-sandbox", "artifacts")
-	if startup.serviceConfig.ArtifactOutputRoot != want {
-		t.Fatalf("unexpected default artifact output root: got %q want %q", startup.serviceConfig.ArtifactOutputRoot, want)
-	}
-}
-
-func TestResolveStartupConfigUsesConfigFileForSocketAndIdleTTL(t *testing.T) {
-	configPath := writeConfigFile(t, `
-[server]
-socket_path = "/tmp/from-config.sock"
-
-[runtime]
-idle_ttl = "45s"
-`)
-
-	startup, err := resolveStartupConfig([]string{"--config", configPath}, func(string) (string, bool) {
-		return "", false
-	})
-	if err != nil {
-		t.Fatalf("resolveStartupConfig returned error: %v", err)
-	}
-	if startup.socketPath != "/tmp/from-config.sock" {
-		t.Fatalf("unexpected socket path: got %q", startup.socketPath)
-	}
-	if startup.serviceConfig.IdleTTL != 45*time.Second {
-		t.Fatalf("unexpected idle ttl: got %s", startup.serviceConfig.IdleTTL)
-	}
-}
-
-func TestResolveStartupConfigUsesEnvironmentWhenFlagMissing(t *testing.T) {
-	startup, err := resolveStartupConfig(nil, func(key string) (string, bool) {
-		switch key {
-		case socketEnvVar:
-			return "/tmp/from-env.sock", true
-		case configEnvVar:
-			return "", false
-		default:
-			return "", false
+		if !strings.Contains(err.Error(), "does not accept CLI path overrides") {
+			t.Fatalf("unexpected error for args %v: %v", args, err)
 		}
-	})
-	if err != nil {
-		t.Fatalf("resolveStartupConfig returned error: %v", err)
-	}
-	if startup.socketPath != "/tmp/from-env.sock" {
-		t.Fatalf("unexpected socket path: got %q", startup.socketPath)
-	}
-}
-
-func TestResolveStartupConfigFlagOverridesEnvironmentAndConfig(t *testing.T) {
-	configPath := writeConfigFile(t, `
-[server]
-socket_path = "/tmp/from-config.sock"
-`)
-
-	startup, err := resolveStartupConfig(
-		[]string{"--socket", "/tmp/from-flag.sock"},
-		func(key string) (string, bool) {
-			switch key {
-			case socketEnvVar:
-				return "/tmp/from-env.sock", true
-			case configEnvVar:
-				return configPath, true
-			default:
-				return "", false
-			}
-		},
-	)
-	if err != nil {
-		t.Fatalf("resolveStartupConfig returned error: %v", err)
-	}
-	if startup.socketPath != "/tmp/from-flag.sock" {
-		t.Fatalf("unexpected socket path: got %q", startup.socketPath)
 	}
 }
 
 func TestResolveStartupConfigRejectsInvalidIdleTTL(t *testing.T) {
-	configPath := writeConfigFile(t, `
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
+	}
+	lookupEnv := fixedPathLookupEnv(t)
+	writeDaemonConfig(t, lookupEnv, `
 [runtime]
 idle_ttl = "never"
 `)
 
-	_, err := resolveStartupConfig([]string{"--config", configPath}, func(string) (string, bool) {
-		return "", false
-	})
+	_, err := resolveStartupConfig(nil, lookupEnv)
 	if err == nil {
 		t.Fatal("expected invalid idle ttl to fail")
 	}
 }
 
-func TestResolveLockPathKeepsHostDefaultAndCoLocatesOverride(t *testing.T) {
-	if got := resolveLockPath(defaultSocketPath); got != defaultLockPath {
-		t.Fatalf("unexpected default lock path: got %q want %q", got, defaultLockPath)
+func TestRunWithDepsUsesResolvedLockPath(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
 	}
-
-	overrideSocket := filepath.Join("/tmp", "custom", "agboxd.sock")
-	wantOverrideLock := filepath.Join("/tmp", "custom", "agboxd.lock")
-	if got := resolveLockPath(overrideSocket); got != wantOverrideLock {
-		t.Fatalf("unexpected override lock path: got %q want %q", got, wantOverrideLock)
-	}
-}
-
-func expectedDefaultSocketPathForTest(lookupEnv func(string) (string, bool)) string {
-	switch runtime.GOOS {
-	case "darwin":
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return defaultSocketPath
-		}
-		return filepath.Join(homeDir, "Library", "Application Support", "agbox", "run", "agboxd.sock")
-	default:
-		if runtimeDir, ok := lookupEnv("XDG_RUNTIME_DIR"); ok && runtimeDir != "" {
-			return filepath.Join(runtimeDir, "agbox", "agboxd.sock")
-		}
-		return defaultSocketPath
-	}
-}
-
-func TestAcquireHostLockRejectsSecondDaemonOnSameMachine(t *testing.T) {
-	lockPath := filepath.Join(t.TempDir(), "agboxd.lock")
-
-	first, err := acquireHostLock(lockPath)
+	lookupEnv := fixedPathLookupEnv(t)
+	startup, err := resolveStartupConfig(nil, lookupEnv)
 	if err != nil {
-		t.Fatalf("acquireHostLock returned error: %v", err)
+		t.Fatalf("resolveStartupConfig returned error: %v", err)
 	}
-	defer func() {
-		if releaseErr := first.release(); releaseErr != nil {
-			t.Fatalf("release returned error: %v", releaseErr)
-		}
-	}()
 
-	second, err := acquireHostLock(lockPath)
-	if err == nil {
-		_ = second.release()
-		t.Fatal("expected second host lock acquisition to fail")
+	var lockPath string
+	var socketPath string
+	var service *control.Service
+	exitCode := runWithDeps(
+		context.Background(),
+		nil,
+		io.Discard,
+		lookupEnv,
+		func(path string) (*hostLock, error) {
+			lockPath = path
+			return &hostLock{path: path}, nil
+		},
+		func(ctx context.Context, path string, svc *control.Service) error {
+			_ = ctx
+			socketPath = path
+			service = svc
+			return nil
+		},
+		control.NewServiceWithPersistentIDStore,
+	)
+
+	if exitCode != 0 {
+		t.Fatalf("unexpected exit code: got %d want 0", exitCode)
 	}
-	if !strings.Contains(err.Error(), "already held") {
-		t.Fatalf("unexpected error: %v", err)
+	if lockPath != startup.lockPath {
+		t.Fatalf("unexpected lock path: got %q want %q", lockPath, startup.lockPath)
+	}
+	if socketPath != startup.socketPath {
+		t.Fatalf("unexpected socket path: got %q want %q", socketPath, startup.socketPath)
+	}
+	if service == nil {
+		t.Fatal("expected service to be created")
 	}
 }
 
-func TestRunFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "agboxd.sock")
-	if err := os.WriteFile(socketPath, []byte("stale socket placeholder"), 0o644); err != nil {
-		t.Fatalf("write socket placeholder: %v", err)
+func TestRunWithDepsFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
+	}
+	lookupEnv := fixedPathLookupEnv(t)
+	startup, err := resolveStartupConfig(nil, lookupEnv)
+	if err != nil {
+		t.Fatalf("resolveStartupConfig returned error: %v", err)
 	}
 
 	var stderr strings.Builder
 	exitCode := runWithDeps(
 		context.Background(),
-		[]string{"--socket", socketPath},
+		nil,
 		&stderr,
-		func(string) (string, bool) { return "", false },
+		lookupEnv,
 		func(lockPath string) (*hostLock, error) {
-			wantLockPath := filepath.Join(filepath.Dir(socketPath), "agboxd.lock")
-			if lockPath != wantLockPath {
-				t.Fatalf("unexpected host lock path: got %q want %q", lockPath, wantLockPath)
+			if lockPath != startup.lockPath {
+				t.Fatalf("unexpected host lock path: got %q want %q", lockPath, startup.lockPath)
 			}
 			return nil, errors.New("lock already held")
 		},
@@ -259,83 +171,96 @@ func TestRunFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
 			t.Fatal("listenAndServe should not run when host lock acquisition fails")
 			return nil
 		},
+		control.NewServiceWithPersistentIDStore,
 	)
 
 	if exitCode != 1 {
 		t.Fatalf("unexpected exit code: got %d want 1", exitCode)
-	}
-	if _, err := os.Stat(socketPath); err != nil {
-		t.Fatalf("socket placeholder should still exist: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "lock already held") {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
 
-func TestRunStartsDaemonWithOverriddenSocketAndAdjacentLock(t *testing.T) {
-	tempDir := t.TempDir()
-	socketPath := filepath.Join(tempDir, "agboxd.sock")
-	lockPath := filepath.Join(tempDir, "agboxd.lock")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	exitCodes := make(chan int, 1)
-	go func() {
-		exitCodes <- runWithDeps(ctx, []string{"--socket", socketPath}, io.Discard, func(string) (string, bool) {
+func TestDaemonFailsFastWhenIDStoreInitFails(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
+	}
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	configRoot := filepath.Join(t.TempDir(), "config")
+	dataRoot := filepath.Join(t.TempDir(), "blocked-data-root")
+	if err := os.WriteFile(dataRoot, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	lookupEnv := func(key string) (string, bool) {
+		switch key {
+		case "XDG_RUNTIME_DIR":
+			return runtimeDir, true
+		case "XDG_CONFIG_HOME":
+			return configRoot, true
+		case "XDG_DATA_HOME":
+			return dataRoot, true
+		default:
 			return "", false
-		}, acquireHostLock, control.ListenAndServe)
-	}()
-
-	waitForDaemonPing(t, socketPath)
-
-	if _, err := os.Stat(lockPath); err != nil {
-		t.Fatalf("expected adjacent lock file to exist: %v", err)
+		}
 	}
 
-	cancel()
+	var stderr strings.Builder
+	exitCode := runWithDeps(
+		context.Background(),
+		nil,
+		&stderr,
+		lookupEnv,
+		func(path string) (*hostLock, error) {
+			return &hostLock{path: path}, nil
+		},
+		func(context.Context, string, *control.Service) error {
+			t.Fatal("listenAndServe should not run when id store initialization fails")
+			return nil
+		},
+		control.NewServiceWithPersistentIDStore,
+	)
 
-	select {
-	case exitCode := <-exitCodes:
-		if exitCode != 0 {
-			t.Fatalf("unexpected exit code: got %d want 0", exitCode)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for daemon shutdown")
+	if exitCode != 1 {
+		t.Fatalf("unexpected exit code: got %d want 1", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "initialize id store") {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
 
-func writeConfigFile(t *testing.T, content string) string {
+func fixedPathLookupEnv(t *testing.T) func(string) (string, bool) {
 	t.Helper()
-	configPath := filepath.Join(t.TempDir(), "config.toml")
+
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	configRoot := filepath.Join(t.TempDir(), "config")
+	dataRoot := filepath.Join(t.TempDir(), "data")
+	return func(key string) (string, bool) {
+		switch key {
+		case "XDG_RUNTIME_DIR":
+			return runtimeDir, true
+		case "XDG_CONFIG_HOME":
+			return configRoot, true
+		case "XDG_DATA_HOME":
+			return dataRoot, true
+		default:
+			return "", false
+		}
+	}
+}
+
+func writeDaemonConfig(t *testing.T, lookupEnv func(string) (string, bool), content string) string {
+	t.Helper()
+
+	configPath, err := platform.ConfigFilePath(lookupEnv)
+	if err != nil {
+		t.Fatalf("ConfigFilePath returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write config file: %v", err)
+		t.Fatalf("WriteFile failed: %v", err)
 	}
 	return configPath
-}
-
-func waitForDaemonPing(t *testing.T, socketPath string) {
-	t.Helper()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, err := grpc.NewClient(
-			"passthrough:///agboxd-test",
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, "unix", socketPath)
-			}),
-		)
-		if err == nil {
-			client := agboxv1.NewSandboxServiceClient(conn)
-			_, err = client.Ping(context.Background(), &agboxv1.PingRequest{})
-			_ = conn.Close()
-			if err == nil {
-				return
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("daemon socket %q was not ready for ping", socketPath)
 }

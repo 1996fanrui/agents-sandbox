@@ -2,23 +2,18 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 const version = "0.1.0"
-
-const (
-	defaultSocketPath = "/run/agbox/agboxd.sock"
-	socketEnvVar      = "AGBOX_SOCKET"
-)
 
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, os.LookupEnv))
@@ -53,14 +48,11 @@ func run(
 }
 
 func runPing(ctx context.Context, args []string, stdout io.Writer, lookupEnv func(string) (string, bool)) error {
-	flagSet := flag.NewFlagSet("ping", flag.ContinueOnError)
-	flagSet.SetOutput(io.Discard)
-	socketPath := defaultSocketPath
-	if envValue, ok := lookupEnv(socketEnvVar); ok && envValue != "" {
-		socketPath = envValue
+	if len(args) != 0 {
+		return fmt.Errorf("ping command does not accept arguments: %v", args)
 	}
-	flagSet.StringVar(&socketPath, "socket", socketPath, "Unix domain socket path for the daemon.")
-	if err := flagSet.Parse(args); err != nil {
+	socketPath, err := platform.SocketPath(lookupEnv)
+	if err != nil {
 		return err
 	}
 
