@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agbox.v1;
 
-option go_package = "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1;agboxv1";
+option go_package = "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1;agboxv1";
 
 import "google/protobuf/timestamp.proto";
 

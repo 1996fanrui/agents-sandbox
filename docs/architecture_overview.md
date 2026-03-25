@@ -138,6 +138,25 @@ Capabilities such as `.claude`, `.codex`, `uv`, `npm`, and `ssh-agent` are resol
 
 The daemon derives ownership from in-memory sandbox state plus namespaced Docker labels, and it removes primary containers, dependency containers, dedicated networks, and daemon-owned filesystem state during delete and failed create cleanup. This keeps runtime cleanup independent from any external product database.
 
+## Proto Generation
+
+Go and Python bindings are generated from `api/proto/service.proto` using pinned tool versions:
+
+| Tool | Version |
+|------|---------|
+| protoc | v6.31.1 (release tag v31.1) |
+| protoc-gen-go | v1.36.11 |
+| protoc-gen-go-grpc | v1.6.1 |
+| grpcio-tools | from `sdk/python` dev dependencies |
+
+Regenerate bindings:
+
+```bash
+bash scripts/generate_proto.sh
+```
+
+The script downloads and caches protoc in `.local/protoc/` (project-local, git-ignored) and installs Go plugins in `.local/go-bin/`. CI runs `scripts/lints/check_proto_consistency.sh` automatically through `run_test.sh lint` to ensure checked-in bindings stay in sync with the proto source.
+
 ## Related Documents
 
 - `README.md`

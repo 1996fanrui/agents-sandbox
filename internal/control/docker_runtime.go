@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1"
+	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 )

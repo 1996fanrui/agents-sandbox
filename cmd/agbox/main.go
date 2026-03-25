@@ -8,7 +8,7 @@ import (
 	"net"
 	"os"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/proto/agboxv1"
+	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
