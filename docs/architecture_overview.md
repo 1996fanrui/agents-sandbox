@@ -14,7 +14,7 @@ flowchart LR
     Daemon --> Service[control.Service]
     Service --> IDDB[Persistent historical ID registry\nids.db]
     Service --> Runtime[Docker runtime backend]
-    Runtime --> Docker[Docker daemon]
+    Runtime --> Docker[Docker daemon\nvia Engine API SDK]
     Service --> Memory[In-memory sandbox, exec,\nand event state]
     Runtime --> StateRoot[Optional runtime state root\nfor copies and shadow copies]
     Runtime --> Artifacts[Optional exec output artifacts]
@@ -22,10 +22,10 @@ flowchart LR
 
 ### Main components
 
-- `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, and serves gRPC over a Unix domain socket.
+- `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
 - `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, cursor generation, and async operation orchestration.
-- `internal/control/id_registry.go` owns the persistent bbolt-backed historical ID registry that reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts.
-- `internal/control/docker_runtime.go` is the concrete runtime backend. It materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
+- `internal/control/id_registry.go` owns the persistent bbolt-backed historical ID registry that reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts and joins the registry closer with the runtime closer.
+- `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
 - `internal/profile` defines daemon-managed built-in resources such as `.claude`, `.codex`, `uv`, `npm`, `apt`, `gh-auth`, and `ssh-agent`.
 - `api/proto/service.proto` is the transport contract shared by Go and Python.
 - `sdk/python` contains a thin raw gRPC wrapper plus the public async `AgentsSandboxClient`, which adds `wait=True/False`, event-based waiting, cursor handling, and public handle models.
@@ -36,7 +36,7 @@ flowchart LR
 2. The service performs synchronous fail-fast validation for create inputs, service declarations, builtin resource IDs, historical ID reuse, and exec command shape.
 3. During `CreateSandbox` and `CreateExec`, the daemon reserves the final `sandbox_id` or `exec_id` in the persistent historical ID registry before accepting the request. When the caller omits an ID, the daemon generates and reserves a UUID v4 first.
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
-5. The runtime backend performs Docker-side work and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
+5. The runtime backend performs Docker-side work through a shared Docker Engine API client and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
 6. The service updates authoritative sandbox or exec state, appends ordered events with `cursor` and `sequence`, and exposes the latest snapshot through `GetSandbox` and `GetExec`.
 7. The Python SDK optionally waits on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`.
 
@@ -99,6 +99,7 @@ This supports long-running orchestration, reconnect after temporary client loss,
 - gRPC transport is exposed over a Unix domain socket only, at a hardcoded platform-specific path (not configurable).
 - The current service keeps sandbox records, exec records, and event history in memory. Event replay works for the daemon process lifetime, but a daemon restart resets replay history for active sandboxes.
 - Caller-visible ID uniqueness is stronger than in-memory lifecycle state: the daemon persists historical `sandbox_id` and `exec_id` reservations in a platform-derived `ids.db` file so old IDs remain unavailable after daemon restart.
+- Runtime stop, delete, and failed-create cleanup do not reuse caller RPC contexts. The service and runtime switch to daemon-owned background contexts so cleanup can finish even if the initiating request has already ended.
 
 ### Filesystem and security constraints
 
@@ -111,7 +112,7 @@ This supports long-running orchestration, reconnect after temporary client loss,
 ### External dependencies
 
 - Go daemon and protocol implementation
-- Docker CLI and Docker daemon interaction in the runtime backend
+- Docker Engine API Go SDK and a reachable Docker daemon
 - gRPC and protobuf for the wire contract
 - Python `grpcio` client stack and `uv`-managed SDK environment
 - Optional host resources such as `SSH_AUTH_SOCK`, `~/.claude`, `~/.codex`, `~/.agents`, and local cache directories
@@ -125,6 +126,10 @@ Slow operations return after acceptance, not after completion. The service then 
 ### Historical IDs are reserved persistently, not only while a sandbox is live
 
 Caller-provided `sandbox_id` and `exec_id` values are part of the external contract, so the daemon does not treat them as temporary in-memory handles. It reserves them in a persistent registry before accepting create operations, which prevents accidental ID reuse after daemon restart and keeps conflict detection independent from Docker object discovery or any external product database.
+
+### Docker access stays on one structured client path
+
+The runtime backend uses a single Docker Engine API client per service instance instead of spawning Docker CLI subprocesses for inspect, lifecycle, image, or exec work. This keeps Docker interactions on structured API surfaces, removes text-parsing dependencies, and makes shutdown explicit because the runtime client is returned as part of the daemon's closer chain.
 
 ### The public Python SDK is direct-parameter, not request-wrapper driven
 
@@ -144,7 +149,7 @@ Capabilities such as `.claude`, `.codex`, `uv`, `npm`, and `ssh-agent` are resol
 
 ### Cleanup and ownership stay runtime-local
 
-The daemon derives ownership from in-memory sandbox state plus namespaced Docker labels, and it removes primary containers, service containers (both required and optional), dedicated networks, and daemon-owned filesystem state during delete and failed create cleanup. This keeps runtime cleanup independent from any external product database.
+The daemon derives ownership from in-memory sandbox state plus namespaced Docker labels, and it removes primary containers, service containers (both required and optional), dedicated networks, and daemon-owned filesystem state during delete and failed create cleanup. Cleanup runs on daemon-owned contexts instead of request-scoped cancellation, which keeps teardown reliable after accepted async operations and failed materialization paths.
 
 ## Proto Generation
 

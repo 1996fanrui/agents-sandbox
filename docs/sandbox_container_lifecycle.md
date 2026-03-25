@@ -110,6 +110,7 @@ Create-path rules:
 - The daemon must return a specific error code when a caller-provided `sandbox_id` duplicates an existing active sandbox.
 - Required services must each pass their healthcheck before the sandbox reaches `READY`.
 - Optional services only report their initial create/start result in V1; they are not restarted or runtime-monitored after readiness is reached.
+- If materialization fails after runtime resources already exist, cleanup continues on a daemon-owned background context with a bounded timeout instead of depending on the initiating request lifetime.
 
 ## Resume Path
 
@@ -153,7 +154,8 @@ flowchart LR
 Delete-path rules:
 
 - Delete is asynchronous and immediately acknowledged.
-- Cleanup removes runtime-owned Docker resources and runtime-owned filesystem state.
+- Stop and delete continue on daemon-owned background contexts, so teardown is not cancelled when the initiating RPC has already returned.
+- Cleanup removes runtime-owned Docker resources and runtime-owned filesystem state through structured Docker Engine API calls with idempotent not-found handling.
 - Product-owned metadata cleanup is outside the scope of this repository.
 
 ## Reconciliation
@@ -168,3 +170,5 @@ It must be able to detect and converge:
 - dedicated networks without live runtime membership
 
 Reconciliation must use structured audit logs and explicit action reasons and strategies.
+
+Runtime cleanup and reconciliation decisions must derive from structured Docker metadata and the daemon's recorded runtime state, not from parsing human-oriented Docker CLI output.
