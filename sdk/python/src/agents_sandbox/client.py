@@ -41,13 +41,10 @@ from .types import (
     PingInfo,
     SandboxEvent,
     SandboxHandle,
-    SandboxOwner,
 )
 
 _DEFAULT_SOCKET_PATH = "/run/agbox/agboxd.sock"
 _SOCKET_ENV_VAR = "AGBOX_SOCKET"
-_SDK_OWNER_PRODUCT = "agents-sandbox-sdk"
-_SDK_OWNER_TYPE = "sandbox_owner"
 
 
 def _resolve_default_socket_path(
@@ -86,14 +83,6 @@ def _resolve_sandbox_owner_id(sandbox_owner: str | None) -> str:
     if sandbox_owner == "":
         raise ValueError("sandbox_owner must not be empty")
     return sandbox_owner
-
-
-def _to_internal_sandbox_owner(owner_id: str) -> SandboxOwner:
-    return SandboxOwner(
-        product=_SDK_OWNER_PRODUCT,
-        owner_type=_SDK_OWNER_TYPE,
-        owner_id=owner_id,
-    )
 
 
 class AgentsSandboxClient:
@@ -138,9 +127,8 @@ class AgentsSandboxClient:
         dependencies: tuple[DependencySpec, ...] = (),
         wait: bool = True,
     ) -> SandboxHandle:
-        owner_id = _resolve_sandbox_owner_id(sandbox_owner)
         request = CreateSandboxRequest(
-            sandbox_owner=_to_internal_sandbox_owner(owner_id),
+            sandbox_owner=_resolve_sandbox_owner_id(sandbox_owner),
             create_spec=CreateSandboxSpec(
                 image=image,
                 dependencies=dependencies,
@@ -155,7 +143,7 @@ class AgentsSandboxClient:
                 to_proto_create_sandbox_request(request),
             )
         except SandboxConflictError as exc:
-            raise SandboxConflictError(f"Sandbox already exists for owner {owner_id}.") from exc
+            raise SandboxConflictError(f"Sandbox already exists for owner {request.sandbox_owner}.") from exc
         current = await self.get_sandbox(response.sandbox_id)
         if not wait:
             return current

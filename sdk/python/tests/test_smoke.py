@@ -249,8 +249,7 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
     ]
     assert servicer.subscribe_requests[0].from_cursor == "0"
     assert servicer.create_requests[0].create_spec.image == "python:3.12-slim"
-    assert servicer.create_requests[0].sandbox_owner.owner_id == "owner-1"
-    assert servicer.create_requests[0].sandbox_owner.product == "agents-sandbox-sdk"
+    assert servicer.create_requests[0].sandbox_owner == "owner-1"
     assert servicer.create_exec_requests[0].cwd == "/workspace"
 
 
@@ -278,7 +277,7 @@ def test_create_sandbox_sandbox_owner_serializes_explicit_and_generated_owner(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor=f"{sandbox_id}:1",
                 )
@@ -294,10 +293,8 @@ def test_create_sandbox_sandbox_owner_serializes_explicit_and_generated_owner(
 
     asyncio.run(run_test())
 
-    assert _FakeRawSandboxClient.create_requests[0].sandbox_owner.owner_id == "owner-1"
-    assert _FakeRawSandboxClient.create_requests[1].sandbox_owner.owner_id == "generated-owner"
-    assert _FakeRawSandboxClient.create_requests[0].sandbox_owner.product == "agents-sandbox-sdk"
-    assert _FakeRawSandboxClient.create_requests[0].sandbox_owner.owner_type == "sandbox_owner"
+    assert _FakeRawSandboxClient.create_requests[0].sandbox_owner == "owner-1"
+    assert _FakeRawSandboxClient.create_requests[1].sandbox_owner == "generated-owner"
 
 
 def test_create_sandbox_mounts_copies_and_builtin_resources_serialize_to_proto(
@@ -324,7 +321,7 @@ def test_create_sandbox_mounts_copies_and_builtin_resources_serialize_to_proto(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor=f"{sandbox_id}:1",
                 )
@@ -445,7 +442,7 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor="sandbox-1:10",
                 )
@@ -513,7 +510,7 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=state,
                     last_event_cursor=cursor,
                 )
@@ -588,7 +585,7 @@ def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_termina
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor="sandbox-1:9",
                 )
@@ -674,7 +671,7 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=state,
                     last_event_cursor=cursor,
                 )
@@ -818,7 +815,7 @@ def test_agents_sandbox_client_waits_for_exec_terminal_with_replay_dedupe(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor="sandbox-1:10",
                 )
@@ -907,7 +904,7 @@ def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor="sandbox-1:12",
                 )
@@ -1140,7 +1137,7 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
         return service_pb2.GetSandboxResponse(
             sandbox=service_pb2.SandboxHandle(
                 sandbox_id=request.sandbox_id,
-                owner=_owner_pb(),
+                sandbox_owner="owner-1",
                 state=service_pb2.SANDBOX_STATE_READY,
                 resolved_tooling_projections=[
                     service_pb2.ResolvedProjectionHandle(
@@ -1169,7 +1166,7 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
             sandboxes=[
                 service_pb2.SandboxHandle(
                     sandbox_id="sandbox-1",
-                    owner=_owner_pb(),
+                    sandbox_owner="owner-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_cursor="sandbox-1:2",
                 )
@@ -1263,14 +1260,6 @@ class _ErrorSandboxService(service_pb2_grpc.SandboxServiceServicer):
         del request
         context.abort_with_status(_rich_status(self._reason))
         yield service_pb2.SandboxEvent()
-
-
-def _owner_pb() -> service_pb2.SandboxOwner:
-    return service_pb2.SandboxOwner(
-        product="consumer",
-        owner_type="workspace",
-        owner_id="owner-1",
-    )
 
 
 def _event_pb(

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 
 class SandboxClientError(RuntimeError):
     """Base error for SDK failures."""
@@ -12,18 +10,13 @@ class SandboxClientError(RuntimeError):
 class SandboxConflictError(SandboxClientError):
     """Raised when a sandbox owner already has an active sandbox."""
 
-    def __init__(self, sandbox_owner: Any = None):
+    def __init__(self, sandbox_owner: str | None = None):
         if sandbox_owner is None:
             message = "Sandbox already exists."
-        elif isinstance(sandbox_owner, str):
-            message = sandbox_owner
         else:
-            message = (
-                "Sandbox already exists for owner "
-                f"{sandbox_owner.product}/{sandbox_owner.owner_type}/{sandbox_owner.owner_id}."
-            )
+            message = sandbox_owner
         super().__init__(message)
-        self.sandbox_owner = None if isinstance(sandbox_owner, str) else sandbox_owner
+        self.sandbox_owner = sandbox_owner
 
 
 class SandboxNotFoundError(SandboxClientError):

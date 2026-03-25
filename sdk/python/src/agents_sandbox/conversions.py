@@ -24,21 +24,12 @@ from .types import (
     ResolvedProjectionHandle,
     SandboxEvent,
     SandboxHandle,
-    SandboxOwner,
     WorkspaceMaterializationSpec,
 )
 
 
 def to_ping_info(response: service_pb2.PingResponse) -> PingInfo:
     return PingInfo(version=response.version, daemon=response.daemon)
-
-
-def to_proto_sandbox_owner(owner: SandboxOwner) -> service_pb2.SandboxOwner:
-    return service_pb2.SandboxOwner(
-        product=owner.product,
-        owner_type=owner.owner_type,
-        owner_id=owner.owner_id,
-    )
 
 
 def to_proto_caller_metadata(metadata: CallerMetadata) -> service_pb2.CallerMetadata:
@@ -59,7 +50,7 @@ def to_proto_workspace_spec(workspace: WorkspaceMaterializationSpec) -> service_
 
 def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb2.CreateSandboxRequest:
     return service_pb2.CreateSandboxRequest(
-        sandbox_owner=to_proto_sandbox_owner(request.sandbox_owner),
+        sandbox_owner=request.sandbox_owner,
         create_spec=service_pb2.CreateSpec(
             image=request.create_spec.image,
             workspace=(
@@ -137,14 +128,6 @@ def to_proto_create_exec_request(request: CreateExecRequest) -> service_pb2.Crea
     )
 
 
-def to_sandbox_owner(owner: service_pb2.SandboxOwner) -> SandboxOwner:
-    return SandboxOwner(
-        product=owner.product,
-        owner_type=owner.owner_type,
-        owner_id=owner.owner_id,
-    )
-
-
 def to_dependency(spec: service_pb2.DependencySpec) -> DependencySpec:
     return DependencySpec(
         name=spec.dependency_name,
@@ -170,7 +153,7 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         parse_cursor_sequence(handle.sandbox_id, handle.last_event_cursor)
     return SandboxHandle(
         sandbox_id=handle.sandbox_id,
-        sandbox_owner=to_sandbox_owner(handle.owner),
+        sandbox_owner=handle.sandbox_owner,
         state=map_sandbox_state(handle.state),
         resolved_tooling_projections=tuple(
             to_resolved_projection_handle(item) for item in handle.resolved_tooling_projections
@@ -283,8 +266,6 @@ __all__ = [
     "to_ping_info",
     "to_proto_create_exec_request",
     "to_proto_create_sandbox_request",
-    "to_proto_sandbox_owner",
     "to_sandbox_event",
     "to_sandbox_handle",
-    "to_sandbox_owner",
 ]
