@@ -3,7 +3,7 @@ package docker
 import "testing"
 
 func TestRuntimeLabelsUseReverseDNSNamespace(t *testing.T) {
-	sandboxLabels := SandboxLabels("sandbox-1", "aihub|session|session-1", "default")
+	sandboxLabels := SandboxLabels("sandbox-1", "default")
 	if sandboxLabels[LabelSandboxID] != "sandbox-1" {
 		t.Fatalf("unexpected sandbox id label: %#v", sandboxLabels)
 	}
@@ -14,11 +14,11 @@ func TestRuntimeLabelsUseReverseDNSNamespace(t *testing.T) {
 		t.Fatalf("unexpected label namespace: %s", LabelNamespace)
 	}
 
-	dependencyLabels := DependencyLabels("sandbox-1", "aihub|session|session-1", "db")
-	if dependencyLabels[LabelComponent] != "dependency" {
-		t.Fatalf("unexpected dependency component label: %#v", dependencyLabels)
+	serviceLabels := ServiceLabels("sandbox-1", "db")
+	if serviceLabels[LabelComponent] != "service" {
+		t.Fatalf("unexpected service component label: %#v", serviceLabels)
 	}
-	if dependencyLabels[LabelDependencyName] != "db" {
-		t.Fatalf("unexpected dependency label payload: %#v", dependencyLabels)
+	if serviceLabels[LabelServiceName] != "db" {
+		t.Fatalf("unexpected service label payload: %#v", serviceLabels)
 	}
 }

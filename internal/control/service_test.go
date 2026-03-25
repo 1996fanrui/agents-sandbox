@@ -3,15 +3,20 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/google/uuid"
+	bbolt "go.etcd.io/bbolt"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -28,11 +33,17 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: "session-1",
+		SandboxId: "session-1",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			Dependencies: []*agboxv1.DependencySpec{
-				{DependencyName: "db", Image: "postgres:16"},
+			RequiredServices: []*agboxv1.ServiceSpec{
+				{
+					Name:  "db",
+					Image: "postgres:16",
+					Healthcheck: &agboxv1.HealthcheckConfig{
+						Test: []string{"CMD", "true"},
+					},
+				},
 			},
 		},
 	})
@@ -53,7 +64,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	wantLifecycle := []agboxv1.EventType{
 		agboxv1.EventType_SANDBOX_ACCEPTED,
 		agboxv1.EventType_SANDBOX_PREPARING,
-		agboxv1.EventType_SANDBOX_DEPENDENCY_READY,
+		agboxv1.EventType_SANDBOX_SERVICE_READY,
 		agboxv1.EventType_SANDBOX_READY,
 	}
 	for index, eventType := range wantLifecycle {
@@ -201,6 +212,340 @@ func TestExplicitErrorSemantics(t *testing.T) {
 	}
 }
 
+func TestCallerProvidedSandboxID(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "issue11-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	if createResp.GetSandboxId() != "issue11-sandbox" {
+		t.Fatalf("unexpected sandbox id: %q", createResp.GetSandboxId())
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	eventCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stream, err := client.SubscribeSandboxEvents(eventCtx, &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId:              createResp.GetSandboxId(),
+		IncludeCurrentSnapshot: true,
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Recv failed: %v", err)
+	}
+	if event.GetSandboxId() != "issue11-sandbox" {
+		t.Fatalf("unexpected event sandbox id: %q", event.GetSandboxId())
+	}
+
+	resp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: "issue11-sandbox"})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if resp.GetSandbox().GetSandboxId() != "issue11-sandbox" {
+		t.Fatalf("unexpected handle sandbox id: %q", resp.GetSandbox().GetSandboxId())
+	}
+}
+
+func TestCallerProvidedSandboxIDValidation(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+	invalidIDs := []string{
+		"MyBox",
+		"my_box",
+		"-mybox",
+		"mybox-",
+		"ab",
+		"a234567890123456789012345678901234567890123456789012345678901234",
+		"my/box",
+		"my.box",
+	}
+	for _, sandboxID := range invalidIDs {
+		t.Run(sandboxID, func(t *testing.T) {
+			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+				SandboxId:  sandboxID,
+				CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+			})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("expected invalid argument, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCallerProvidedSandboxIDDuplicate(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+
+	if _, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "dup-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	}); err != nil {
+		t.Fatalf("CreateSandbox(first) failed: %v", err)
+	}
+	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "dup-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected already exists, got %v", err)
+	}
+	assertErrorReason(t, err, ReasonSandboxIDAlreadyExists)
+}
+
+func TestDaemonGeneratedSandboxIDUsesUUIDAndRegistry(t *testing.T) {
+	registry := newMemoryIDRegistry()
+	client := newBufconnClient(t, ServiceConfig{idRegistry: registry})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	if _, err := uuid.Parse(createResp.GetSandboxId()); err != nil {
+		t.Fatalf("expected UUIDv4 sandbox id, got %q: %v", createResp.GetSandboxId(), err)
+	}
+	if _, ok := registry.sandboxIDs[createResp.GetSandboxId()]; !ok {
+		t.Fatalf("sandbox id %q was not recorded in registry", createResp.GetSandboxId())
+	}
+	if err := registry.ReserveSandboxID(createResp.GetSandboxId(), time.Now().UTC()); !errors.Is(err, errSandboxIDAlreadyExists) {
+		t.Fatalf("expected duplicate registry reservation to fail, got %v", err)
+	}
+}
+
+func TestCallerProvidedExecID(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "issue11-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "issue11-exec",
+		Command:   []string{"echo", "hello"},
+	})
+	if err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+	if execResp.GetExecId() != "issue11-exec" {
+		t.Fatalf("unexpected exec id: %q", execResp.GetExecId())
+	}
+	resp, err := client.GetExec(context.Background(), &agboxv1.GetExecRequest{ExecId: "issue11-exec"})
+	if err != nil {
+		t.Fatalf("GetExec failed: %v", err)
+	}
+	if resp.GetExec().GetExecId() != "issue11-exec" {
+		t.Fatalf("unexpected exec handle: %q", resp.GetExec().GetExecId())
+	}
+}
+
+func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "exec-validation-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	for _, execID := range []string{"MyExec", "my_exec", "-myexec", "ab"} {
+		t.Run("invalid-"+execID, func(t *testing.T) {
+			_, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+				SandboxId: createResp.GetSandboxId(),
+				ExecId:    execID,
+				Command:   []string{"echo"},
+			})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("expected invalid argument, got %v", err)
+			}
+		})
+	}
+
+	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "dup-exec",
+		Command:   []string{"echo"},
+	}); err != nil {
+		t.Fatalf("CreateExec(first) failed: %v", err)
+	}
+	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "dup-exec",
+		Command:   []string{"echo"},
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected already exists, got %v", err)
+	}
+	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
+
+	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		Command:   []string{"echo", "uuid"},
+	})
+	if err != nil {
+		t.Fatalf("CreateExec(generated) failed: %v", err)
+	}
+	if _, err := uuid.Parse(execResp.GetExecId()); err != nil {
+		t.Fatalf("expected UUID exec id, got %q: %v", execResp.GetExecId(), err)
+	}
+}
+
+func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	registry, err := openPersistentIDRegistry(dbPath)
+	if err != nil {
+		t.Fatalf("openPersistentIDRegistry(first) failed: %v", err)
+	}
+	client := newBufconnClient(t, ServiceConfig{idRegistry: registry})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "persistent-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "persistent-exec",
+		Command:   []string{"echo"},
+	}); err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close(first registry) failed: %v", err)
+	}
+
+	db, err := bbolt.Open(dbPath, 0o600, &bbolt.Options{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("bbolt.Open(readonly) failed: %v", err)
+	}
+	if err := db.View(func(tx *bbolt.Tx) error {
+		bucketNames := []string{string(sandboxIDBucket), string(execIDBucket)}
+		for _, bucketName := range bucketNames {
+			bucket := tx.Bucket([]byte(bucketName))
+			if bucket == nil {
+				t.Fatalf("missing bucket %q", bucketName)
+			}
+		}
+		rawSandbox := tx.Bucket(sandboxIDBucket).Get([]byte("persistent-sandbox"))
+		rawExec := tx.Bucket(execIDBucket).Get([]byte("persistent-exec"))
+		if _, err := time.Parse(time.RFC3339Nano, string(rawSandbox)); err != nil {
+			t.Fatalf("sandbox registry timestamp is invalid: %v", err)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, string(rawExec)); err != nil {
+			t.Fatalf("exec registry timestamp is invalid: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("db.View failed: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close(readonly db) failed: %v", err)
+	}
+
+	registry2, err := openPersistentIDRegistry(dbPath)
+	if err != nil {
+		t.Fatalf("openPersistentIDRegistry(second) failed: %v", err)
+	}
+	defer registry2.Close()
+	client2 := newBufconnClient(t, ServiceConfig{idRegistry: registry2})
+
+	_, err = client2.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "persistent-sandbox",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected already exists for sandbox id, got %v", err)
+	}
+	assertErrorReason(t, err, ReasonSandboxIDAlreadyExists)
+
+	secondSandbox, err := client2.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "persistent-sandbox-2",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox(second) failed: %v", err)
+	}
+	waitForSandboxState(t, client2, secondSandbox.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	_, err = client2.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: secondSandbox.GetSandboxId(),
+		ExecId:    "persistent-exec",
+		Command:   []string{"echo"},
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected already exists for exec id, got %v", err)
+	}
+	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
+}
+
+func TestSandboxOwnerRemoved(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+
+	if _, ok := reflect.TypeOf(agboxv1.CreateSandboxRequest{}).FieldByName("SandboxOwner"); ok {
+		t.Fatal("CreateSandboxRequest should not expose SandboxOwner")
+	}
+	if _, ok := reflect.TypeOf(agboxv1.SandboxHandle{}).FieldByName("SandboxOwner"); ok {
+		t.Fatal("SandboxHandle should not expose SandboxOwner")
+	}
+	if _, ok := reflect.TypeOf(agboxv1.ListSandboxesRequest{}).FieldByName("SandboxOwner"); ok {
+		t.Fatal("ListSandboxesRequest should not expose SandboxOwner")
+	}
+
+	first, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "owner-removed-1",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+		CallerMetadata: &agboxv1.CallerMetadata{
+			Product: "p",
+			RunId:   "r1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox(first) failed: %v", err)
+	}
+	second, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "owner-removed-2",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+		CallerMetadata: &agboxv1.CallerMetadata{
+			Product: "p",
+			RunId:   "r1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox(second) failed: %v", err)
+	}
+	if first.GetSandboxId() == second.GetSandboxId() {
+		t.Fatal("expected distinct sandbox ids")
+	}
+
+	_, err = client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "owner-removed-1",
+		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+		CallerMetadata: &agboxv1.CallerMetadata{
+			Product: "p",
+			RunId:   "r2",
+		},
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("expected duplicate sandbox id to fail, got %v", err)
+	}
+	assertErrorReason(t, err, ReasonSandboxIDAlreadyExists)
+}
+
 func TestCreateSandboxRequiresExplicitImage(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -222,7 +567,7 @@ func TestCreateSandboxRequiresExplicitImage(t *testing.T) {
 		{
 			name: "missing_create_spec",
 			request: &agboxv1.CreateSandboxRequest{
-				SandboxOwner: "session-missing-spec",
+				SandboxId: "session-missing-spec",
 			},
 		},
 		{
@@ -275,7 +620,7 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.
 	}
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: "session-generic-inputs",
+		SandboxId: "session-generic-inputs",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "example.com/custom/runtime:1.2.3",
 			Mounts: []*agboxv1.MountSpec{
@@ -310,7 +655,7 @@ func TestCreateSandboxRejectsConflictingGenericTargets(t *testing.T) {
 	})
 
 	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: "session-conflict",
+		SandboxId: "session-conflict",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
 			Mounts: []*agboxv1.MountSpec{
@@ -361,7 +706,7 @@ func TestCreateSandboxRejectsInvalidGenericSourcesBeforeRuntime(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-				SandboxOwner: "session-" + testCase.name,
+				SandboxId:  "session-" + testCase.name,
 				CreateSpec: testCase.createSpec,
 			})
 			if status.Code(err) != codes.InvalidArgument {
@@ -383,7 +728,7 @@ func TestCreateSandboxRejectsUnknownBuiltinResourcesBeforeRuntime(t *testing.T) 
 	})
 
 	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: "session-unknown-builtin",
+		SandboxId: "session-unknown-builtin",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
 			BuiltinResources: []string{"missing-builtin"},
@@ -397,7 +742,7 @@ func TestCreateSandboxRejectsUnknownBuiltinResourcesBeforeRuntime(t *testing.T) 
 	}
 }
 
-func TestCreateSandboxRejectsInvalidDependenciesBeforeRuntime(t *testing.T) {
+func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -406,27 +751,34 @@ func TestCreateSandboxRejectsInvalidDependenciesBeforeRuntime(t *testing.T) {
 	})
 
 	testCases := []struct {
-		name         string
-		dependencies []*agboxv1.DependencySpec
+		name            string
+		required        []*agboxv1.ServiceSpec
+		optional        []*agboxv1.ServiceSpec
+		expectedErrPart string
 	}{
 		{
-			name: "empty_dependency_name",
-			dependencies: []*agboxv1.DependencySpec{
-				{DependencyName: "", Image: "postgres:16"},
+			name: "empty_service_name",
+			required: []*agboxv1.ServiceSpec{
+				{Name: "", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
 			},
+			expectedErrPart: "service name is required",
 		},
 		{
-			name: "empty_dependency_image",
-			dependencies: []*agboxv1.DependencySpec{
-				{DependencyName: "postgres", Image: ""},
+			name: "required_missing_healthcheck",
+			required: []*agboxv1.ServiceSpec{
+				{Name: "postgres", Image: "postgres:16"},
 			},
+			expectedErrPart: "must define healthcheck",
 		},
 		{
-			name: "duplicate_dependency_name",
-			dependencies: []*agboxv1.DependencySpec{
-				{DependencyName: "postgres", Image: "postgres:16"},
-				{DependencyName: "postgres", Image: "postgres:17"},
+			name: "duplicate_service_name",
+			required: []*agboxv1.ServiceSpec{
+				{Name: "postgres", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
 			},
+			optional: []*agboxv1.ServiceSpec{
+				{Name: "postgres", Image: "postgres:17"},
+			},
+			expectedErrPart: "duplicate service name",
 		},
 	}
 
@@ -434,14 +786,18 @@ func TestCreateSandboxRejectsInvalidDependenciesBeforeRuntime(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runtime.lastCreateSpec = nil
 			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-				SandboxOwner: "session-" + testCase.name,
+				SandboxId: "session-" + testCase.name,
 				CreateSpec: &agboxv1.CreateSpec{
-					Image:        "ghcr.io/agents-sandbox/coding-runtime:test",
-					Dependencies: testCase.dependencies,
+					Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
+					RequiredServices: testCase.required,
+					OptionalServices: testCase.optional,
 				},
 			})
 			if status.Code(err) != codes.InvalidArgument {
 				t.Fatalf("expected invalid argument, got %v", err)
+			}
+			if testCase.expectedErrPart != "" && !strings.Contains(err.Error(), testCase.expectedErrPart) {
+				t.Fatalf("expected error to contain %q, got %v", testCase.expectedErrPart, err)
 			}
 			if runtime.lastCreateSpec != nil {
 				t.Fatalf("expected runtime backend to stay untouched, got %#v", runtime.lastCreateSpec)
@@ -847,8 +1203,12 @@ func (backend *capturingRuntimeBackend) CreateSandbox(_ context.Context, record 
 	return fakeRuntimeBackend{}.CreateSandbox(context.Background(), record)
 }
 
-func (*capturingRuntimeBackend) ResumeSandbox(context.Context, *sandboxRecord) error {
-	return nil
+func (backend *capturingRuntimeBackend) ResumeSandbox(context.Context, *sandboxRecord) (runtimeResumeResult, error) {
+	return runtimeResumeResult{
+		ServiceStatuses: []runtimeServiceStatus{
+			{Name: "default", Required: true, Ready: true},
+		},
+	}, nil
 }
 
 func (*capturingRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error {
@@ -866,13 +1226,29 @@ func (backend *capturingRuntimeBackend) RunExec(context.Context, *sandboxRecord,
 	return backend.execResult, nil
 }
 
-func createSandboxRequest(sandboxOwner string, image string) *agboxv1.CreateSandboxRequest {
+func createSandboxRequest(sandboxID string, image string) *agboxv1.CreateSandboxRequest {
 	return &agboxv1.CreateSandboxRequest{
-		SandboxOwner: sandboxOwner,
-		CreateSpec:   createSpecWithImage(image),
+		SandboxId:  sandboxID,
+		CreateSpec: createSpecWithImage(image),
 	}
 }
 
 func createSpecWithImage(image string) *agboxv1.CreateSpec {
 	return &agboxv1.CreateSpec{Image: image}
+}
+
+func assertErrorReason(t *testing.T, err error, want string) {
+	t.Helper()
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %v", err)
+	}
+	for _, detail := range st.Details() {
+		info, ok := detail.(*errdetails.ErrorInfo)
+		if ok && info.GetReason() == want {
+			return
+		}
+	}
+	t.Fatalf("expected reason %q in error details, got %v", want, st.Details())
 }
