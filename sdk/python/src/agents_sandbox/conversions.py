@@ -5,26 +5,19 @@ from __future__ import annotations
 from datetime import UTC
 
 from ._generated import service_pb2
-from .models import (
-    ExecState,
-    ProjectionMountMode,
-    SandboxEventType,
-    SandboxState,
-    WorkspaceMaterializationMode,
-)
+from .models import ExecState, SandboxEventType, SandboxState
 from .types import (
     CallerMetadata,
     CopySpec,
     CreateExecRequest,
     CreateSandboxRequest,
-    DependencySpec,
     ExecHandle,
+    HealthcheckConfig,
     MountSpec,
     PingInfo,
-    ResolvedProjectionHandle,
     SandboxEvent,
     SandboxHandle,
-    WorkspaceMaterializationSpec,
+    ServiceSpec,
 )
 
 
@@ -40,60 +33,48 @@ def to_proto_caller_metadata(metadata: CallerMetadata) -> service_pb2.CallerMeta
     )
 
 
-def to_proto_workspace_spec(workspace: WorkspaceMaterializationSpec) -> service_pb2.WorkspaceSpec:
-    resolved_mode = _WORKSPACE_MODE_TO_PROTO[workspace.mode]
-    return service_pb2.WorkspaceSpec(
-        path="" if workspace.source_root is None else workspace.source_root,
-        mode=resolved_mode,
+def to_proto_healthcheck(config: HealthcheckConfig) -> service_pb2.HealthcheckConfig:
+    return service_pb2.HealthcheckConfig(
+        test=list(config.test),
+        interval="" if config.interval is None else config.interval,
+        timeout="" if config.timeout is None else config.timeout,
+        retries=0 if config.retries is None else config.retries,
+        start_period="" if config.start_period is None else config.start_period,
+        start_interval="" if config.start_interval is None else config.start_interval,
+    )
+
+
+def to_proto_service(spec: ServiceSpec) -> service_pb2.ServiceSpec:
+    return service_pb2.ServiceSpec(
+        name=spec.name,
+        image=spec.image,
+        environment=[
+            service_pb2.KeyValue(key=key, value=value)
+            for key, value in spec.environment.items()
+        ],
+        healthcheck=(
+            None
+            if spec.healthcheck is None
+            else to_proto_healthcheck(spec.healthcheck)
+        ),
+        post_start_on_primary=list(spec.post_start_on_primary),
     )
 
 
 def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb2.CreateSandboxRequest:
     return service_pb2.CreateSandboxRequest(
-        sandbox_owner=request.sandbox_owner,
+        sandbox_id="" if request.sandbox_id is None else request.sandbox_id,
         create_spec=service_pb2.CreateSpec(
             image=request.create_spec.image,
-            workspace=(
-                None
-                if request.create_spec.workspace is None
-                else to_proto_workspace_spec(request.create_spec.workspace)
-            ),
-            cache_projections=[
-                service_pb2.CacheProjectionRequest(
-                    cache_id=item.capability_id,
-                    enabled=item.enabled,
-                )
-                for item in request.create_spec.cache_projections
-            ],
-            tooling_projections=[
-                service_pb2.ToolingProjectionRequest(
-                    capability_id=item.capability_id,
-                    writable=item.writable,
-                    source_path="" if item.source_root is None else item.source_root,
-                    target_path="" if item.target_path is None else item.target_path,
-                )
-                for item in request.create_spec.tooling_projections
-            ],
-            dependencies=[to_proto_dependency(item) for item in request.create_spec.dependencies],
             mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
             copies=[to_proto_copy(item) for item in request.create_spec.copies],
             builtin_resources=list(request.create_spec.builtin_resources),
+            required_services=[to_proto_service(item) for item in request.create_spec.required_services],
+            optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
         ),
         caller_metadata=(
             None if request.caller_metadata is None else to_proto_caller_metadata(request.caller_metadata)
         ),
-    )
-
-
-def to_proto_dependency(spec: DependencySpec) -> service_pb2.DependencySpec:
-    return service_pb2.DependencySpec(
-        dependency_name=spec.name,
-        image=spec.image,
-        network_alias="" if spec.network_alias is None else spec.network_alias,
-        environment=[
-            service_pb2.KeyValue(key=key, value=value)
-            for key, value in spec.environment.items()
-        ],
     )
 
 
@@ -117,6 +98,7 @@ def to_proto_create_exec_request(request: CreateExecRequest) -> service_pb2.Crea
     return service_pb2.CreateExecRequest(
         sandbox_id=request.sandbox_id,
         command=list(request.command),
+        exec_id="" if request.exec_id is None else request.exec_id,
         cwd="" if request.cwd is None else request.cwd,
         env_overrides=[
             service_pb2.KeyValue(key=key, value=value)
@@ -128,23 +110,26 @@ def to_proto_create_exec_request(request: CreateExecRequest) -> service_pb2.Crea
     )
 
 
-def to_dependency(spec: service_pb2.DependencySpec) -> DependencySpec:
-    return DependencySpec(
-        name=spec.dependency_name,
-        image=spec.image,
-        network_alias=spec.network_alias or None,
-        environment={item.key: item.value for item in spec.environment},
+def to_healthcheck(config: service_pb2.HealthcheckConfig | None) -> HealthcheckConfig | None:
+    if config is None:
+        return None
+    return HealthcheckConfig(
+        test=tuple(config.test),
+        interval=config.interval or None,
+        timeout=config.timeout or None,
+        retries=config.retries if config.retries != 0 else None,
+        start_period=config.start_period or None,
+        start_interval=config.start_interval or None,
     )
 
 
-def to_resolved_projection_handle(handle: service_pb2.ResolvedProjectionHandle) -> ResolvedProjectionHandle:
-    return ResolvedProjectionHandle(
-        capability_id=handle.capability_id,
-        source_path=handle.source_path or None,
-        target_path=handle.target_path or None,
-        mount_mode=map_projection_mount_mode(handle.mount_mode),
-        writable=handle.writable,
-        write_back=handle.write_back,
+def to_service(spec: service_pb2.ServiceSpec) -> ServiceSpec:
+    return ServiceSpec(
+        name=spec.name,
+        image=spec.image,
+        environment={item.key: item.value for item in spec.environment},
+        healthcheck=to_healthcheck(spec.healthcheck if spec.HasField("healthcheck") else None),
+        post_start_on_primary=tuple(spec.post_start_on_primary),
     )
 
 
@@ -153,13 +138,10 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         parse_cursor_sequence(handle.sandbox_id, handle.last_event_cursor)
     return SandboxHandle(
         sandbox_id=handle.sandbox_id,
-        sandbox_owner=handle.sandbox_owner,
         state=map_sandbox_state(handle.state),
-        resolved_tooling_projections=tuple(
-            to_resolved_projection_handle(item) for item in handle.resolved_tooling_projections
-        ),
-        dependencies=tuple(to_dependency(item) for item in handle.dependencies),
         last_event_cursor=handle.last_event_cursor,
+        required_services=tuple(to_service(item) for item in handle.required_services),
+        optional_services=tuple(to_service(item) for item in handle.optional_services),
     )
 
 
@@ -205,7 +187,7 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
         replay=event.replay,
         snapshot=event.snapshot,
         phase=event.phase or None,
-        dependency_name=event.dependency_name or None,
+        service_name=event.service_name or None,
         error_code=event.error_code or None,
         error_message=event.error_message or None,
         reason=event.reason or None,
@@ -222,10 +204,6 @@ def map_sandbox_state(state: int) -> SandboxState:
 
 def map_exec_state(state: int) -> ExecState:
     return ExecState(state)
-
-
-def map_projection_mount_mode(mode: int) -> ProjectionMountMode:
-    return ProjectionMountMode(mode)
 
 
 def parse_cursor_sequence(sandbox_id: str, cursor: str) -> int:
@@ -249,16 +227,8 @@ def normalize_from_cursor(sandbox_id: str, cursor: str) -> str:
     return cursor
 
 
-_WORKSPACE_MODE_TO_PROTO = {
-    WorkspaceMaterializationMode.UNSPECIFIED: service_pb2.WORKSPACE_MATERIALIZATION_MODE_UNSPECIFIED,
-    WorkspaceMaterializationMode.DURABLE_COPY: service_pb2.WORKSPACE_MATERIALIZATION_MODE_DURABLE_COPY,
-    WorkspaceMaterializationMode.BIND: service_pb2.WORKSPACE_MATERIALIZATION_MODE_BIND,
-}
-
-
 __all__ = [
     "map_exec_state",
-    "map_projection_mount_mode",
     "map_sandbox_state",
     "normalize_from_cursor",
     "parse_cursor_sequence",

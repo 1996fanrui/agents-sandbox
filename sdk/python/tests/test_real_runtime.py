@@ -17,6 +17,7 @@ from agents_sandbox import (
     MountSpec,
     SandboxClientError,
 )
+from agents_sandbox._grpc_client import SandboxGrpcClient
 
 RUNTIME_IMAGE_REPOSITORY = "ghcr.io/agents-sandbox/coding-runtime"
 CODING_RUNTIME_VERSION_TAG = os.environ.get("CODING_RUNTIME_VERSION_TAG", "0.1.0")
@@ -37,9 +38,10 @@ def test_sdk_can_create_real_sandbox_and_exec(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "agboxd.sock"
+    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
     _ensure_runtime_image(repo_root)
-    _cleanup_runtime_resources("sandbox-1")
+    _cleanup_runtime_resources("real-runtime-exec")
 
     sandbox_id = ""
     with _running_test_daemon(repo_root, socket_path):
@@ -52,7 +54,7 @@ def test_sdk_can_create_real_sandbox_and_exec(tmp_path: Path) -> None:
             )
             _wait_for_container_absent(_primary_container_name(sandbox_id))
         finally:
-            _cleanup_runtime_resources(sandbox_id or "sandbox-1")
+            _cleanup_runtime_resources(sandbox_id or "real-runtime-exec")
 
 
 def test_sdk_rejects_empty_image_in_real_runtime(tmp_path: Path) -> None:
@@ -64,8 +66,9 @@ def test_sdk_rejects_empty_image_in_real_runtime(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "agboxd.sock"
-    _cleanup_runtime_resources("sandbox-1")
+    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    _cleanup_runtime_resources("real-runtime-empty-image")
 
     with _running_test_daemon(repo_root, socket_path):
         with pytest.raises(SandboxClientError):
@@ -93,17 +96,18 @@ def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "agboxd.sock"
+    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
+    socket_path.parent.mkdir(parents=True, exist_ok=True)
     go_cache = tmp_path / "go-cache"
     go_cache.mkdir()
     _ensure_runtime_image(repo_root)
-    _cleanup_runtime_resources("sandbox-1")
+    _cleanup_runtime_resources("real-runtime-claude")
 
     sandbox_id = ""
     with _running_test_daemon(
         repo_root,
         socket_path,
-        env={**os.environ, "HOME": str(fake_home), "GOCACHE": str(go_cache)},
+        env={"HOME": str(fake_home), "GOCACHE": str(go_cache)},
     ):
         try:
             sandbox_id = asyncio.run(
@@ -113,7 +117,7 @@ def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
                 )
             )
         finally:
-            _cleanup_runtime_resources(sandbox_id or "sandbox-1")
+            _cleanup_runtime_resources(sandbox_id or "real-runtime-claude")
 
 
 async def _run_real_runtime_exec_flow(*, socket_path: Path, workspace: Path) -> str:
@@ -121,7 +125,7 @@ async def _run_real_runtime_exec_flow(*, socket_path: Path, workspace: Path) -> 
     async with client:
         sandbox = await client.create_sandbox(
             RUNTIME_IMAGE,
-            sandbox_owner="workspace-1",
+            sandbox_id="real-runtime-exec",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
         )
 
@@ -157,7 +161,7 @@ async def _run_real_runtime_create_with_image(
     async with client:
         await client.create_sandbox(
             image,
-            sandbox_owner="workspace-empty-image",
+            sandbox_id="real-runtime-empty-image",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
         )
 
@@ -167,7 +171,7 @@ async def _run_real_runtime_projection_flow(*, socket_path: Path, workspace: Pat
     async with client:
         sandbox = await client.create_sandbox(
             RUNTIME_IMAGE,
-            sandbox_owner="workspace-with-claude",
+            sandbox_id="real-runtime-claude",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
             builtin_resources=(".claude",),
         )
@@ -209,22 +213,12 @@ async def _wait_for_client(socket_path: Path) -> AgentsSandboxClient:
     raise AssertionError("AgentsSandbox daemon did not become ready in time")
 
 
-@contextmanager
-def _socket_env(socket_path: str | Path):
-    previous = os.environ.get("AGBOX_SOCKET")
-    os.environ["AGBOX_SOCKET"] = str(socket_path)
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop("AGBOX_SOCKET", None)
-        else:
-            os.environ["AGBOX_SOCKET"] = previous
-
-
 def _new_client(socket_path: str | Path, **kwargs: object) -> AgentsSandboxClient:
-    with _socket_env(socket_path):
-        return AgentsSandboxClient(**kwargs)
+    client = AgentsSandboxClient(**kwargs)
+    client.close()
+    client.socket_path = str(socket_path)
+    client._rpc_client = SandboxGrpcClient(str(socket_path), timeout_seconds=client._timeout_seconds)
+    return client
 
 
 @contextmanager
@@ -234,10 +228,26 @@ def _running_test_daemon(
     *,
     env: dict[str, str] | None = None,
 ) -> Iterator[None]:
-    process = subprocess.Popen(
-        ["go", "run", "./cmd/agboxd", "--socket", str(socket_path)],
+    runtime_dir = socket_path.parent.parent if socket_path.parent.name == "agbox" else socket_path.parent
+    merged_env = os.environ.copy()
+    merged_env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+    merged_env["HOME"] = str(runtime_dir.parent)
+    if env is not None:
+        merged_env.update(env)
+    daemon_path = runtime_dir / "agboxd-test"
+    subprocess.run(
+        ["go", "build", "-o", str(daemon_path), "./cmd/agboxd"],
         cwd=repo_root,
-        env=env,
+        env=os.environ.copy(),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    process = subprocess.Popen(
+        [str(daemon_path)],
+        cwd=repo_root,
+        env=merged_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         text=True,

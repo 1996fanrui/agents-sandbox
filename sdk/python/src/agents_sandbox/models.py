@@ -39,7 +39,6 @@ class SandboxEventType(IntEnum):
     UNSPECIFIED = service_pb2.EVENT_TYPE_UNSPECIFIED
     SANDBOX_ACCEPTED = service_pb2.SANDBOX_ACCEPTED
     SANDBOX_PREPARING = service_pb2.SANDBOX_PREPARING
-    SANDBOX_DEPENDENCY_READY = service_pb2.SANDBOX_DEPENDENCY_READY
     SANDBOX_READY = service_pb2.SANDBOX_READY
     SANDBOX_FAILED = service_pb2.SANDBOX_FAILED
     SANDBOX_STOP_REQUESTED = service_pb2.SANDBOX_STOP_REQUESTED
@@ -50,28 +49,12 @@ class SandboxEventType(IntEnum):
     EXEC_FINISHED = service_pb2.EXEC_FINISHED
     EXEC_FAILED = service_pb2.EXEC_FAILED
     EXEC_CANCELLED = service_pb2.EXEC_CANCELLED
-
-
-class ProjectionMountMode(IntEnum):
-    """Public projection mount modes."""
-
-    UNSPECIFIED = service_pb2.PROJECTION_MOUNT_MODE_UNSPECIFIED
-    BIND = service_pb2.PROJECTION_MOUNT_MODE_BIND
-    SHADOW_COPY = service_pb2.PROJECTION_MOUNT_MODE_SHADOW_COPY
-
-
-class WorkspaceMaterializationMode(IntEnum):
-    """Public workspace materialization modes."""
-
-    UNSPECIFIED = service_pb2.WORKSPACE_MATERIALIZATION_MODE_UNSPECIFIED
-    DURABLE_COPY = service_pb2.WORKSPACE_MATERIALIZATION_MODE_DURABLE_COPY
-    BIND = service_pb2.WORKSPACE_MATERIALIZATION_MODE_BIND
+    SANDBOX_SERVICE_READY = service_pb2.SANDBOX_SERVICE_READY
+    SANDBOX_SERVICE_FAILED = service_pb2.SANDBOX_SERVICE_FAILED
 
 
 __all__ = [
     "ExecState",
-    "ProjectionMountMode",
     "SandboxEventType",
     "SandboxState",
-    "WorkspaceMaterializationMode",
 ]

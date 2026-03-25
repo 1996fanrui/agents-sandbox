@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
-import uuid
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from threading import Event as ThreadEvent
 from threading import Thread
 from typing import cast
@@ -35,29 +34,22 @@ from .types import (
     CreateExecRequest,
     CreateSandboxRequest,
     CreateSandboxSpec,
-    DependencySpec,
     ExecHandle,
     MountSpec,
     PingInfo,
     SandboxEvent,
     SandboxHandle,
+    ServiceSpec,
 )
-
-_DEFAULT_SOCKET_PATH = "/run/agbox/agboxd.sock"
-_SOCKET_ENV_VAR = "AGBOX_SOCKET"
 
 
 def _resolve_default_socket_path(
     *,
     system: str | None = None,
-    lookup_env: callable | None = None,
+    lookup_env: Callable[[str], str | None] | None = None,
     home_dir: str | None = None,
 ) -> str:
     lookup = os.environ.get if lookup_env is None else lookup_env
-    socket_path = lookup(_SOCKET_ENV_VAR)
-    if socket_path:
-        return socket_path
-
     resolved_system = platform.system() if system is None else system
     if resolved_system == "Darwin":
         resolved_home = home_dir or os.path.expanduser("~")
@@ -74,15 +66,13 @@ def _resolve_default_socket_path(
         runtime_dir = lookup("XDG_RUNTIME_DIR")
         if runtime_dir:
             return os.path.join(runtime_dir, "agbox", "agboxd.sock")
-    return _DEFAULT_SOCKET_PATH
+        raise RuntimeError("XDG_RUNTIME_DIR is required to resolve the AgentsSandbox socket path on Linux")
 
 
-def _resolve_sandbox_owner_id(sandbox_owner: str | None) -> str:
-    if sandbox_owner is None:
-        return str(uuid.uuid4())
-    if sandbox_owner == "":
-        raise ValueError("sandbox_owner must not be empty")
-    return sandbox_owner
+def _validate_optional_id(field_name: str, value: str | None) -> str | None:
+    if value == "":
+        raise ValueError(f"{field_name} must not be empty")
+    return value
 
 
 class AgentsSandboxClient:
@@ -120,21 +110,23 @@ class AgentsSandboxClient:
         self,
         image: str,
         *,
-        sandbox_owner: str | None = None,
+        sandbox_id: str | None = None,
         mounts: tuple[MountSpec, ...] = (),
         copies: tuple[CopySpec, ...] = (),
         builtin_resources: tuple[str, ...] = (),
-        dependencies: tuple[DependencySpec, ...] = (),
+        required_services: tuple[ServiceSpec, ...] = (),
+        optional_services: tuple[ServiceSpec, ...] = (),
         wait: bool = True,
     ) -> SandboxHandle:
         request = CreateSandboxRequest(
-            sandbox_owner=_resolve_sandbox_owner_id(sandbox_owner),
+            sandbox_id=_validate_optional_id("sandbox_id", sandbox_id),
             create_spec=CreateSandboxSpec(
                 image=image,
-                dependencies=dependencies,
                 mounts=mounts,
                 copies=copies,
                 builtin_resources=builtin_resources,
+                required_services=required_services,
+                optional_services=optional_services,
             ),
         )
         try:
@@ -143,7 +135,9 @@ class AgentsSandboxClient:
                 to_proto_create_sandbox_request(request),
             )
         except SandboxConflictError as exc:
-            raise SandboxConflictError(f"Sandbox already exists for owner {request.sandbox_owner}.") from exc
+            if request.sandbox_id is None:
+                raise
+            raise SandboxConflictError(f"Sandbox already exists for id {request.sandbox_id}.") from exc
         current = await self.get_sandbox(response.sandbox_id)
         if not wait:
             return current
@@ -225,6 +219,7 @@ class AgentsSandboxClient:
         sandbox_id: str,
         command: Sequence[str],
         *,
+        exec_id: str | None = None,
         cwd: str = "/workspace",
         env_overrides: Mapping[str, str] | None = None,
         wait: bool = False,
@@ -232,6 +227,7 @@ class AgentsSandboxClient:
         request = CreateExecRequest(
             sandbox_id=sandbox_id,
             command=tuple(command),
+            exec_id=_validate_optional_id("exec_id", exec_id),
             cwd=cwd,
             env_overrides={} if env_overrides is None else dict(env_overrides),
         )

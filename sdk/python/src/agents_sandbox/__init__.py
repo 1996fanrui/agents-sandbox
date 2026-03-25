@@ -14,34 +14,30 @@ from .errors import (
 from .client import AgentsSandboxClient
 from .models import (
     ExecState,
-    ProjectionMountMode,
     SandboxEventType,
     SandboxState,
-    WorkspaceMaterializationMode,
 )
 from .types import (
     CopySpec,
-    DependencySpec,
     ExecHandle,
+    HealthcheckConfig,
     MountSpec,
     PingInfo,
-    ResolvedProjectionHandle,
     SandboxEvent,
     SandboxHandle,
+    ServiceSpec,
 )
 
 __all__ = [
     "AgentsSandboxClient",
     "CopySpec",
-    "DependencySpec",
     "ExecAlreadyTerminalError",
     "ExecHandle",
     "ExecNotFoundError",
     "ExecNotRunningError",
     "ExecState",
+    "HealthcheckConfig",
     "PingInfo",
-    "ProjectionMountMode",
-    "ResolvedProjectionHandle",
     "SandboxClientError",
     "SandboxConflictError",
     "SandboxCursorExpiredError",
@@ -53,5 +49,5 @@ __all__ = [
     "SandboxNotReadyError",
     "SandboxState",
     "MountSpec",
-    "WorkspaceMaterializationMode",
+    "ServiceSpec",
 ]

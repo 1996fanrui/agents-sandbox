@@ -13,6 +13,8 @@ from ._generated import service_pb2, service_pb2_grpc
 
 _REASON_TO_ERROR = dict(
     SANDBOX_CONFLICT=errors.SandboxConflictError,
+    SANDBOX_ID_ALREADY_EXISTS=errors.SandboxConflictError,
+    EXEC_ID_ALREADY_EXISTS=errors.SandboxConflictError,
     SANDBOX_NOT_FOUND=errors.SandboxNotFoundError,
     SANDBOX_NOT_READY=errors.SandboxNotReadyError,
     SANDBOX_INVALID_STATE=errors.SandboxInvalidStateError,
