@@ -154,34 +154,52 @@ class ServiceSpec(_message.Message):
     def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., environment: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_resources", "required_services", "optional_services")
+    __slots__ = ("image", "mounts", "copies", "builtin_resources", "required_services", "optional_services", "labels")
+    class LabelsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     MOUNTS_FIELD_NUMBER: _ClassVar[int]
     COPIES_FIELD_NUMBER: _ClassVar[int]
     BUILTIN_RESOURCES_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
     builtin_resources: _containers.RepeatedScalarFieldContainer[str]
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_resources: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ...) -> None: ...
+    labels: _containers.ScalarMap[str, str]
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_resources: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
-    __slots__ = ("sandbox_id", "state", "last_event_cursor", "required_services", "optional_services")
+    __slots__ = ("sandbox_id", "state", "last_event_cursor", "required_services", "optional_services", "labels")
+    class LabelsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
     LAST_EVENT_CURSOR_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
+    LABELS_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     state: SandboxState
     last_event_cursor: str
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
-    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_cursor: _Optional[str] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ...) -> None: ...
+    labels: _containers.ScalarMap[str, str]
+    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_cursor: _Optional[str] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class SandboxEvent(_message.Message):
     __slots__ = ("event_id", "sequence", "cursor", "sandbox_id", "event_type", "occurred_at", "replay", "snapshot", "phase", "error_code", "error_message", "reason", "exec_id", "exit_code", "sandbox_state", "exec_state", "service_name")
@@ -276,10 +294,19 @@ class GetSandboxResponse(_message.Message):
     def __init__(self, sandbox: _Optional[_Union[SandboxHandle, _Mapping]] = ...) -> None: ...
 
 class ListSandboxesRequest(_message.Message):
-    __slots__ = ("include_deleted",)
+    __slots__ = ("include_deleted", "label_selector")
+    class LabelSelectorEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     INCLUDE_DELETED_FIELD_NUMBER: _ClassVar[int]
+    LABEL_SELECTOR_FIELD_NUMBER: _ClassVar[int]
     include_deleted: bool
-    def __init__(self, include_deleted: bool = ...) -> None: ...
+    label_selector: _containers.ScalarMap[str, str]
+    def __init__(self, include_deleted: bool = ..., label_selector: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ListSandboxesResponse(_message.Message):
     __slots__ = ("sandboxes",)
@@ -304,6 +331,27 @@ class DeleteSandboxRequest(_message.Message):
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
+
+class DeleteSandboxesRequest(_message.Message):
+    __slots__ = ("label_selector",)
+    class LabelSelectorEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    LABEL_SELECTOR_FIELD_NUMBER: _ClassVar[int]
+    label_selector: _containers.ScalarMap[str, str]
+    def __init__(self, label_selector: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class DeleteSandboxesResponse(_message.Message):
+    __slots__ = ("deleted_sandbox_ids", "deleted_count")
+    DELETED_SANDBOX_IDS_FIELD_NUMBER: _ClassVar[int]
+    DELETED_COUNT_FIELD_NUMBER: _ClassVar[int]
+    deleted_sandbox_ids: _containers.RepeatedScalarFieldContainer[str]
+    deleted_count: int
+    def __init__(self, deleted_sandbox_ids: _Optional[_Iterable[str]] = ..., deleted_count: _Optional[int] = ...) -> None: ...
 
 class AcceptedResponse(_message.Message):
     __slots__ = ("accepted",)

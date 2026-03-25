@@ -69,6 +69,11 @@ class SandboxServiceStub(object):
                 request_serializer=service__pb2.DeleteSandboxRequest.SerializeToString,
                 response_deserializer=service__pb2.AcceptedResponse.FromString,
                 _registered_method=True)
+        self.DeleteSandboxes = channel.unary_unary(
+                '/agbox.v1.SandboxService/DeleteSandboxes',
+                request_serializer=service__pb2.DeleteSandboxesRequest.SerializeToString,
+                response_deserializer=service__pb2.DeleteSandboxesResponse.FromString,
+                _registered_method=True)
         self.SubscribeSandboxEvents = channel.unary_stream(
                 '/agbox.v1.SandboxService/SubscribeSandboxEvents',
                 request_serializer=service__pb2.SubscribeSandboxEventsRequest.SerializeToString,
@@ -141,6 +146,12 @@ class SandboxServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DeleteSandboxes(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SubscribeSandboxEvents(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -208,6 +219,11 @@ def add_SandboxServiceServicer_to_server(servicer, server):
                     servicer.DeleteSandbox,
                     request_deserializer=service__pb2.DeleteSandboxRequest.FromString,
                     response_serializer=service__pb2.AcceptedResponse.SerializeToString,
+            ),
+            'DeleteSandboxes': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteSandboxes,
+                    request_deserializer=service__pb2.DeleteSandboxesRequest.FromString,
+                    response_serializer=service__pb2.DeleteSandboxesResponse.SerializeToString,
             ),
             'SubscribeSandboxEvents': grpc.unary_stream_rpc_method_handler(
                     servicer.SubscribeSandboxEvents,
@@ -424,6 +440,33 @@ class SandboxService(object):
             '/agbox.v1.SandboxService/DeleteSandbox',
             service__pb2.DeleteSandboxRequest.SerializeToString,
             service__pb2.AcceptedResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteSandboxes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/agbox.v1.SandboxService/DeleteSandboxes',
+            service__pb2.DeleteSandboxesRequest.SerializeToString,
+            service__pb2.DeleteSandboxesResponse.FromString,
             options,
             channel_credentials,
             insecure,
