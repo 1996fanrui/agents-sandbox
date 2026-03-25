@@ -12,10 +12,12 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -374,7 +376,7 @@ func TestOptionalServicesLaunchInParallelWithPrimaryPath(t *testing.T) {
 	started := make(chan string, len(services))
 	release := make(chan struct{})
 
-	starts := startOptionalServicesAsync(context.Background(), "parallel-optional", "network", services, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "parallel-optional", "network", services, nil, func(context.Context, dockerContainerSpec) error {
 		started <- "create"
 		return nil
 	}, func(_ context.Context, name string) error {
@@ -400,7 +402,7 @@ func TestOptionalServiceStartupCancellationStopsWorkers(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "cancel-optional", "network", services, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "cancel-optional", "network", services, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -427,7 +429,7 @@ func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "delete-cancel", "network", services, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "delete-cancel", "network", services, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -653,6 +655,134 @@ func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
 	}
 }
 
+func TestDockerLabelsPassthrough(t *testing.T) {
+	sandboxID := "labels-pass-through"
+	userLabels := map[string]string{
+		"owner": "team-a",
+		"env":   "dev",
+	}
+	requiredContainerName := dockerServiceContainerName(sandboxID, "db")
+	optionalContainerName := dockerServiceContainerName(sandboxID, "cache")
+	primaryContainerName := dockerPrimaryContainerName(sandboxID)
+
+	var mu sync.Mutex
+	networkLabels := map[string]string{}
+	containerLabels := make(map[string]map[string]string)
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
+			writeDockerJSON(t, w, map[string]string{"Id": "sha256:test"})
+		case r.Method == http.MethodPost && path == "/networks/create":
+			var request struct {
+				Labels map[string]string `json:"Labels"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode network create request failed: %v", err)
+			}
+			mu.Lock()
+			networkLabels = request.Labels
+			mu.Unlock()
+			writeDockerJSON(t, w, map[string]string{"Id": "network-1"})
+		case r.Method == http.MethodPost && path == "/containers/create":
+			var request struct {
+				Labels map[string]string `json:"Labels"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode container create request failed: %v", err)
+			}
+			name := r.URL.Query().Get("name")
+			mu.Lock()
+			containerLabels[name] = request.Labels
+			mu.Unlock()
+			writeDockerJSON(t, w, map[string]string{"Id": name})
+		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/start"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && path == "/containers/"+requiredContainerName+"/json":
+			writeDockerJSON(t, w, container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					State: &container.State{
+						Running: true,
+						Status:  "running",
+						Health:  &container.Health{Status: "healthy"},
+					},
+				},
+			})
+		case r.Method == http.MethodGet && path == "/containers/"+primaryContainerName+"/json":
+			writeDockerJSON(t, w, container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					State: &container.State{Running: true, Status: "running"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+
+	result, err := backend.CreateSandbox(context.Background(), &sandboxRecord{
+		handle: &agboxv1.SandboxHandle{
+			SandboxId: sandboxID,
+			Labels:    userLabels,
+		},
+		createSpec: &agboxv1.CreateSpec{
+			Image:  "ghcr.io/agents-sandbox/coding-runtime:test",
+			Labels: userLabels,
+		},
+		requiredServices: []*agboxv1.ServiceSpec{
+			{
+				Name:  "db",
+				Image: "postgres:16",
+				Healthcheck: &agboxv1.HealthcheckConfig{
+					Test: []string{"CMD", "true"},
+				},
+			},
+		},
+		optionalServices: []*agboxv1.ServiceSpec{
+			{
+				Name:  "cache",
+				Image: "redis:7",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+
+	statuses := collectRuntimeServiceStatuses(result.OptionalServiceStatuses)
+	if len(statuses) != 1 || !statuses[0].Ready || statuses[0].Name != "cache" {
+		t.Fatalf("unexpected optional service statuses: %#v", statuses)
+	}
+
+	assertUserDockerLabels(t, networkLabels, map[string]string{
+		runtimedocker.LabelSandboxID:            sandboxID,
+		runtimedocker.LabelComponent:            "primary",
+		runtimedocker.LabelProfile:              "default",
+		runtimedocker.LabelUserPrefix + "owner": "team-a",
+		runtimedocker.LabelUserPrefix + "env":   "dev",
+	})
+	assertUserDockerLabels(t, containerLabels[requiredContainerName], map[string]string{
+		runtimedocker.LabelSandboxID:            sandboxID,
+		runtimedocker.LabelComponent:            "service",
+		runtimedocker.LabelServiceName:          "db",
+		runtimedocker.LabelUserPrefix + "owner": "team-a",
+		runtimedocker.LabelUserPrefix + "env":   "dev",
+	})
+	assertUserDockerLabels(t, containerLabels[optionalContainerName], map[string]string{
+		runtimedocker.LabelSandboxID:            sandboxID,
+		runtimedocker.LabelComponent:            "service",
+		runtimedocker.LabelServiceName:          "cache",
+		runtimedocker.LabelUserPrefix + "owner": "team-a",
+		runtimedocker.LabelUserPrefix + "env":   "dev",
+	})
+	assertUserDockerLabels(t, containerLabels[primaryContainerName], map[string]string{
+		runtimedocker.LabelSandboxID:            sandboxID,
+		runtimedocker.LabelComponent:            "primary",
+		runtimedocker.LabelProfile:              "default",
+		runtimedocker.LabelUserPrefix + "owner": "team-a",
+		runtimedocker.LabelUserPrefix + "env":   "dev",
+	})
+}
+
 func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWriter, *http.Request)) *dockerRuntimeBackend {
 	t.Helper()
 
@@ -715,6 +845,13 @@ func writeHijackedDockerStream(t *testing.T, w http.ResponseWriter, writePayload
 	}
 
 	writePayload(conn)
+}
+
+func assertUserDockerLabels(t *testing.T, got map[string]string, want map[string]string) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected docker labels: got=%#v want=%#v", got, want)
+	}
 }
 
 func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {

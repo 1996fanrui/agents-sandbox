@@ -207,7 +207,8 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			return runtimeCreateResult{}, err
 		}
 	}
-	if err := backend.dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default")); err != nil {
+	userLabels := record.handle.GetLabels()
+	if err := backend.dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default", userLabels)); err != nil {
 		return runtimeCreateResult{}, err
 	}
 
@@ -225,7 +226,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			Image:        service.GetImage(),
 			NetworkName:  state.NetworkName,
 			NetworkAlias: service.GetName(),
-			Labels:       runtimedocker.ServiceLabels(record.handle.GetSandboxId(), service.GetName()),
+			Labels:       runtimedocker.ServiceLabels(record.handle.GetSandboxId(), service.GetName(), userLabels),
 			Environment:  keyValuesToMap(service.GetEnvironment()),
 			Healthcheck:  service.GetHealthcheck(),
 		}); err != nil {
@@ -240,7 +241,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
 	}
 
-	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, record.optionalServices, func(ctx context.Context, spec dockerContainerSpec) error {
+	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, record.optionalServices, userLabels, func(ctx context.Context, spec dockerContainerSpec) error {
 		return backend.dockerContainerCreate(ctx, spec)
 	}, func(ctx context.Context, name string) error {
 		return backend.dockerContainerStart(ctx, name)
@@ -257,7 +258,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
 		NetworkName: state.NetworkName,
-		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default"),
+		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default", userLabels),
 		Mounts:      mounts,
 		Environment: primaryContainerEnvironment(mounts),
 		Workdir:     "/workspace",
@@ -346,6 +347,7 @@ func startOptionalServicesAsync(
 	sandboxID string,
 	networkName string,
 	services []*agboxv1.ServiceSpec,
+	userLabels map[string]string,
 	createContainer func(context.Context, dockerContainerSpec) error,
 	startContainer func(context.Context, string) error,
 ) optionalServiceStarts {
@@ -364,7 +366,7 @@ func startOptionalServicesAsync(
 				Image:        service.GetImage(),
 				NetworkName:  networkName,
 				NetworkAlias: service.GetName(),
-				Labels:       runtimedocker.ServiceLabels(sandboxID, service.GetName()),
+				Labels:       runtimedocker.ServiceLabels(sandboxID, service.GetName(), userLabels),
 				Environment:  keyValuesToMap(service.GetEnvironment()),
 				Healthcheck:  service.GetHealthcheck(),
 			}); err != nil {
