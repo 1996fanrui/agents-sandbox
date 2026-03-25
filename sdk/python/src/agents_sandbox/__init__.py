@@ -11,7 +11,7 @@ from .errors import (
     SandboxNotFoundError,
     SandboxNotReadyError,
 )
-from .high_level_client import AgentsSandboxClient
+from .client import AgentsSandboxClient
 from .models import (
     ExecState,
     ProjectionMountMode,

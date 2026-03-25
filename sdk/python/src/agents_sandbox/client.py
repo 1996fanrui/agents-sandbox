@@ -1,131 +1,451 @@
-"""Python client for the agents-sandbox daemon."""
+"""Public async Python client built on top of the protobuf transport."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+import os
+import platform
+import uuid
+from collections.abc import AsyncIterator, Mapping, Sequence
+from threading import Event as ThreadEvent
+from threading import Thread
+from typing import cast
 
-import grpc
-from google.rpc import error_details_pb2
-from grpc_status import rpc_status
-
-from . import errors
-from ._generated import service_pb2, service_pb2_grpc
-
-_REASON_TO_ERROR = dict(
-    SANDBOX_CONFLICT=errors.SandboxConflictError,
-    SANDBOX_NOT_FOUND=errors.SandboxNotFoundError,
-    SANDBOX_NOT_READY=errors.SandboxNotReadyError,
-    SANDBOX_INVALID_STATE=errors.SandboxInvalidStateError,
-    EXEC_NOT_FOUND=errors.ExecNotFoundError,
-    EXEC_ALREADY_TERMINAL=errors.ExecAlreadyTerminalError,
-    SANDBOX_EVENT_CURSOR_EXPIRED=errors.SandboxCursorExpiredError,
+from ._generated import service_pb2
+from ._grpc_client import SandboxGrpcClient
+from .conversions import (
+    normalize_from_cursor,
+    parse_cursor_sequence,
+    to_exec_handle,
+    to_ping_info,
+    to_proto_create_exec_request,
+    to_proto_create_sandbox_request,
+    to_sandbox_event,
+    to_sandbox_handle,
+)
+from .errors import (
+    ExecNotRunningError,
+    SandboxClientError,
+    SandboxConflictError,
+    SandboxInvalidStateError,
+)
+from .models import SandboxState
+from .types import (
+    CopySpec,
+    CreateExecRequest,
+    CreateSandboxRequest,
+    CreateSandboxSpec,
+    DependencySpec,
+    ExecHandle,
+    MountSpec,
+    PingInfo,
+    SandboxEvent,
+    SandboxHandle,
+    SandboxOwner,
 )
 
+_DEFAULT_SOCKET_PATH = "/run/agbox/agboxd.sock"
+_SOCKET_ENV_VAR = "AGBOX_SOCKET"
+_SDK_OWNER_PRODUCT = "agents-sandbox-sdk"
+_SDK_OWNER_TYPE = "sandbox_owner"
 
-class SandboxClient:
-    """Thin synchronous wrapper around the generated gRPC stub."""
 
-    def __init__(self, socket_path: str, *, timeout_seconds: float = 5.0) -> None:
+def _resolve_default_socket_path(
+    *,
+    system: str | None = None,
+    lookup_env: callable | None = None,
+    home_dir: str | None = None,
+) -> str:
+    lookup = os.environ.get if lookup_env is None else lookup_env
+    socket_path = lookup(_SOCKET_ENV_VAR)
+    if socket_path:
+        return socket_path
+
+    resolved_system = platform.system() if system is None else system
+    if resolved_system == "Darwin":
+        resolved_home = home_dir or os.path.expanduser("~")
+        if resolved_home:
+            return os.path.join(
+                resolved_home,
+                "Library",
+                "Application Support",
+                "agbox",
+                "run",
+                "agboxd.sock",
+            )
+    else:
+        runtime_dir = lookup("XDG_RUNTIME_DIR")
+        if runtime_dir:
+            return os.path.join(runtime_dir, "agbox", "agboxd.sock")
+    return _DEFAULT_SOCKET_PATH
+
+
+def _resolve_sandbox_owner_id(sandbox_owner: str | None) -> str:
+    if sandbox_owner is None:
+        return str(uuid.uuid4())
+    if sandbox_owner == "":
+        raise ValueError("sandbox_owner must not be empty")
+    return sandbox_owner
+
+
+def _to_internal_sandbox_owner(owner_id: str) -> SandboxOwner:
+    return SandboxOwner(
+        product=_SDK_OWNER_PRODUCT,
+        owner_type=_SDK_OWNER_TYPE,
+        owner_id=owner_id,
+    )
+
+
+class AgentsSandboxClient:
+    """Async high-level client that exposes the northbound SDK surface."""
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 5.0,
+        stream_timeout_seconds: float | None = None,
+        operation_timeout_seconds: float = 60.0,
+    ) -> None:
+        self.socket_path = _resolve_default_socket_path()
         self._timeout_seconds = timeout_seconds
-        self._channel = grpc.insecure_channel(f"unix://{socket_path}")
-        self._stub = service_pb2_grpc.SandboxServiceStub(self._channel)
+        self._stream_timeout_seconds = stream_timeout_seconds
+        self._operation_timeout_seconds = operation_timeout_seconds
+        self._exec_poll_interval_seconds = 0.25
+        self._rpc_client = SandboxGrpcClient(self.socket_path, timeout_seconds=timeout_seconds)
 
     def close(self) -> None:
-        self._channel.close()
+        self._rpc_client.close()
 
-    def __enter__(self) -> "SandboxClient":
+    async def __aenter__(self) -> AgentsSandboxClient:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, exc_type, exc, tb) -> None:
         del exc_type, exc, tb
         self.close()
 
-    def ping(self) -> service_pb2.PingResponse:
-        return self._call(self._stub.Ping, service_pb2.PingRequest())
+    async def ping(self) -> PingInfo:
+        response = await asyncio.to_thread(self._rpc_client.ping)
+        return to_ping_info(response)
 
-    def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
-        return self._call(self._stub.CreateSandbox, request)
-
-    def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-        return self._call(self._stub.GetSandbox, service_pb2.GetSandboxRequest(sandbox_id=sandbox_id))
-
-    def list_sandboxes(self, request: service_pb2.ListSandboxesRequest | None = None) -> service_pb2.ListSandboxesResponse:
-        return self._call(self._stub.ListSandboxes, request or service_pb2.ListSandboxesRequest())
-
-    def resume_sandbox(self, sandbox_id: str) -> service_pb2.AcceptedResponse:
-        return self._call(self._stub.ResumeSandbox, service_pb2.ResumeSandboxRequest(sandbox_id=sandbox_id))
-
-    def stop_sandbox(
+    async def create_sandbox(
         self,
-        sandbox_id: str,
-    ) -> service_pb2.AcceptedResponse:
-        return self._call(
-            self._stub.StopSandbox,
-            service_pb2.StopSandboxRequest(sandbox_id=sandbox_id),
+        image: str,
+        *,
+        sandbox_owner: str | None = None,
+        mounts: tuple[MountSpec, ...] = (),
+        copies: tuple[CopySpec, ...] = (),
+        builtin_resources: tuple[str, ...] = (),
+        dependencies: tuple[DependencySpec, ...] = (),
+        wait: bool = True,
+    ) -> SandboxHandle:
+        owner_id = _resolve_sandbox_owner_id(sandbox_owner)
+        request = CreateSandboxRequest(
+            sandbox_owner=_to_internal_sandbox_owner(owner_id),
+            create_spec=CreateSandboxSpec(
+                image=image,
+                dependencies=dependencies,
+                mounts=mounts,
+                copies=copies,
+                builtin_resources=builtin_resources,
+            ),
+        )
+        try:
+            response = await asyncio.to_thread(
+                self._rpc_client.create_sandbox,
+                to_proto_create_sandbox_request(request),
+            )
+        except SandboxConflictError as exc:
+            raise SandboxConflictError(f"Sandbox already exists for owner {owner_id}.") from exc
+        current = await self.get_sandbox(response.sandbox_id)
+        if not wait:
+            return current
+        return await self._wait_for_sandbox_state(
+            sandbox_id=response.sandbox_id,
+            baseline=current,
+            target_state=SandboxState.READY,
+            operation_name="create_sandbox",
         )
 
-    def delete_sandbox(
-        self,
-        sandbox_id: str,
-    ) -> service_pb2.AcceptedResponse:
-        return self._call(
-            self._stub.DeleteSandbox,
-            service_pb2.DeleteSandboxRequest(sandbox_id=sandbox_id),
-        )
+    async def get_sandbox(self, sandbox_id: str) -> SandboxHandle:
+        response = await asyncio.to_thread(self._rpc_client.get_sandbox, sandbox_id)
+        return to_sandbox_handle(response.sandbox)
 
-    def subscribe_sandbox_events(
+    async def list_sandboxes(
+        self,
+        *,
+        include_deleted: bool = False,
+    ) -> list[SandboxHandle]:
+        response = await asyncio.to_thread(
+            self._rpc_client.list_sandboxes,
+            service_pb2.ListSandboxesRequest(include_deleted=include_deleted),
+        )
+        return [to_sandbox_handle(item) for item in response.sandboxes]
+
+    async def resume_sandbox(
         self,
         sandbox_id: str,
         *,
-        from_cursor: str = "",
-        include_current_snapshot: bool = False,
-    ) -> Iterator[service_pb2.SandboxEvent]:
-        request = service_pb2.SubscribeSandboxEventsRequest(
+        wait: bool = True,
+    ) -> SandboxHandle:
+        await asyncio.to_thread(self._rpc_client.resume_sandbox, sandbox_id)
+        current = await self.get_sandbox(sandbox_id)
+        if not wait:
+            return current
+        return await self._wait_for_sandbox_state(
             sandbox_id=sandbox_id,
-            from_cursor=from_cursor,
-            include_current_snapshot=include_current_snapshot,
+            baseline=current,
+            target_state=SandboxState.READY,
+            operation_name="resume_sandbox",
         )
-        try:
-            stream = self._stub.SubscribeSandboxEvents(request, timeout=self._timeout_seconds)
-            for event in stream:
-                yield event
-        except grpc.RpcError as exc:
-            raise _translate_rpc_error(exc) from exc
 
-    def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
-        return self._call(self._stub.CreateExec, request)
+    async def stop_sandbox(
+        self,
+        sandbox_id: str,
+        *,
+        wait: bool = True,
+    ) -> SandboxHandle:
+        await asyncio.to_thread(self._rpc_client.stop_sandbox, sandbox_id)
+        current = await self.get_sandbox(sandbox_id)
+        if not wait:
+            return current
+        return await self._wait_for_sandbox_state(
+            sandbox_id=sandbox_id,
+            baseline=current,
+            target_state=SandboxState.STOPPED,
+            operation_name="stop_sandbox",
+        )
 
-    def cancel_exec(
+    async def delete_sandbox(
+        self,
+        sandbox_id: str,
+        *,
+        wait: bool = True,
+    ) -> SandboxHandle:
+        await asyncio.to_thread(self._rpc_client.delete_sandbox, sandbox_id)
+        current = await self.get_sandbox(sandbox_id)
+        if not wait:
+            return current
+        return await self._wait_for_sandbox_state(
+            sandbox_id=sandbox_id,
+            baseline=current,
+            target_state=SandboxState.DELETED,
+            operation_name="delete_sandbox",
+        )
+
+    async def create_exec(
+        self,
+        sandbox_id: str,
+        command: Sequence[str],
+        *,
+        cwd: str = "/workspace",
+        env_overrides: Mapping[str, str] | None = None,
+        wait: bool = False,
+    ) -> ExecHandle:
+        request = CreateExecRequest(
+            sandbox_id=sandbox_id,
+            command=tuple(command),
+            cwd=cwd,
+            env_overrides={} if env_overrides is None else dict(env_overrides),
+        )
+        response = await asyncio.to_thread(
+            self._rpc_client.create_exec,
+            to_proto_create_exec_request(request),
+        )
+        current = await self.get_exec(response.exec_id)
+        if not wait:
+            return current
+        return await self._wait_for_exec_terminal(
+            exec_id=response.exec_id,
+            sandbox_id=sandbox_id,
+            baseline=current,
+            operation_name="create_exec",
+        )
+
+    async def run(
+        self,
+        sandbox_id: str,
+        command: Sequence[str],
+        *,
+        cwd: str = "/workspace",
+        env_overrides: Mapping[str, str] | None = None,
+    ) -> ExecHandle:
+        return await self.create_exec(
+            sandbox_id,
+            command,
+            cwd=cwd,
+            env_overrides=env_overrides,
+            wait=True,
+        )
+
+    async def cancel_exec(
         self,
         exec_id: str,
-    ) -> service_pb2.AcceptedResponse:
-        return self._call(
-            self._stub.CancelExec,
-            service_pb2.CancelExecRequest(exec_id=exec_id),
+        *,
+        wait: bool = True,
+    ) -> ExecHandle:
+        try:
+            await asyncio.to_thread(self._rpc_client.cancel_exec, exec_id)
+        except SandboxInvalidStateError as exc:
+            raise ExecNotRunningError(exec_id) from exc
+        current = await self.get_exec(exec_id)
+        if not wait:
+            return current
+        return await self._wait_for_exec_terminal(
+            exec_id=exec_id,
+            sandbox_id=current.sandbox_id,
+            baseline=current,
+            operation_name="cancel_exec",
         )
 
-    def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
-        return self._call(self._stub.GetExec, service_pb2.GetExecRequest(exec_id=exec_id))
+    async def get_exec(self, exec_id: str) -> ExecHandle:
+        response = await asyncio.to_thread(self._rpc_client.get_exec, exec_id)
+        return to_exec_handle(response.exec)
 
-    def list_active_execs(self, sandbox_id: str = "") -> service_pb2.ListActiveExecsResponse:
-        return self._call(self._stub.ListActiveExecs, service_pb2.ListActiveExecsRequest(sandbox_id=sandbox_id))
+    async def list_active_execs(
+        self,
+        sandbox_id: str | None = None,
+    ) -> list[ExecHandle]:
+        response = await asyncio.to_thread(
+            self._rpc_client.list_active_execs,
+            "" if sandbox_id is None else sandbox_id,
+        )
+        return [to_exec_handle(item) for item in response.execs]
 
-    def _call(self, rpc, request):
+    async def subscribe_sandbox_events(
+        self,
+        sandbox_id: str,
+        *,
+        from_cursor: str = "0",
+        include_current_snapshot: bool = False,
+    ) -> AsyncIterator[SandboxEvent]:
+        normalized_cursor = normalize_from_cursor(sandbox_id, from_cursor)
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, SandboxEvent | Exception | None]] = asyncio.Queue()
+        stop_event = ThreadEvent()
+        stream_client = SandboxGrpcClient(
+            self.socket_path,
+            timeout_seconds=(
+                self._timeout_seconds if self._stream_timeout_seconds is None else self._stream_timeout_seconds
+            ),
+        )
+
+        def publish(kind: str, payload: SandboxEvent | Exception | None) -> None:
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, (kind, payload))
+            except RuntimeError:
+                return
+
+        def produce() -> None:
+            try:
+                for item in stream_client.subscribe_sandbox_events(
+                    sandbox_id,
+                    from_cursor=normalized_cursor,
+                    include_current_snapshot=include_current_snapshot,
+                ):
+                    if stop_event.is_set():
+                        break
+                    publish("event", to_sandbox_event(item))
+            except Exception as exc:  # noqa: BLE001
+                if not stop_event.is_set():
+                    publish("error", exc)
+            finally:
+                stream_client.close()
+                publish("end", None)
+
+        producer = Thread(target=produce, name=f"agents-sandbox-events-{sandbox_id}", daemon=True)
+        producer.start()
         try:
-            return rpc(request, timeout=self._timeout_seconds)
-        except grpc.RpcError as exc:
-            raise _translate_rpc_error(exc) from exc
-
-
-def _translate_rpc_error(exc: grpc.RpcError) -> Exception:
-    reason = ""
-    parsed_status = rpc_status.from_call(exc)
-    if parsed_status is not None:
-        for detail in parsed_status.details:
-            error_info = error_details_pb2.ErrorInfo()
-            if detail.Is(error_info.DESCRIPTOR):
-                detail.Unpack(error_info)
-                reason = error_info.reason
+            while True:
+                kind, payload = await queue.get()
+                if kind == "event":
+                    yield cast(SandboxEvent, payload)
+                    continue
+                if kind == "error":
+                    raise cast(Exception, payload)
                 break
-    error_type = _REASON_TO_ERROR.get(reason, errors.SandboxClientError)
-    return error_type(exc.details() or reason or "RPC failed")
+        finally:
+            stop_event.set()
+            stream_client.close()
+            await asyncio.to_thread(producer.join, 1.0)
+
+    async def _wait_for_sandbox_state(
+        self,
+        *,
+        sandbox_id: str,
+        baseline: SandboxHandle,
+        target_state: SandboxState,
+        operation_name: str,
+    ) -> SandboxHandle:
+        if baseline.state == target_state:
+            return baseline
+        self._raise_for_failed_sandbox(baseline, operation_name)
+        baseline_sequence = parse_cursor_sequence(sandbox_id, baseline.last_event_cursor)
+        stream_cursor = baseline.last_event_cursor or "0"
+        try:
+            async with asyncio.timeout(self._operation_timeout_seconds):
+                async for event in self.subscribe_sandbox_events(sandbox_id, from_cursor=stream_cursor):
+                    if event.sequence <= baseline_sequence:
+                        continue
+                    current = await self.get_sandbox(sandbox_id)
+                    if current.state == target_state:
+                        return current
+                    self._raise_for_failed_sandbox(current, operation_name)
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"{operation_name} timed out while waiting for sandbox {sandbox_id} to reach {target_state.name}."
+            ) from exc
+        raise SandboxClientError(
+            f"{operation_name} ended before sandbox {sandbox_id} reached {target_state.name}."
+        )
+
+    async def _wait_for_exec_terminal(
+        self,
+        *,
+        exec_id: str,
+        sandbox_id: str,
+        baseline: ExecHandle,
+        operation_name: str,
+    ) -> ExecHandle:
+        if baseline.state.is_terminal:
+            return baseline
+        sandbox_baseline = await self.get_sandbox(sandbox_id)
+        baseline_sequence = parse_cursor_sequence(sandbox_id, sandbox_baseline.last_event_cursor)
+        stream_cursor = sandbox_baseline.last_event_cursor or "0"
+        stream = self.subscribe_sandbox_events(sandbox_id, from_cursor=stream_cursor)
+        try:
+            async with asyncio.timeout(self._operation_timeout_seconds):
+                while True:
+                    current = await self.get_exec(exec_id)
+                    if current.state.is_terminal:
+                        return current
+                    try:
+                        event = await asyncio.wait_for(
+                            stream.__anext__(),
+                            timeout=self._exec_poll_interval_seconds,
+                        )
+                    except TimeoutError:
+                        continue
+                    if event.sequence <= baseline_sequence:
+                        continue
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"{operation_name} timed out while waiting for exec {exec_id} to become terminal."
+            ) from exc
+        except StopAsyncIteration as exc:
+            raise SandboxClientError(
+                f"{operation_name} event stream ended before exec {exec_id} reached a terminal state."
+            ) from exc
+        finally:
+            await stream.aclose()
+        raise SandboxClientError(
+            f"{operation_name} ended before exec {exec_id} reached a terminal state."
+        )
+
+    def _raise_for_failed_sandbox(self, handle: SandboxHandle, operation_name: str) -> None:
+        if handle.state == SandboxState.FAILED:
+            raise SandboxClientError(
+                f"{operation_name} observed sandbox {handle.sandbox_id} in FAILED state."
+            )
+
+
+__all__ = ["AgentsSandboxClient"]
