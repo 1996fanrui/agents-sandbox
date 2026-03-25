@@ -1,11 +1,10 @@
 #!/bin/bash
-# agboxd startup script (foreground mode for systemd)
+# agboxd startup script (foreground mode for systemd user service)
 #
 # Usage:
-#   sudo systemctl start agboxd
-#   sudo systemctl stop agboxd
 #   systemctl --user start agboxd
-#   journalctl -u agboxd -f
+#   systemctl --user stop agboxd
+#   journalctl --user -u agboxd -f
 #   GO_BIN=go ./scripts/agboxd_start.sh
 #
 # This script builds and starts agboxd with fixed platform paths.

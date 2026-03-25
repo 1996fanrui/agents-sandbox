@@ -65,9 +65,9 @@ Supported deployments must satisfy all of these constraints:
 - The daemon exits fail-fast if the lock is already held.
 - A consumer that bind-mounts the host runtime directory must expose the same platform-derived runtime directory for both the socket and host lock; per-stack private Docker volumes are not a safe singleton mechanism.
 
-In practice, the host-managed safe default is:
+In practice, the host-managed safe default is the same platform-derived runtime root:
 
-- socket path: `/run/agbox/agboxd.sock`
-- host lock path: `/run/agbox/agboxd.lock`
+- socket path: `$XDG_RUNTIME_DIR/agbox/agboxd.sock` on Linux
+- host lock path: `$XDG_RUNTIME_DIR/agbox/agboxd.lock` on Linux
 
-With that layout, accidental duplicate compose stacks on the same host contend on the same lock file and the later daemon fails before it can mutate the shared socket or Docker-managed runtime state.
+With that layout, accidental duplicate daemons in the same user runtime contend on the same lock file and the later daemon fails before it can mutate the shared socket or Docker-managed runtime state.
