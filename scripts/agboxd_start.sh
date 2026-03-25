@@ -2,15 +2,13 @@
 # agboxd startup script (foreground mode for systemd)
 #
 # Usage:
-#   sudo systemctl start agboxd           # Start the system service
-#   sudo systemctl stop agboxd            # Stop the system service
-#   systemctl --user start agboxd         # Start the user service for local development
-#   journalctl -u agboxd -f               # Follow system service lifecycle logs
+#   sudo systemctl start agboxd
+#   sudo systemctl stop agboxd
+#   systemctl --user start agboxd
+#   journalctl -u agboxd -f
+#   GO_BIN=go ./scripts/agboxd_start.sh
 #
-# Optional environment variables:
-#   AGBOX_SOCKET       Override the daemon Unix socket path.
-#   AGBOX_CONFIG_FILE  Override the daemon config file path.
-#   GO_BIN             Override the Go executable used for building.
+# This script builds and starts agboxd with fixed platform paths.
 
 set -e
 
@@ -28,17 +26,7 @@ fi
 mkdir -p "${BUILD_DIR}" "${LOG_DIR}"
 exec > "${LOG_DIR}/agboxd_$(date +%Y%m%d_%H%M%S).log" 2>&1
 
-SOCKET_ARGS=()
-if [ -n "${AGBOX_SOCKET:-}" ]; then
-    SOCKET_ARGS=(--socket "${AGBOX_SOCKET}")
-fi
-
-CONFIG_ARGS=()
-if [ -n "${AGBOX_CONFIG_FILE:-}" ]; then
-    CONFIG_ARGS=(--config "${AGBOX_CONFIG_FILE}")
-fi
-
 cd "${PROJECT_ROOT}"
 "${GO_BIN}" build -o "${BUILD_DIR}/agboxd" ./cmd/agboxd
 
-exec "${BUILD_DIR}/agboxd" "${SOCKET_ARGS[@]}" "${CONFIG_ARGS[@]}"
+exec "${BUILD_DIR}/agboxd"
