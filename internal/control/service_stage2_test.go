@@ -613,6 +613,13 @@ func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
 		case r.Method == http.MethodPost && path == "/containers/primary/exec":
 			writeDockerJSON(t, w, map[string]string{"Id": "exec-2"})
 		case r.Method == http.MethodPost && path == "/exec/exec-2/start":
+			var request container.ExecStartOptions
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode exec start request failed: %v", err)
+			}
+			if request.Detach || request.Tty {
+				t.Fatalf("unexpected exec start options: %#v", request)
+			}
 			writeHijackedDockerStream(t, w, func(writer io.Writer) {
 				if _, err := stdcopy.NewStdWriter(writer, stdcopy.Stdout).Write([]byte("partial")); err != nil {
 					t.Fatalf("write stdout stream failed: %v", err)

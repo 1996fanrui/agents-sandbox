@@ -512,6 +512,24 @@ func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
 	}
 }
 
+func TestNewServiceDoesNotRequireReachableDockerDaemonAtConstruction(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "nonexistent-docker.sock"))
+
+	service, closer, err := NewService(ServiceConfig{})
+	if err != nil {
+		t.Fatalf("NewService failed with unreachable docker host: %v", err)
+	}
+	if service == nil {
+		t.Fatal("expected service instance")
+	}
+	if closer == nil {
+		t.Fatal("expected runtime closer")
+	}
+	if closeErr := closer.Close(); closeErr != nil {
+		t.Fatalf("service closer failed: %v", closeErr)
+	}
+}
+
 func TestSandboxOwnerRemoved(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{})
 
