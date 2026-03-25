@@ -28,11 +28,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "aihub",
-			OwnerType: "session",
-			OwnerId:   "session-1",
-		},
+		SandboxOwner: "session-1",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
 			Dependencies: []*agboxv1.DependencySpec{
@@ -108,14 +104,7 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.jsonl",
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "consumer",
-			OwnerType: "workspace",
-			OwnerId:   "workspace-1",
-		},
-		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
-	})
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("workspace-1", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -154,14 +143,7 @@ func TestCreateExecFailsFastWhenArtifactTemplateEscapesRoot(t *testing.T) {
 		ArtifactOutputTemplate: "../escape.jsonl",
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "consumer",
-			OwnerType: "workspace",
-			OwnerId:   "workspace-escape",
-		},
-		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
-	})
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("workspace-escape", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -179,12 +161,12 @@ func TestCreateExecFailsFastWhenArtifactTemplateEscapesRoot(t *testing.T) {
 func TestExplicitErrorSemantics(t *testing.T) {
 	client := newBufconnClient(t, DefaultServiceConfig())
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-1", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-1", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
 
-	if _, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-1", "ghcr.io/agents-sandbox/coding-runtime:test")); status.Code(err) != codes.AlreadyExists {
+	if _, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-1", "ghcr.io/agents-sandbox/coding-runtime:test")); status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("expected conflict error, got %v", err)
 	}
 
@@ -225,7 +207,7 @@ func TestCreateSandboxRequiresExplicitImage(t *testing.T) {
 		PollInterval:    2 * time.Millisecond,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-valid", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-valid", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox(valid) failed: %v", err)
 	}
@@ -240,16 +222,12 @@ func TestCreateSandboxRequiresExplicitImage(t *testing.T) {
 		{
 			name: "missing_create_spec",
 			request: &agboxv1.CreateSandboxRequest{
-				SandboxOwner: &agboxv1.SandboxOwner{
-					Product:   "aihub",
-					OwnerType: "session",
-					OwnerId:   "session-missing-spec",
-				},
+				SandboxOwner: "session-missing-spec",
 			},
 		},
 		{
 			name:    "empty_image",
-			request: createSandboxRequest("aihub", "session", "session-empty-image", ""),
+			request: createSandboxRequest("session-empty-image", ""),
 		},
 	}
 	for _, testCase := range testCases {
@@ -270,7 +248,7 @@ func TestCreateSandboxUsesRequestedImageForRuntime(t *testing.T) {
 		runtimeBackend:  runtime,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-runtime-image", "example.com/custom/runtime:1.2.3"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-runtime-image", "example.com/custom/runtime:1.2.3"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -297,11 +275,7 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.
 	}
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "aihub",
-			OwnerType: "session",
-			OwnerId:   "session-generic-inputs",
-		},
+		SandboxOwner: "session-generic-inputs",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "example.com/custom/runtime:1.2.3",
 			Mounts: []*agboxv1.MountSpec{
@@ -336,11 +310,7 @@ func TestCreateSandboxRejectsConflictingGenericTargets(t *testing.T) {
 	})
 
 	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "aihub",
-			OwnerType: "session",
-			OwnerId:   "session-conflict",
-		},
+		SandboxOwner: "session-conflict",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
 			Mounts: []*agboxv1.MountSpec{
@@ -391,11 +361,7 @@ func TestCreateSandboxRejectsInvalidGenericSourcesBeforeRuntime(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-				SandboxOwner: &agboxv1.SandboxOwner{
-					Product:   "aihub",
-					OwnerType: "session",
-					OwnerId:   "session-" + testCase.name,
-				},
+				SandboxOwner: "session-" + testCase.name,
 				CreateSpec: testCase.createSpec,
 			})
 			if status.Code(err) != codes.InvalidArgument {
@@ -417,11 +383,7 @@ func TestCreateSandboxRejectsUnknownBuiltinResourcesBeforeRuntime(t *testing.T) 
 	})
 
 	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   "aihub",
-			OwnerType: "session",
-			OwnerId:   "session-unknown-builtin",
-		},
+		SandboxOwner: "session-unknown-builtin",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
 			BuiltinResources: []string{"missing-builtin"},
@@ -472,11 +434,7 @@ func TestCreateSandboxRejectsInvalidDependenciesBeforeRuntime(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runtime.lastCreateSpec = nil
 			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-				SandboxOwner: &agboxv1.SandboxOwner{
-					Product:   "aihub",
-					OwnerType: "session",
-					OwnerId:   "session-" + testCase.name,
-				},
+				SandboxOwner: "session-" + testCase.name,
 				CreateSpec: &agboxv1.CreateSpec{
 					Image:        "ghcr.io/agents-sandbox/coding-runtime:test",
 					Dependencies: testCase.dependencies,
@@ -506,7 +464,7 @@ func TestExecStatusCarriesStdoutAndStderr(t *testing.T) {
 		runtimeBackend:  runtime,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-exec-output", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-exec-output", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -586,7 +544,7 @@ func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
 		DaemonName:      "agboxd-test",
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-2", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-2", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -652,7 +610,7 @@ func TestCancelExecEmitsCancelledEvent(t *testing.T) {
 		PollInterval:    2 * time.Millisecond,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-cancel", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-cancel", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -698,7 +656,7 @@ func TestStopAndDeleteSandboxEmitRequestAndTerminalEvents(t *testing.T) {
 		PollInterval:    2 * time.Millisecond,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-delete-flow", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-delete-flow", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -755,7 +713,7 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 		DaemonName:      "agboxd-test",
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("aihub", "session", "session-idle-ttl", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-idle-ttl", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
@@ -908,14 +866,10 @@ func (backend *capturingRuntimeBackend) RunExec(context.Context, *sandboxRecord,
 	return backend.execResult, nil
 }
 
-func createSandboxRequest(product string, ownerType string, ownerID string, image string) *agboxv1.CreateSandboxRequest {
+func createSandboxRequest(sandboxOwner string, image string) *agboxv1.CreateSandboxRequest {
 	return &agboxv1.CreateSandboxRequest{
-		SandboxOwner: &agboxv1.SandboxOwner{
-			Product:   product,
-			OwnerType: ownerType,
-			OwnerId:   ownerID,
-		},
-		CreateSpec: createSpecWithImage(image),
+		SandboxOwner: sandboxOwner,
+		CreateSpec:   createSpecWithImage(image),
 	}
 }
 

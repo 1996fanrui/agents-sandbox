@@ -67,7 +67,7 @@ var (
 type sandboxRecord struct {
 	handle                    *agboxv1.SandboxHandle
 	createSpec                *agboxv1.CreateSpec
-	ownerKey                  string
+	sandboxOwner              string
 	dependencies              []*agboxv1.DependencySpec
 	runtimeState              *sandboxRuntimeState
 	events                    []*agboxv1.SandboxEvent
@@ -128,7 +128,7 @@ func (s *Service) Ping(context.Context, *agboxv1.PingRequest) (*agboxv1.PingResp
 }
 
 func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-	if req.GetSandboxOwner() == nil || req.GetSandboxOwner().GetProduct() == "" || req.GetSandboxOwner().GetOwnerType() == "" || req.GetSandboxOwner().GetOwnerId() == "" {
+	if req.GetSandboxOwner() == "" {
 		return nil, status.Error(codes.InvalidArgument, "sandbox_owner is required")
 	}
 	if req.GetCreateSpec() == nil {
@@ -144,10 +144,9 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ownerKey := makeOwnerKey(req.GetSandboxOwner())
 	for _, record := range s.boxes {
-		if record.ownerKey == ownerKey && record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_DELETED {
-			return nil, newStatusError(codes.AlreadyExists, ReasonSandboxConflict, "sandbox already exists for owner %s", ownerKey)
+		if record.sandboxOwner == req.GetSandboxOwner() && record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+			return nil, newStatusError(codes.AlreadyExists, ReasonSandboxConflict, "sandbox already exists for owner %s", req.GetSandboxOwner())
 		}
 	}
 
@@ -156,12 +155,12 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	record := &sandboxRecord{
 		handle: &agboxv1.SandboxHandle{
 			SandboxId:    sandboxID,
-			Owner:        cloneOwner(req.GetSandboxOwner()),
+			SandboxOwner: req.GetSandboxOwner(),
 			State:        agboxv1.SandboxState_SANDBOX_STATE_PENDING,
 			Dependencies: cloneDependencies(req.GetCreateSpec().GetDependencies()),
 		},
 		createSpec:    cloneCreateSpec(req.GetCreateSpec()),
-		ownerKey:      ownerKey,
+		sandboxOwner:  req.GetSandboxOwner(),
 		dependencies:  cloneDependencies(req.GetCreateSpec().GetDependencies()),
 		execs:         make(map[string]*agboxv1.ExecStatus),
 		execCancel:    make(map[string]context.CancelFunc),
@@ -194,14 +193,13 @@ func (s *Service) ListSandboxes(_ context.Context, req *agboxv1.ListSandboxesReq
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	filterOwner := req.GetOwner() != nil && req.GetOwner().GetOwnerId() != ""
-	expectedOwner := makeOwnerKey(req.GetOwner())
+	filterOwner := req.GetSandboxOwner() != ""
 	var handles []*agboxv1.SandboxHandle
 	for _, record := range s.boxes {
 		if !req.GetIncludeDeleted() && record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
 			continue
 		}
-		if filterOwner && record.ownerKey != expectedOwner {
+		if filterOwner && record.sandboxOwner != req.GetSandboxOwner() {
 			continue
 		}
 		handles = append(handles, cloneHandle(record.handle))
@@ -946,13 +944,6 @@ func isExecTerminal(state agboxv1.ExecState) bool {
 		state == agboxv1.ExecState_EXEC_STATE_CANCELLED
 }
 
-func makeOwnerKey(owner *agboxv1.SandboxOwner) string {
-	if owner == nil {
-		return ""
-	}
-	return owner.GetProduct() + "|" + owner.GetOwnerType() + "|" + owner.GetOwnerId()
-}
-
 func makeCursor(sandboxID string, sequence uint64) string {
 	return sandboxID + ":" + strconv.FormatUint(sequence, 10)
 }
@@ -1024,17 +1015,6 @@ func eventTypeForExec(state agboxv1.ExecState) agboxv1.EventType {
 		return agboxv1.EventType_EXEC_FAILED
 	default:
 		return agboxv1.EventType_EXEC_FINISHED
-	}
-}
-
-func cloneOwner(owner *agboxv1.SandboxOwner) *agboxv1.SandboxOwner {
-	if owner == nil {
-		return nil
-	}
-	return &agboxv1.SandboxOwner{
-		Product:   owner.GetProduct(),
-		OwnerType: owner.GetOwnerType(),
-		OwnerId:   owner.GetOwnerId(),
 	}
 }
 
@@ -1154,7 +1134,7 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 	}
 	return &agboxv1.SandboxHandle{
 		SandboxId:                  handle.GetSandboxId(),
-		Owner:                      cloneOwner(handle.GetOwner()),
+		SandboxOwner:               handle.GetSandboxOwner(),
 		State:                      handle.GetState(),
 		ResolvedToolingProjections: cloneResolvedProjections(handle.GetResolvedToolingProjections()),
 		Dependencies:               cloneDependencies(handle.GetDependencies()),

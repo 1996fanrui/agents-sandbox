@@ -147,7 +147,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	if err := dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.ownerKey, "default")); err != nil {
+	if err := dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.sandboxOwner, "default")); err != nil {
 		return runtimeCreateResult{}, err
 	}
 
@@ -168,7 +168,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			Image:        dependency.GetImage(),
 			NetworkName:  state.NetworkName,
 			NetworkAlias: firstNonEmpty(dependency.GetNetworkAlias(), dependency.GetDependencyName()),
-			Labels:       runtimedocker.DependencyLabels(record.handle.GetSandboxId(), record.ownerKey, dependency.GetDependencyName()),
+			Labels:       runtimedocker.DependencyLabels(record.handle.GetSandboxId(), record.sandboxOwner, dependency.GetDependencyName()),
 			Environment:  keyValuesToMap(dependency.GetEnvironment()),
 		}); err != nil {
 			return runtimeCreateResult{}, err
@@ -185,7 +185,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
 		NetworkName: state.NetworkName,
-		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.ownerKey, "default"),
+		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), record.sandboxOwner, "default"),
 		Mounts:      mounts,
 		Environment: primaryContainerEnvironment(mounts),
 		Workdir:     "/workspace",

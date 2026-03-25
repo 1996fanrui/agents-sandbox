@@ -75,12 +75,6 @@ message PingResponse {
   string daemon = 2;
 }
 
-message SandboxOwner {
-  string product = 1;
-  string owner_type = 2;
-  string owner_id = 3;
-}
-
 message CallerMetadata {
   string product = 1;
   string session_id = 2;
@@ -150,7 +144,7 @@ message ResolvedProjectionHandle {
 
 message SandboxHandle {
   string sandbox_id = 1;
-  SandboxOwner owner = 2;
+  string sandbox_owner = 2;
   SandboxState state = 3;
   repeated ResolvedProjectionHandle resolved_tooling_projections = 4;
   repeated DependencySpec dependencies = 5;
@@ -191,7 +185,7 @@ message ExecStatus {
 }
 
 message CreateSandboxRequest {
-  SandboxOwner sandbox_owner = 1;
+  string sandbox_owner = 1;
   CreateSpec create_spec = 2;
   CallerMetadata caller_metadata = 3;
 }
@@ -210,7 +204,7 @@ message GetSandboxResponse {
 }
 
 message ListSandboxesRequest {
-  SandboxOwner owner = 1;
+  string sandbox_owner = 1;
   bool include_deleted = 2;
 }
 

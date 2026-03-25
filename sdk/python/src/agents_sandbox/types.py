@@ -22,13 +22,6 @@ class PingInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class SandboxOwner:
-    product: str
-    owner_type: str
-    owner_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class CallerMetadata:
     product: str
     session_id: str
@@ -91,7 +84,7 @@ class CreateSandboxSpec:
 
 @dataclass(frozen=True, slots=True)
 class CreateSandboxRequest:
-    sandbox_owner: SandboxOwner
+    sandbox_owner: str
     create_spec: CreateSandboxSpec
     caller_metadata: CallerMetadata | None = None
 
@@ -139,7 +132,7 @@ class SandboxEvent:
 @dataclass(frozen=True, slots=True)
 class SandboxHandle:
     sandbox_id: str
-    sandbox_owner: SandboxOwner
+    sandbox_owner: str
     state: SandboxState
     resolved_tooling_projections: tuple[ResolvedProjectionHandle, ...] = ()
     dependencies: tuple[DependencySpec, ...] = ()
@@ -174,7 +167,6 @@ __all__ = [
     "ResolvedProjectionHandle",
     "SandboxEvent",
     "SandboxHandle",
-    "SandboxOwner",
     "ToolingProjectionSpec",
     "WorkspaceMaterializationSpec",
 ]
