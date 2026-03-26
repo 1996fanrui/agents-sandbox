@@ -179,7 +179,7 @@ class CreateSpec(_message.Message):
     def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_resources: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
-    __slots__ = ("sandbox_id", "state", "last_event_cursor", "required_services", "optional_services", "labels")
+    __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -189,23 +189,22 @@ class SandboxHandle(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
-    LAST_EVENT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    LAST_EVENT_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     state: SandboxState
-    last_event_cursor: str
+    last_event_sequence: int
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     labels: _containers.ScalarMap[str, str]
-    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_cursor: _Optional[str] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_sequence: _Optional[int] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class SandboxEvent(_message.Message):
-    __slots__ = ("event_id", "sequence", "cursor", "sandbox_id", "event_type", "occurred_at", "replay", "snapshot", "phase", "error_code", "error_message", "reason", "exec_id", "exit_code", "sandbox_state", "exec_state", "service_name")
+    __slots__ = ("event_id", "sequence", "sandbox_id", "event_type", "occurred_at", "replay", "snapshot", "phase", "error_code", "error_message", "reason", "exec_id", "exit_code", "sandbox_state", "exec_state", "service_name")
     EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
-    CURSOR_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     EVENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     OCCURRED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -222,7 +221,6 @@ class SandboxEvent(_message.Message):
     SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
     event_id: str
     sequence: int
-    cursor: str
     sandbox_id: str
     event_type: EventType
     occurred_at: _timestamp_pb2.Timestamp
@@ -237,10 +235,10 @@ class SandboxEvent(_message.Message):
     sandbox_state: SandboxState
     exec_state: ExecState
     service_name: str
-    def __init__(self, event_id: _Optional[str] = ..., sequence: _Optional[int] = ..., cursor: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., event_type: _Optional[_Union[EventType, str]] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., replay: bool = ..., snapshot: bool = ..., phase: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., reason: _Optional[str] = ..., exec_id: _Optional[str] = ..., exit_code: _Optional[int] = ..., sandbox_state: _Optional[_Union[SandboxState, str]] = ..., exec_state: _Optional[_Union[ExecState, str]] = ..., service_name: _Optional[str] = ...) -> None: ...
+    def __init__(self, event_id: _Optional[str] = ..., sequence: _Optional[int] = ..., sandbox_id: _Optional[str] = ..., event_type: _Optional[_Union[EventType, str]] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., replay: bool = ..., snapshot: bool = ..., phase: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., reason: _Optional[str] = ..., exec_id: _Optional[str] = ..., exit_code: _Optional[int] = ..., sandbox_state: _Optional[_Union[SandboxState, str]] = ..., exec_state: _Optional[_Union[ExecState, str]] = ..., service_name: _Optional[str] = ...) -> None: ...
 
 class ExecStatus(_message.Message):
-    __slots__ = ("exec_id", "sandbox_id", "state", "command", "cwd", "env_overrides", "exit_code", "error", "stdout", "stderr")
+    __slots__ = ("exec_id", "sandbox_id", "state", "command", "cwd", "env_overrides", "exit_code", "error", "stdout", "stderr", "last_event_sequence")
     EXEC_ID_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
@@ -251,6 +249,7 @@ class ExecStatus(_message.Message):
     ERROR_FIELD_NUMBER: _ClassVar[int]
     STDOUT_FIELD_NUMBER: _ClassVar[int]
     STDERR_FIELD_NUMBER: _ClassVar[int]
+    LAST_EVENT_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     exec_id: str
     sandbox_id: str
     state: ExecState
@@ -261,7 +260,8 @@ class ExecStatus(_message.Message):
     error: str
     stdout: str
     stderr: str
-    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., stdout: _Optional[str] = ..., stderr: _Optional[str] = ...) -> None: ...
+    last_event_sequence: int
+    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., stdout: _Optional[str] = ..., stderr: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
 
 class CreateSandboxRequest(_message.Message):
     __slots__ = ("create_spec", "caller_metadata", "sandbox_id")
@@ -360,14 +360,14 @@ class AcceptedResponse(_message.Message):
     def __init__(self, accepted: bool = ...) -> None: ...
 
 class SubscribeSandboxEventsRequest(_message.Message):
-    __slots__ = ("sandbox_id", "from_cursor", "include_current_snapshot")
+    __slots__ = ("sandbox_id", "from_sequence", "include_current_snapshot")
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
-    FROM_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    FROM_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     INCLUDE_CURRENT_SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
-    from_cursor: str
+    from_sequence: int
     include_current_snapshot: bool
-    def __init__(self, sandbox_id: _Optional[str] = ..., from_cursor: _Optional[str] = ..., include_current_snapshot: bool = ...) -> None: ...
+    def __init__(self, sandbox_id: _Optional[str] = ..., from_sequence: _Optional[int] = ..., include_current_snapshot: bool = ...) -> None: ...
 
 class CreateExecRequest(_message.Message):
     __slots__ = ("sandbox_id", "command", "cwd", "env_overrides", "caller_metadata", "exec_id")

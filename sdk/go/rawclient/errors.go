@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var sandboxCursorExpiredPattern = regexp.MustCompile(`^Sandbox (\S+) event cursor (\d+) expired; oldest retained sequence is (\d+)\.?$`)
+var sandboxSequenceExpiredPattern = regexp.MustCompile(`^sandbox (\S+) event sequence (\d+) is outside retained history(?:; oldest retained sequence is (\d+))?\.?$`)
 
 // SandboxClientError is the base rawclient error type.
 type SandboxClientError struct {
@@ -173,16 +173,16 @@ func NewExecNotRunningError(execID string, cause error) *ExecNotRunningError {
 	return newExecNotRunningError(execID, cause)
 }
 
-// SandboxCursorExpiredError is raised when a subscription cursor is too old.
-type SandboxCursorExpiredError struct {
+// SandboxSequenceExpiredError is raised when a subscription start sequence is outside retained history.
+type SandboxSequenceExpiredError struct {
 	*SandboxClientError
 	SandboxID      string
 	FromSequence   *uint64
 	OldestSequence *uint64
 }
 
-func newSandboxCursorExpiredError(message string, cause error) *SandboxCursorExpiredError {
-	sandboxID, fromSeq, oldestSeq := parseCursorExpiredMessage(message)
+func newSandboxSequenceExpiredError(message string, cause error) *SandboxSequenceExpiredError {
+	sandboxID, fromSeq, oldestSeq := parseSequenceExpiredMessage(message)
 	if sandboxID == "" {
 		id, hasID := idFromMessage(message)
 		if hasID {
@@ -194,7 +194,7 @@ func newSandboxCursorExpiredError(message string, cause error) *SandboxCursorExp
 		message = "RPC failed."
 	}
 
-	return &SandboxCursorExpiredError{
+	return &SandboxSequenceExpiredError{
 		SandboxClientError: &SandboxClientError{message: message, cause: cause},
 		SandboxID:          sandboxID,
 		FromSequence:       fromSeq,
@@ -238,15 +238,15 @@ func translateRPCError(err error) error {
 		return newExecNotFoundError(message, err)
 	case control.ReasonExecAlreadyTerminal:
 		return newExecAlreadyTerminalError(message, err)
-	case control.ReasonSandboxEventCursorExpired:
-		return newSandboxCursorExpiredError(message, err)
+	case control.ReasonSandboxEventSequenceExpired:
+		return newSandboxSequenceExpiredError(message, err)
 	default:
 		return &SandboxClientError{message: message, cause: err}
 	}
 }
 
-func parseCursorExpiredMessage(message string) (string, *uint64, *uint64) {
-	matches := sandboxCursorExpiredPattern.FindStringSubmatch(message)
+func parseSequenceExpiredMessage(message string) (string, *uint64, *uint64) {
+	matches := sandboxSequenceExpiredPattern.FindStringSubmatch(message)
 	if len(matches) != 4 {
 		return "", nil, nil
 	}
@@ -254,6 +254,9 @@ func parseCursorExpiredMessage(message string) (string, *uint64, *uint64) {
 	fromSequence, err := strconv.ParseUint(matches[2], 10, 64)
 	if err != nil {
 		return sandboxID, nil, nil
+	}
+	if matches[3] == "" {
+		return sandboxID, &fromSequence, nil
 	}
 	oldestSequence, err := strconv.ParseUint(matches[3], 10, 64)
 	if err != nil {

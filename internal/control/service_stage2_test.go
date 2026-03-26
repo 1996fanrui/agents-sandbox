@@ -116,8 +116,8 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -283,8 +283,8 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 	close(optionalStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -353,8 +353,8 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 	close(optionalStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -1120,18 +1120,18 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			fieldNames: []string{
 				"sandbox_id",
 				"state",
-				"last_event_cursor",
+				"last_event_sequence",
 				"required_services",
 				"optional_services",
 				"labels",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"sandbox_id":        1,
-				"state":             2,
-				"last_event_cursor": 3,
-				"required_services": 4,
-				"optional_services": 5,
-				"labels":            6,
+				"sandbox_id":          1,
+				"state":               2,
+				"last_event_sequence": 3,
+				"required_services":   4,
+				"optional_services":   5,
+				"labels":              6,
 			},
 		},
 		{
@@ -1140,7 +1140,6 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			fieldNames: []string{
 				"event_id",
 				"sequence",
-				"cursor",
 				"sandbox_id",
 				"event_type",
 				"occurred_at",
@@ -1159,21 +1158,50 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"event_id":      1,
 				"sequence":      2,
-				"cursor":        3,
-				"sandbox_id":    4,
-				"event_type":    5,
-				"occurred_at":   6,
-				"replay":        7,
-				"snapshot":      8,
-				"phase":         9,
-				"error_code":    10,
-				"error_message": 11,
-				"reason":        12,
-				"exec_id":       13,
-				"exit_code":     14,
-				"sandbox_state": 15,
-				"exec_state":    16,
-				"service_name":  17,
+				"sandbox_id":    3,
+				"event_type":    4,
+				"occurred_at":   5,
+				"replay":        6,
+				"snapshot":      7,
+				"phase":         8,
+				"error_code":    9,
+				"error_message": 10,
+				"reason":        11,
+				"exec_id":       12,
+				"exit_code":     13,
+				"sandbox_state": 14,
+				"exec_state":    15,
+				"service_name":  16,
+			},
+		},
+		{
+			name:       "ExecStatus",
+			descriptor: (&agboxv1.ExecStatus{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"exec_id",
+				"sandbox_id",
+				"state",
+				"command",
+				"cwd",
+				"env_overrides",
+				"exit_code",
+				"error",
+				"stdout",
+				"stderr",
+				"last_event_sequence",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"exec_id":             1,
+				"sandbox_id":          2,
+				"state":               3,
+				"command":             4,
+				"cwd":                 5,
+				"env_overrides":       6,
+				"exit_code":           7,
+				"error":               8,
+				"stdout":              9,
+				"stderr":              10,
+				"last_event_sequence": 11,
 			},
 		},
 		{
@@ -1200,6 +1228,16 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"include_deleted": 1,
 				"label_selector":  2,
+			},
+		},
+		{
+			name:       "GetExecResponse",
+			descriptor: (&agboxv1.GetExecResponse{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"exec",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"exec": 1,
 			},
 		},
 	}

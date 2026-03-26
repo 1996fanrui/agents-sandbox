@@ -89,7 +89,8 @@ func TestRPCMethods(t *testing.T) {
 		},
 		getExecResp: &agboxv1.GetExecResponse{
 			Exec: &agboxv1.ExecStatus{
-				ExecId: "exec-1",
+				ExecId:            "exec-1",
+				LastEventSequence: 1,
 			},
 		},
 		listActiveExecsResp: &agboxv1.ListActiveExecsResponse{},
@@ -154,7 +155,7 @@ func TestRPCMethods(t *testing.T) {
 	if _, err := client.DeleteSandboxes(context.Background(), deleteSandboxesReq); err != nil {
 		t.Fatalf("DeleteSandboxes failed: %v", err)
 	}
-	stream, err := client.SubscribeSandboxEvents(context.Background(), "sandbox-alpha", "cursor:42", true)
+	stream, err := client.SubscribeSandboxEvents(context.Background(), "sandbox-alpha", 42, true)
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
 	}
@@ -197,8 +198,8 @@ func TestRPCMethods(t *testing.T) {
 	if service.subscribeSandboxEventsReq.GetSandboxId() != "sandbox-alpha" {
 		t.Fatalf("subscribe request mismatch: %#v", service.subscribeSandboxEventsReq)
 	}
-	if service.subscribeSandboxEventsReq.GetFromCursor() != "cursor:42" {
-		t.Fatalf("subscribe from_cursor mismatch: %q", service.subscribeSandboxEventsReq.GetFromCursor())
+	if service.subscribeSandboxEventsReq.GetFromSequence() != 42 {
+		t.Fatalf("subscribe from_sequence mismatch: %d", service.subscribeSandboxEventsReq.GetFromSequence())
 	}
 	if !service.subscribeSandboxEventsReq.GetIncludeCurrentSnapshot() {
 		t.Fatalf("subscribe include_current_snapshot mismatch: %v", service.subscribeSandboxEventsReq.GetIncludeCurrentSnapshot())
@@ -271,19 +272,25 @@ func TestErrorTranslationKnownAndUnknownReason(t *testing.T) {
 		t.Fatalf("unexpected already-terminal message: %q", terminal.Error())
 	}
 
-	cursorErr := translateRPCError(
+	sequenceErr := translateRPCError(
 		newStatusError(
 			t,
-			control.ReasonSandboxEventCursorExpired,
-			"cursor sequence 42 is outside sandbox sandbox-alpha event history",
+			control.ReasonSandboxEventSequenceExpired,
+			"sandbox sandbox-alpha event sequence 42 is outside retained history",
 		),
 	)
-	var expired *SandboxCursorExpiredError
-	if !errors.As(cursorErr, &expired) {
-		t.Fatalf("expected SandboxCursorExpiredError, got %T", cursorErr)
+	var expired *SandboxSequenceExpiredError
+	if !errors.As(sequenceErr, &expired) {
+		t.Fatalf("expected SandboxSequenceExpiredError, got %T", sequenceErr)
 	}
-	if expired.SandboxID != "" || expired.FromSequence != nil || expired.OldestSequence != nil {
-		t.Fatalf("expected provider-style cursor message to leave structured fields empty, got %#v", expired)
+	if expired.SandboxID != "sandbox-alpha" {
+		t.Fatalf("unexpected sandbox id: %q", expired.SandboxID)
+	}
+	if expired.FromSequence == nil || *expired.FromSequence != 42 {
+		t.Fatalf("unexpected from sequence: %#v", expired.FromSequence)
+	}
+	if expired.OldestSequence != nil {
+		t.Fatalf("unexpected oldest sequence: %#v", expired.OldestSequence)
 	}
 
 	_, err = client.DeleteSandbox(context.Background(), "sandbox-alpha")
@@ -319,7 +326,7 @@ func TestSubscribeEvents(t *testing.T) {
 		}
 	})
 
-	stream, err := client.SubscribeSandboxEvents(context.Background(), "sandbox-1", "events:7", true)
+	stream, err := client.SubscribeSandboxEvents(context.Background(), "sandbox-1", 7, true)
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
 	}
@@ -344,8 +351,8 @@ func TestSubscribeEvents(t *testing.T) {
 	if service.subscribeSandboxEventsReq.GetSandboxId() != "sandbox-1" {
 		t.Fatalf("unexpected sandbox id: %q", service.subscribeSandboxEventsReq.GetSandboxId())
 	}
-	if service.subscribeSandboxEventsReq.GetFromCursor() != "events:7" {
-		t.Fatalf("unexpected from_cursor: %q", service.subscribeSandboxEventsReq.GetFromCursor())
+	if service.subscribeSandboxEventsReq.GetFromSequence() != 7 {
+		t.Fatalf("unexpected from_sequence: %d", service.subscribeSandboxEventsReq.GetFromSequence())
 	}
 	if !service.subscribeSandboxEventsReq.GetIncludeCurrentSnapshot() {
 		t.Fatalf("include_current_snapshot should be true")

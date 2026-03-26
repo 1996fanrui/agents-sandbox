@@ -414,6 +414,9 @@ func TestCallerProvidedExecID(t *testing.T) {
 	if resp.GetExec().GetExecId() != "issue11-exec" {
 		t.Fatalf("unexpected exec handle: %q", resp.GetExec().GetExecId())
 	}
+	if got := resp.GetExec().GetLastEventSequence(); got == 0 {
+		t.Fatal("expected non-zero exec last_event_sequence")
+	}
 }
 
 func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
@@ -579,8 +582,8 @@ func TestEventPersistenceAcrossRestart(t *testing.T) {
 		PollInterval: 2 * time.Millisecond,
 	}, dbPath)
 	stream, err := second.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -603,8 +606,8 @@ func TestEventPersistenceAcrossRestart(t *testing.T) {
 		if event.GetSequence() != uint64(index+1) {
 			t.Fatalf("unexpected sequence at %d: got %d want %d", index, event.GetSequence(), index+1)
 		}
-		if event.GetCursor() != makeCursor(createResp.GetSandboxId(), uint64(index+1)) {
-			t.Fatalf("unexpected cursor at %d: got %s", index, event.GetCursor())
+		if event.GetSequence() != uint64(index+1) {
+			t.Fatalf("unexpected sequence at %d: got %d want %d", index, event.GetSequence(), index+1)
 		}
 	}
 }
@@ -630,8 +633,8 @@ func TestDeletedSandboxEventsRetained(t *testing.T) {
 	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 
 	stream, err := harness.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -1380,6 +1383,9 @@ func TestExecStatusCarriesStdoutAndStderr(t *testing.T) {
 	if execStatus.GetExec().GetStdout() != "hello" || execStatus.GetExec().GetStderr() != "warning" {
 		t.Fatalf("unexpected exec output payload: %#v", execStatus.GetExec())
 	}
+	if got := execStatus.GetExec().GetLastEventSequence(); got == 0 {
+		t.Fatal("expected non-zero exec last_event_sequence")
+	}
 }
 
 func TestMaterializeGenericCopiesRejectsExternalSymlink(t *testing.T) {
@@ -1430,7 +1436,7 @@ func TestMaterializeGenericCopiesAppliesExcludePatterns(t *testing.T) {
 	}
 }
 
-func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
+func TestSubscribeSandboxEventsReplayFromZeroSequence(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
@@ -1454,8 +1460,8 @@ func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	replay, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: "0",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 0,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -1482,8 +1488,8 @@ func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
 	}
 
 	incremental, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: fullHistory[2].GetCursor(),
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: fullHistory[2].GetSequence(),
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents(incremental) failed: %v", err)
@@ -1498,21 +1504,21 @@ func TestSubscribeSandboxEventsReplayFromZeroCursor(t *testing.T) {
 	}
 }
 
-func TestStaleCursorReturnsExpiredError(t *testing.T) {
+func TestExpiredSequenceReturnsOutOfRangeError(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
 	})
 
-	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("stale-cursor", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("expired-sequence", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:  createResp.GetSandboxId(),
-		FromCursor: createResp.GetSandboxId() + ":99",
+		SandboxId:    createResp.GetSandboxId(),
+		FromSequence: 99,
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -1520,9 +1526,9 @@ func TestStaleCursorReturnsExpiredError(t *testing.T) {
 
 	_, err = stream.Recv()
 	if err == nil {
-		t.Fatal("expected stale cursor error")
+		t.Fatal("expected expired sequence error")
 	}
-	assertStatusErrorReason(t, err, codes.OutOfRange, ReasonSandboxEventCursorExpired)
+	assertStatusErrorReason(t, err, codes.OutOfRange, ReasonSandboxEventSequenceExpired)
 }
 
 func TestCreateSandboxFailsWhenAcceptedEventAppendFails(t *testing.T) {

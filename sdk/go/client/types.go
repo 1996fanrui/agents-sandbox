@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -102,12 +100,12 @@ type CopySpec struct {
 
 // SandboxHandle is the public sandbox state snapshot.
 type SandboxHandle struct {
-	SandboxID        string
-	State            SandboxState
-	LastEventCursor  string
-	RequiredServices []ServiceSpec
-	OptionalServices []ServiceSpec
-	Labels           map[string]string
+	SandboxID         string
+	State             SandboxState
+	LastEventSequence uint64
+	RequiredServices  []ServiceSpec
+	OptionalServices  []ServiceSpec
+	Labels            map[string]string
 }
 
 // DeleteSandboxesResult is the public bulk delete result.
@@ -118,23 +116,23 @@ type DeleteSandboxesResult struct {
 
 // ExecHandle is the public exec state snapshot.
 type ExecHandle struct {
-	ExecID       string
-	SandboxID    string
-	State        ExecState
-	Command      []string
-	Cwd          *string
-	EnvOverrides map[string]string
-	ExitCode     *int32
-	Error        *string
-	Stdout       *string
-	Stderr       *string
+	ExecID            string
+	SandboxID         string
+	State             ExecState
+	Command           []string
+	Cwd               *string
+	EnvOverrides      map[string]string
+	ExitCode          *int32
+	Error             *string
+	Stdout            *string
+	Stderr            *string
+	LastEventSequence uint64
 }
 
 // SandboxEvent is the public sandbox event type.
 type SandboxEvent struct {
 	EventID      string
 	Sequence     uint64
-	Cursor       string
 	SandboxID    string
 	EventType    SandboxEventType
 	OccurredAt   time.Time
@@ -168,18 +166,13 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 	if handle == nil {
 		return SandboxHandle{}, fmt.Errorf("sandbox handle is required")
 	}
-	if handle.GetLastEventCursor() != "" {
-		if _, err := parseCursorSequence(handle.GetSandboxId(), handle.GetLastEventCursor()); err != nil {
-			return SandboxHandle{}, err
-		}
-	}
 	return SandboxHandle{
-		SandboxID:        handle.GetSandboxId(),
-		State:            SandboxState(handle.GetState()),
-		LastEventCursor:  handle.GetLastEventCursor(),
-		RequiredServices: toServices(handle.GetRequiredServices()),
-		OptionalServices: toServices(handle.GetOptionalServices()),
-		Labels:           cloneStringMap(handle.GetLabels()),
+		SandboxID:         handle.GetSandboxId(),
+		State:             SandboxState(handle.GetState()),
+		LastEventSequence: handle.GetLastEventSequence(),
+		RequiredServices:  toServices(handle.GetRequiredServices()),
+		OptionalServices:  toServices(handle.GetOptionalServices()),
+		Labels:            cloneStringMap(handle.GetLabels()),
 	}, nil
 }
 
@@ -190,17 +183,38 @@ func toExecHandle(execStatus *agboxv1.ExecStatus) ExecHandle {
 		exitCode = int32Ptr(execStatus.GetExitCode())
 	}
 	return ExecHandle{
-		ExecID:       execStatus.GetExecId(),
-		SandboxID:    execStatus.GetSandboxId(),
-		State:        state,
-		Command:      slices.Clone(execStatus.GetCommand()),
-		Cwd:          emptyStringPtr(execStatus.GetCwd()),
-		EnvOverrides: keyValuesToMap(execStatus.GetEnvOverrides()),
-		ExitCode:     exitCode,
-		Error:        emptyStringPtr(execStatus.GetError()),
-		Stdout:       emptyStringPtr(execStatus.GetStdout()),
-		Stderr:       emptyStringPtr(execStatus.GetStderr()),
+		ExecID:            execStatus.GetExecId(),
+		SandboxID:         execStatus.GetSandboxId(),
+		State:             state,
+		Command:           slices.Clone(execStatus.GetCommand()),
+		Cwd:               emptyStringPtr(execStatus.GetCwd()),
+		EnvOverrides:      keyValuesToMap(execStatus.GetEnvOverrides()),
+		ExitCode:          exitCode,
+		Error:             emptyStringPtr(execStatus.GetError()),
+		Stdout:            emptyStringPtr(execStatus.GetStdout()),
+		Stderr:            emptyStringPtr(execStatus.GetStderr()),
+		LastEventSequence: execStatus.GetLastEventSequence(),
 	}
+}
+
+type execSnapshot struct {
+	handle            ExecHandle
+	lastEventSequence uint64
+}
+
+func toExecSnapshot(response *agboxv1.GetExecResponse) (execSnapshot, error) {
+	if response == nil || response.GetExec() == nil {
+		return execSnapshot{}, fmt.Errorf("get exec response is missing exec")
+	}
+	handle := toExecHandle(response.GetExec())
+	lastEventSequence := handle.LastEventSequence
+	if lastEventSequence == 0 {
+		return execSnapshot{}, fmt.Errorf("get exec response for exec %s is missing last_event_sequence", handle.ExecID)
+	}
+	return execSnapshot{
+		handle:            handle,
+		lastEventSequence: lastEventSequence,
+	}, nil
 }
 
 func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
@@ -210,10 +224,6 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 	if event.GetOccurredAt() == nil {
 		return SandboxEvent{}, fmt.Errorf("sandbox event %s is missing occurred_at", fallbackID(event.GetEventId()))
 	}
-	if _, err := parseCursorSequence(event.GetSandboxId(), event.GetCursor()); err != nil {
-		return SandboxEvent{}, err
-	}
-
 	var exitCode *int32
 	if event.GetEventType() == agboxv1.EventType_EXEC_FINISHED || event.GetExitCode() != 0 {
 		exitCode = int32Ptr(event.GetExitCode())
@@ -222,7 +232,6 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 	return SandboxEvent{
 		EventID:      event.GetEventId(),
 		Sequence:     event.GetSequence(),
-		Cursor:       event.GetCursor(),
 		SandboxID:    event.GetSandboxId(),
 		EventType:    SandboxEventType(event.GetEventType()),
 		OccurredAt:   event.GetOccurredAt().AsTime().UTC(),
@@ -238,31 +247,6 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 		SandboxState: sandboxStatePtr(event.GetSandboxState()),
 		ExecState:    execStatePtr(event.GetExecState()),
 	}, nil
-}
-
-func parseCursorSequence(sandboxID string, cursor string) (uint64, error) {
-	if cursor == "" || cursor == "0" {
-		return 0, nil
-	}
-	prefix, rawSequence, ok := stringsCut(cursor, ":")
-	if !ok || prefix != sandboxID {
-		return 0, fmt.Errorf("cursor does not belong to sandbox %s: %s", sandboxID, cursor)
-	}
-	sequence, err := parseUint(rawSequence)
-	if err != nil {
-		return 0, fmt.Errorf("cursor sequence must be non-negative: %s", cursor)
-	}
-	return sequence, nil
-}
-
-func normalizeFromCursor(sandboxID string, cursor string) (string, error) {
-	if cursor == "0" || cursor == "" {
-		return cursor, nil
-	}
-	if _, err := parseCursorSequence(sandboxID, cursor); err != nil {
-		return "", err
-	}
-	return cursor, nil
 }
 
 func toProtoMount(spec MountSpec) *agboxv1.MountSpec {
@@ -429,12 +413,4 @@ func fallbackID(value string) string {
 		return "<unknown>"
 	}
 	return value
-}
-
-func stringsCut(value string, sep string) (string, string, bool) {
-	return strings.Cut(value, sep)
-}
-
-func parseUint(value string) (uint64, error) {
-	return strconv.ParseUint(value, 10, 64)
 }

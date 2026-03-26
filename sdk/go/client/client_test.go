@@ -18,9 +18,9 @@ func TestConversions(t *testing.T) {
 	t.Parallel()
 
 	handle, err := toSandboxHandle(&agboxv1.SandboxHandle{
-		SandboxId:       "sandbox-1",
-		State:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-		LastEventCursor: "sandbox-1:1",
+		SandboxId:         "sandbox-1",
+		State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+		LastEventSequence: 1,
 		RequiredServices: []*agboxv1.ServiceSpec{
 			{
 				Name:  "postgres",
@@ -55,14 +55,15 @@ func TestConversions(t *testing.T) {
 	}
 
 	running := toExecHandle(&agboxv1.ExecStatus{
-		ExecId:    "exec-running",
-		SandboxId: "sandbox-1",
-		State:     agboxv1.ExecState_EXEC_STATE_RUNNING,
-		Command:   []string{"echo", "hello"},
-		Cwd:       "/workspace",
-		Stdout:    "partial",
-		Stderr:    "warn",
-		ExitCode:  0,
+		ExecId:            "exec-running",
+		SandboxId:         "sandbox-1",
+		State:             agboxv1.ExecState_EXEC_STATE_RUNNING,
+		Command:           []string{"echo", "hello"},
+		Cwd:               "/workspace",
+		Stdout:            "partial",
+		Stderr:            "warn",
+		ExitCode:          0,
+		LastEventSequence: 3,
 	})
 	if running.ExitCode != nil {
 		t.Fatalf("running exec should not expose exit code: %#v", running)
@@ -70,21 +71,28 @@ func TestConversions(t *testing.T) {
 	if running.Stdout == nil || *running.Stdout != "partial" {
 		t.Fatalf("unexpected running stdout: %#v", running.Stdout)
 	}
+	if running.LastEventSequence != 3 {
+		t.Fatalf("unexpected running last event sequence: %#v", running.LastEventSequence)
+	}
 
 	finished := toExecHandle(&agboxv1.ExecStatus{
-		ExecId:    "exec-finished",
-		SandboxId: "sandbox-1",
-		State:     agboxv1.ExecState_EXEC_STATE_FINISHED,
-		Command:   []string{"echo", "hello"},
-		Cwd:       "/workspace",
-		Stdout:    "done",
-		ExitCode:  7,
+		ExecId:            "exec-finished",
+		SandboxId:         "sandbox-1",
+		State:             agboxv1.ExecState_EXEC_STATE_FINISHED,
+		Command:           []string{"echo", "hello"},
+		Cwd:               "/workspace",
+		Stdout:            "done",
+		ExitCode:          7,
+		LastEventSequence: 7,
 	})
 	if finished.ExitCode == nil || *finished.ExitCode != 7 {
 		t.Fatalf("unexpected finished exit code: %#v", finished.ExitCode)
 	}
+	if finished.LastEventSequence != 7 {
+		t.Fatalf("unexpected finished last event sequence: %#v", finished.LastEventSequence)
+	}
 
-	event, err := toSandboxEvent(eventPB("sandbox-1", 11, "sandbox-1:11", agboxv1.EventType_EXEC_FINISHED))
+	event, err := toSandboxEvent(eventPB("sandbox-1", 11, "", agboxv1.EventType_EXEC_FINISHED))
 	if err != nil {
 		t.Fatalf("toSandboxEvent failed: %v", err)
 	}
@@ -95,18 +103,20 @@ func TestConversions(t *testing.T) {
 	_, err = toSandboxEvent(&agboxv1.SandboxEvent{
 		EventId:   "event-missing",
 		SandboxId: "sandbox-1",
-		Cursor:    "sandbox-1:1",
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing occurred_at") {
 		t.Fatalf("expected missing occurred_at error, got %v", err)
 	}
 
-	_, err = toSandboxHandle(&agboxv1.SandboxHandle{
-		SandboxId:       "sandbox-1",
-		LastEventCursor: "sandbox-2:1",
+	_, err = toExecSnapshot(&agboxv1.GetExecResponse{
+		Exec: &agboxv1.ExecStatus{
+			ExecId:    "exec-1",
+			SandboxId: "sandbox-1",
+			State:     agboxv1.ExecState_EXEC_STATE_RUNNING,
+		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not belong") {
-		t.Fatalf("expected invalid cursor error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "missing last_event_sequence") {
+		t.Fatalf("expected missing last_event_sequence error, got %v", err)
 	}
 }
 
@@ -128,29 +138,29 @@ func TestSandboxLifecycle(t *testing.T) {
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
 			getCalls++
 			state := agboxv1.SandboxState_SANDBOX_STATE_PENDING
-			cursor := "sandbox-1:5"
+			sequence := uint64(5)
 			if getCalls > 1 {
 				state = agboxv1.SandboxState_SANDBOX_STATE_READY
-				cursor = "sandbox-1:6"
+				sequence = 6
 			}
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           state,
-					LastEventCursor: cursor,
+					SandboxId:         sandboxID,
+					State:             state,
+					LastEventSequence: sequence,
 				},
 			}, nil
 		}
 
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
-			if sandboxID != "sandbox-1" || fromCursor != "sandbox-1:5" || includeCurrentSnapshot {
-				t.Fatalf("unexpected subscribe args: %q %q %v", sandboxID, fromCursor, includeCurrentSnapshot)
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
+			if sandboxID != "sandbox-1" || fromSequence != 5 || includeCurrentSnapshot {
+				t.Fatalf("unexpected subscribe args: %q %d %v", sandboxID, fromSequence, includeCurrentSnapshot)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB("sandbox-1", 4, "sandbox-1:4", agboxv1.EventType_SANDBOX_READY),
-				eventPB("sandbox-1", 5, "sandbox-1:5", agboxv1.EventType_SANDBOX_READY),
-				eventPB("sandbox-1", 6, "sandbox-1:6", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 4, "", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 5, "", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 6, "", agboxv1.EventType_SANDBOX_READY),
 			}, nil), nil
 		}
 
@@ -181,25 +191,25 @@ func TestSandboxLifecycle(t *testing.T) {
 		deleteCalls := 0
 		responses := map[string][]*agboxv1.SandboxHandle{
 			"resume-false": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventCursor: "sandbox-1:1"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventSequence: 1},
 			},
 			"resume-true": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventCursor: "sandbox-1:2"},
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventCursor: "sandbox-1:3"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventSequence: 2},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 3},
 			},
 			"stop-false": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventCursor: "sandbox-1:4"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 4},
 			},
 			"stop-true": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventCursor: "sandbox-1:5"},
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_STOPPED, LastEventCursor: "sandbox-1:6"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 5},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_STOPPED, LastEventSequence: 6},
 			},
 			"delete-false": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETING, LastEventCursor: "sandbox-1:7"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETING, LastEventSequence: 7},
 			},
 			"delete-true": {
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETING, LastEventCursor: "sandbox-1:8"},
-				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETED, LastEventCursor: "sandbox-1:9"},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETING, LastEventSequence: 8},
+				{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_DELETED, LastEventSequence: 9},
 			},
 		}
 		base.resumeSandboxFn = func(_ context.Context, _ string) (*agboxv1.AcceptedResponse, error) {
@@ -237,23 +247,23 @@ func TestSandboxLifecycle(t *testing.T) {
 		}
 
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			var events []*agboxv1.SandboxEvent
 			switch mode {
 			case "resume-true":
 				events = []*agboxv1.SandboxEvent{
-					eventPB(sandboxID, 2, "sandbox-1:2", agboxv1.EventType_SANDBOX_READY),
-					eventPB(sandboxID, 3, "sandbox-1:3", agboxv1.EventType_SANDBOX_READY),
+					eventPB(sandboxID, 2, "", agboxv1.EventType_SANDBOX_READY),
+					eventPB(sandboxID, 3, "", agboxv1.EventType_SANDBOX_READY),
 				}
 			case "stop-true":
 				events = []*agboxv1.SandboxEvent{
-					eventPB(sandboxID, 5, "sandbox-1:5", agboxv1.EventType_SANDBOX_STOPPED),
-					eventPB(sandboxID, 6, "sandbox-1:6", agboxv1.EventType_SANDBOX_STOPPED),
+					eventPB(sandboxID, 5, "", agboxv1.EventType_SANDBOX_STOPPED),
+					eventPB(sandboxID, 6, "", agboxv1.EventType_SANDBOX_STOPPED),
 				}
 			default:
 				events = []*agboxv1.SandboxEvent{
-					eventPB(sandboxID, 8, "sandbox-1:8", agboxv1.EventType_SANDBOX_DELETED),
-					eventPB(sandboxID, 9, "sandbox-1:9", agboxv1.EventType_SANDBOX_DELETED),
+					eventPB(sandboxID, 8, "", agboxv1.EventType_SANDBOX_DELETED),
+					eventPB(sandboxID, 9, "", agboxv1.EventType_SANDBOX_DELETED),
 				}
 			}
 			return streamFromEvents(events, nil), nil
@@ -305,26 +315,26 @@ func TestSandboxLifecycle(t *testing.T) {
 			readCount := sandboxReads[sandboxID]
 			mu.Unlock()
 			state := agboxv1.SandboxState_SANDBOX_STATE_DELETING
-			cursor := sandboxID + ":1"
+			sequence := uint64(1)
 			if readCount >= 2 {
 				state = agboxv1.SandboxState_SANDBOX_STATE_DELETED
-				cursor = sandboxID + ":2"
+				sequence = 2
 			}
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           state,
-					LastEventCursor: cursor,
+					SandboxId:         sandboxID,
+					State:             state,
+					LastEventSequence: sequence,
 				},
 			}, nil
 		}
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, _ bool) (rawclient.SandboxEventStream, error) {
-			if fromCursor != sandboxID+":1" {
-				t.Fatalf("unexpected from_cursor: %q", fromCursor)
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			if fromSequence != 1 {
+				t.Fatalf("unexpected from_sequence: %d", fromSequence)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB(sandboxID, 2, sandboxID+":2", agboxv1.EventType_SANDBOX_DELETED),
+				eventPB(sandboxID, 2, "", agboxv1.EventType_SANDBOX_DELETED),
 			}, nil), nil
 		}
 
@@ -356,16 +366,16 @@ func TestSandboxLifecycle(t *testing.T) {
 			mu.Unlock()
 
 			state := agboxv1.SandboxState_SANDBOX_STATE_DELETING
-			cursor := sandboxID + ":1"
+			sequence := uint64(1)
 			if readCount >= 2 {
 				state = agboxv1.SandboxState_SANDBOX_STATE_DELETED
-				cursor = sandboxID + ":2"
+				sequence = 2
 			}
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           state,
-					LastEventCursor: cursor,
+					SandboxId:         sandboxID,
+					State:             state,
+					LastEventSequence: sequence,
 				},
 			}, nil
 		}
@@ -373,7 +383,7 @@ func TestSandboxLifecycle(t *testing.T) {
 		ready := make(chan string, 2)
 		release := make(chan struct{})
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			ready <- sandboxID
 			delivered := false
 			return &fakeStream{
@@ -383,7 +393,7 @@ func TestSandboxLifecycle(t *testing.T) {
 						return nil, io.EOF
 					}
 					delivered = true
-					return eventPB(sandboxID, 2, sandboxID+":2", agboxv1.EventType_SANDBOX_DELETED), nil
+					return eventPB(sandboxID, 2, "", agboxv1.EventType_SANDBOX_DELETED), nil
 				},
 			}, nil
 		}
@@ -427,11 +437,12 @@ func TestExecOperations(t *testing.T) {
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			return &agboxv1.GetExecResponse{
 				Exec: &agboxv1.ExecStatus{
-					ExecId:    execID,
-					SandboxId: "sandbox-1",
-					State:     agboxv1.ExecState_EXEC_STATE_RUNNING,
-					Command:   []string{"echo", "hello"},
-					Cwd:       "/workspace",
+					ExecId:            execID,
+					SandboxId:         "sandbox-1",
+					State:             agboxv1.ExecState_EXEC_STATE_RUNNING,
+					Command:           []string{"echo", "hello"},
+					Cwd:               "/workspace",
+					LastEventSequence: 1,
 				},
 			}, nil
 		}
@@ -444,6 +455,9 @@ func TestExecOperations(t *testing.T) {
 		if handle.State != ExecStateRunning {
 			t.Fatalf("unexpected exec state: %v", handle.State)
 		}
+		if handle.LastEventSequence != 1 {
+			t.Fatalf("unexpected exec sequence: %d", handle.LastEventSequence)
+		}
 	})
 
 	t.Run("create_exec_wait_and_run", func(t *testing.T) {
@@ -451,44 +465,42 @@ func TestExecOperations(t *testing.T) {
 		base.createExecFn = func(_ context.Context, request *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
 			return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
 		}
+		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
+			t.Fatalf("waitForExecTerminal must not call GetSandbox, got %q", sandboxID)
+			return nil, nil
+		}
 		getExecCalls := 0
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			getExecCalls++
 			state := agboxv1.ExecState_EXEC_STATE_RUNNING
 			stdout := ""
-			if getExecCalls >= 3 {
+			sequence := uint64(10)
+			if getExecCalls >= 2 {
 				state = agboxv1.ExecState_EXEC_STATE_FINISHED
 				stdout = "hello"
+				sequence = 12
 			}
 			return &agboxv1.GetExecResponse{
 				Exec: &agboxv1.ExecStatus{
-					ExecId:    execID,
-					SandboxId: "sandbox-1",
-					State:     state,
-					Command:   []string{"echo", "hello"},
-					Cwd:       "/workspace",
-					Stdout:    stdout,
-					ExitCode:  0,
-				},
-			}, nil
-		}
-		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
-			return &agboxv1.GetSandboxResponse{
-				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-					LastEventCursor: "sandbox-1:10",
+					ExecId:            execID,
+					SandboxId:         "sandbox-1",
+					State:             state,
+					Command:           []string{"echo", "hello"},
+					Cwd:               "/workspace",
+					Stdout:            stdout,
+					ExitCode:          0,
+					LastEventSequence: sequence,
 				},
 			}, nil
 		}
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, _ bool) (rawclient.SandboxEventStream, error) {
-			if fromCursor != "sandbox-1:10" {
-				t.Fatalf("unexpected from_cursor: %q", fromCursor)
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			if fromSequence != 10 {
+				t.Fatalf("unexpected from_sequence: %d", fromSequence)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB(sandboxID, 10, "sandbox-1:10", agboxv1.EventType_EXEC_FINISHED),
-				eventPB(sandboxID, 11, "sandbox-1:11", agboxv1.EventType_EXEC_FINISHED),
+				withExecEvent(eventPB(sandboxID, 11, "", agboxv1.EventType_EXEC_FINISHED), "exec-2"),
+				withExecEvent(eventPB(sandboxID, 12, "", agboxv1.EventType_EXEC_FINISHED), "exec-1"),
 			}, nil), nil
 		}
 
@@ -500,18 +512,22 @@ func TestExecOperations(t *testing.T) {
 		if handle.State != ExecStateFinished {
 			t.Fatalf("unexpected exec state: %v", handle.State)
 		}
+		if handle.LastEventSequence != 12 {
+			t.Fatalf("unexpected exec sequence: %d", handle.LastEventSequence)
+		}
 
 		getExecCalls = 0
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			return &agboxv1.GetExecResponse{
 				Exec: &agboxv1.ExecStatus{
-					ExecId:    execID,
-					SandboxId: "sandbox-1",
-					State:     agboxv1.ExecState_EXEC_STATE_FINISHED,
-					Command:   []string{"echo", "hello"},
-					Cwd:       "/workspace",
-					Stdout:    "hello",
-					ExitCode:  0,
+					ExecId:            execID,
+					SandboxId:         "sandbox-1",
+					State:             agboxv1.ExecState_EXEC_STATE_FINISHED,
+					Command:           []string{"echo", "hello"},
+					Cwd:               "/workspace",
+					Stdout:            "hello",
+					ExitCode:          0,
+					LastEventSequence: 12,
 				},
 			}, nil
 		}
@@ -521,6 +537,9 @@ func TestExecOperations(t *testing.T) {
 		}
 		if runHandle.Stdout == nil || *runHandle.Stdout != "hello" {
 			t.Fatalf("unexpected run stdout: %#v", runHandle.Stdout)
+		}
+		if runHandle.LastEventSequence != 12 {
+			t.Fatalf("unexpected run sequence: %d", runHandle.LastEventSequence)
 		}
 	})
 
@@ -554,36 +573,38 @@ func TestExecOperations(t *testing.T) {
 		}
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			state := agboxv1.ExecState_EXEC_STATE_RUNNING
+			sequence := uint64(12)
 			if mode == "cancel-true" {
 				trueExecCalls++
-				if trueExecCalls >= 3 {
-					state = agboxv1.ExecState_EXEC_STATE_FINISHED
+				if trueExecCalls >= 2 {
+					state = agboxv1.ExecState_EXEC_STATE_CANCELLED
+					sequence = 13
 				}
 			}
 			return &agboxv1.GetExecResponse{
 				Exec: &agboxv1.ExecStatus{
-					ExecId:    execID,
-					SandboxId: "sandbox-1",
-					State:     state,
-					Command:   []string{"echo", "hello"},
-					Cwd:       "/workspace",
-					ExitCode:  0,
+					ExecId:            execID,
+					SandboxId:         "sandbox-1",
+					State:             state,
+					Command:           []string{"echo", "hello"},
+					Cwd:               "/workspace",
+					ExitCode:          0,
+					LastEventSequence: sequence,
 				},
 			}, nil
 		}
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
-			return &agboxv1.GetSandboxResponse{
-				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-					LastEventCursor: "sandbox-1:12",
-				},
-			}, nil
+			t.Fatalf("waitForExecTerminal must not call GetSandbox, got %q", sandboxID)
+			return nil, nil
 		}
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			if fromSequence != 12 {
+				t.Fatalf("unexpected from_sequence: %d", fromSequence)
+			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB(sandboxID, 12, "sandbox-1:12", agboxv1.EventType_EXEC_FINISHED),
+				withExecEvent(eventPB(sandboxID, 12, "", agboxv1.EventType_EXEC_CANCELLED), "exec-1"),
+				withExecEvent(eventPB(sandboxID, 13, "", agboxv1.EventType_EXEC_CANCELLED), "exec-1"),
 			}, nil), nil
 		}
 		client = newTestClient(base, func(time.Duration) (rpcClient, error) { return streamClient, nil })
@@ -592,8 +613,32 @@ func TestExecOperations(t *testing.T) {
 			t.Fatalf("CancelExec(wait=false) = %#v, %v", running, err)
 		}
 		finished, err := client.CancelExec(context.Background(), "exec-1")
-		if err != nil || finished.State != ExecStateFinished {
+		if err != nil || finished.State != ExecStateCancelled {
 			t.Fatalf("CancelExec(wait=true) = %#v, %v", finished, err)
+		}
+	})
+
+	t.Run("exec_wait_requires_snapshot_sequence", func(t *testing.T) {
+		base := &fakeRPCClient{}
+		base.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
+			return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
+		}
+		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
+			return &agboxv1.GetExecResponse{
+				Exec: &agboxv1.ExecStatus{
+					ExecId:    execID,
+					SandboxId: "sandbox-1",
+					State:     agboxv1.ExecState_EXEC_STATE_RUNNING,
+					Command:   []string{"echo", "hello"},
+					Cwd:       "/workspace",
+				},
+			}, nil
+		}
+
+		client := newTestClient(base, nil)
+		_, err := client.CreateExec(context.Background(), "sandbox-1", []string{"echo", "hello"}, WithWait(true))
+		if err == nil || !strings.Contains(err.Error(), "missing last_event_sequence") {
+			t.Fatalf("expected missing sequence error, got %v", err)
 		}
 	})
 }
@@ -609,9 +654,9 @@ func TestWaitErrorSemantics(t *testing.T) {
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       "sandbox-1",
-					State:           agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-					LastEventCursor: "sandbox-1:1",
+					SandboxId:         "sandbox-1",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+					LastEventSequence: 1,
 				},
 			}, nil
 		}
@@ -637,14 +682,14 @@ func TestWaitErrorSemantics(t *testing.T) {
 			getCalls++
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-					LastEventCursor: "sandbox-1:1",
+					SandboxId:         sandboxID,
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
 				},
 			}, nil
 		}
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			return streamFromEvents(nil, nil), nil
 		}
 
@@ -667,25 +712,21 @@ func TestWaitErrorSemantics(t *testing.T) {
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			return &agboxv1.GetExecResponse{
 				Exec: &agboxv1.ExecStatus{
-					ExecId:    execID,
-					SandboxId: "sandbox-1",
-					State:     agboxv1.ExecState_EXEC_STATE_RUNNING,
-					Command:   []string{"echo", "hello"},
-					Cwd:       "/workspace",
+					ExecId:            execID,
+					SandboxId:         "sandbox-1",
+					State:             agboxv1.ExecState_EXEC_STATE_RUNNING,
+					Command:           []string{"echo", "hello"},
+					Cwd:               "/workspace",
+					LastEventSequence: 10,
 				},
 			}, nil
 		}
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
-			return &agboxv1.GetSandboxResponse{
-				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:       sandboxID,
-					State:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-					LastEventCursor: "sandbox-1:10",
-				},
-			}, nil
+			t.Fatalf("waitForExecTerminal must not call GetSandbox, got %q", sandboxID)
+			return nil, nil
 		}
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			return streamFromEvents(nil, nil), nil
 		}
 
@@ -706,13 +747,13 @@ func TestSubscribeChannel(t *testing.T) {
 
 	t.Run("events_and_defaults", func(t *testing.T) {
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromCursor string, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
-			if sandboxID != "sandbox-1" || fromCursor != "0" || includeCurrentSnapshot {
-				t.Fatalf("unexpected subscribe args: %q %q %v", sandboxID, fromCursor, includeCurrentSnapshot)
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
+			if sandboxID != "sandbox-1" || fromSequence != 0 || includeCurrentSnapshot {
+				t.Fatalf("unexpected subscribe args: %q %d %v", sandboxID, fromSequence, includeCurrentSnapshot)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB("sandbox-1", 1, "sandbox-1:1", agboxv1.EventType_SANDBOX_SERVICE_READY),
-				eventPB("sandbox-1", 2, "sandbox-1:2", agboxv1.EventType_EXEC_FINISHED),
+				eventPB("sandbox-1", 1, "", agboxv1.EventType_SANDBOX_SERVICE_READY),
+				eventPB("sandbox-1", 2, "", agboxv1.EventType_EXEC_FINISHED),
 			}, nil), nil
 		}
 		client := newTestClient(&fakeRPCClient{}, func(time.Duration) (rpcClient, error) { return streamClient, nil })
@@ -728,19 +769,10 @@ func TestSubscribeChannel(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid_cursor_reports_error", func(t *testing.T) {
-		client := newTestClient(&fakeRPCClient{}, nil)
-		ch := client.SubscribeSandboxEvents(context.Background(), "sandbox-1", WithFromCursor("sandbox-2:1"))
-		item, ok := <-ch
-		if !ok || item.Err == nil {
-			t.Fatalf("expected immediate cursor error, got %#v %v", item, ok)
-		}
-	})
-
 	t.Run("stream_error_is_forwarded", func(t *testing.T) {
 		wantErr := errors.New("stream failed")
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			return streamFromEvents(nil, wantErr), nil
 		}
 		client := newTestClient(&fakeRPCClient{}, func(time.Duration) (rpcClient, error) { return streamClient, nil })
@@ -753,7 +785,7 @@ func TestSubscribeChannel(t *testing.T) {
 	t.Run("context_cancel_closes_channel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		streamClient := &fakeRPCClient{}
-		streamClient.subscribeSandboxEventsFn = func(ctx context.Context, _ string, _ string, _ bool) (rawclient.SandboxEventStream, error) {
+		streamClient.subscribeSandboxEventsFn = func(ctx context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
 			return blockingStream(ctx), nil
 		}
 		client := newTestClient(&fakeRPCClient{}, func(time.Duration) (rpcClient, error) { return streamClient, nil })
@@ -773,7 +805,7 @@ type fakeRPCClient struct {
 	stopSandboxFn            func(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	deleteSandboxFn          func(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	deleteSandboxesFn        func(context.Context, *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error)
-	subscribeSandboxEventsFn func(context.Context, string, string, bool) (rawclient.SandboxEventStream, error)
+	subscribeSandboxEventsFn func(context.Context, string, uint64, bool) (rawclient.SandboxEventStream, error)
 	createExecFn             func(context.Context, *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error)
 	cancelExecFn             func(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	getExecFn                func(context.Context, string) (*agboxv1.GetExecResponse, error)
@@ -837,9 +869,9 @@ func (f *fakeRPCClient) DeleteSandboxes(ctx context.Context, request *agboxv1.De
 	return &agboxv1.DeleteSandboxesResponse{}, nil
 }
 
-func (f *fakeRPCClient) SubscribeSandboxEvents(ctx context.Context, sandboxID string, fromCursor string, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
+func (f *fakeRPCClient) SubscribeSandboxEvents(ctx context.Context, sandboxID string, fromSequence uint64, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
 	if f.subscribeSandboxEventsFn != nil {
-		return f.subscribeSandboxEventsFn(ctx, sandboxID, fromCursor, includeCurrentSnapshot)
+		return f.subscribeSandboxEventsFn(ctx, sandboxID, fromSequence, includeCurrentSnapshot)
 	}
 	return streamFromEvents(nil, nil), nil
 }
@@ -914,7 +946,6 @@ func newTestClient(base rpcClient, streamFactory rawClientFactory) *Client {
 		newStreamClient:  streamFactory,
 		streamTimeout:    time.Second,
 		operationTimeout: 50 * time.Millisecond,
-		execPollInterval: time.Millisecond,
 	}
 }
 
@@ -944,14 +975,18 @@ func blockingStream(ctx context.Context) rawclient.SandboxEventStream {
 	}
 }
 
-func eventPB(sandboxID string, sequence uint64, cursor string, eventType agboxv1.EventType) *agboxv1.SandboxEvent {
+func eventPB(sandboxID string, sequence uint64, _ string, eventType agboxv1.EventType) *agboxv1.SandboxEvent {
 	return &agboxv1.SandboxEvent{
 		EventId:    "event",
 		Sequence:   sequence,
-		Cursor:     cursor,
 		SandboxId:  sandboxID,
 		EventType:  eventType,
 		OccurredAt: timestamppb.New(time.Now()),
 		ExecState:  agboxv1.ExecState_EXEC_STATE_FINISHED,
 	}
+}
+
+func withExecEvent(event *agboxv1.SandboxEvent, execID string) *agboxv1.SandboxEvent {
+	event.ExecId = execID
+	return event
 }
