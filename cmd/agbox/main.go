@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
@@ -37,7 +36,7 @@ func run(
 	case "ping":
 		err = runPing(ctx, args[1:], stdout, lookupEnv)
 	case "sandbox":
-		err = runSandbox(args[1:])
+		err = runSandbox(ctx, args[1:], stdout, lookupEnv)
 	default:
 		err = usageErrorf("unknown command %q", args[0])
 	}
@@ -74,19 +73,4 @@ func runPing(ctx context.Context, args []string, stdout io.Writer, lookupEnv fun
 	return nil
 }
 
-var sandboxSubcommands = []string{"create", "list", "get", "delete", "exec"}
-
-func runSandbox(args []string) error {
-	if len(args) == 0 {
-		return usageErrorf(
-			"sandbox command requires a subcommand\navailable subcommands: %s",
-			strings.Join(sandboxSubcommands, ", "),
-		)
-	}
-
-	return usageErrorf(
-		"unknown sandbox command %q\navailable subcommands: %s",
-		args[0],
-		strings.Join(sandboxSubcommands, ", "),
-	)
-}
+var sandboxSubcommands = []string{"create", "list", "get", "delete"}
