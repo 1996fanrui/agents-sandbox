@@ -13,9 +13,10 @@ from typing import cast
 from ._generated import service_pb2
 from ._grpc_client import SandboxGrpcClient
 from .conversions import (
-    normalize_from_cursor,
-    parse_cursor_sequence,
+    normalize_from_sequence,
+    parse_event_sequence,
     to_exec_handle,
+    to_exec_snapshot,
     to_ping_info,
     to_proto_create_exec_request,
     to_proto_create_sandbox_request,
@@ -90,7 +91,6 @@ class AgentsSandboxClient:
         self._timeout_seconds = timeout_seconds
         self._stream_timeout_seconds = stream_timeout_seconds
         self._operation_timeout_seconds = operation_timeout_seconds
-        self._exec_poll_interval_seconds = 0.25
         self._rpc_client = SandboxGrpcClient(self.socket_path, timeout_seconds=timeout_seconds)
 
     def close(self) -> None:
@@ -272,13 +272,14 @@ class AgentsSandboxClient:
             self._rpc_client.create_exec,
             to_proto_create_exec_request(request),
         )
-        current = await self.get_exec(response.exec_id)
+        current, last_event_sequence = await self._get_exec_snapshot(response.exec_id)
         if not wait:
             return current
         return await self._wait_for_exec_terminal(
             exec_id=response.exec_id,
             sandbox_id=sandbox_id,
             baseline=current,
+            baseline_sequence=last_event_sequence,
             operation_name="create_exec",
         )
 
@@ -308,19 +309,20 @@ class AgentsSandboxClient:
             await asyncio.to_thread(self._rpc_client.cancel_exec, exec_id)
         except SandboxInvalidStateError as exc:
             raise ExecNotRunningError(exec_id) from exc
-        current = await self.get_exec(exec_id)
+        current, last_event_sequence = await self._get_exec_snapshot(exec_id)
         if not wait:
             return current
         return await self._wait_for_exec_terminal(
             exec_id=exec_id,
             sandbox_id=current.sandbox_id,
             baseline=current,
+            baseline_sequence=last_event_sequence,
             operation_name="cancel_exec",
         )
 
     async def get_exec(self, exec_id: str) -> ExecHandle:
-        response = await asyncio.to_thread(self._rpc_client.get_exec, exec_id)
-        return to_exec_handle(response.exec)
+        handle, _ = await self._get_exec_snapshot(exec_id)
+        return handle
 
     async def list_active_execs(
         self,
@@ -332,14 +334,18 @@ class AgentsSandboxClient:
         )
         return [to_exec_handle(item) for item in response.execs]
 
+    async def _get_exec_snapshot(self, exec_id: str) -> tuple[ExecHandle, int]:
+        response = await asyncio.to_thread(self._rpc_client.get_exec, exec_id)
+        return to_exec_snapshot(response)
+
     async def subscribe_sandbox_events(
         self,
         sandbox_id: str,
         *,
-        from_cursor: str = "0",
+        from_sequence: int = 0,
         include_current_snapshot: bool = False,
     ) -> AsyncIterator[SandboxEvent]:
-        normalized_cursor = normalize_from_cursor(sandbox_id, from_cursor)
+        normalized_sequence = normalize_from_sequence(from_sequence)
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[tuple[str, SandboxEvent | Exception | None]] = asyncio.Queue()
         stop_event = ThreadEvent()
@@ -360,7 +366,7 @@ class AgentsSandboxClient:
             try:
                 for item in stream_client.subscribe_sandbox_events(
                     sandbox_id,
-                    from_cursor=normalized_cursor,
+                    from_sequence=normalized_sequence,
                     include_current_snapshot=include_current_snapshot,
                 ):
                     if stop_event.is_set():
@@ -400,11 +406,11 @@ class AgentsSandboxClient:
         if baseline.state == target_state:
             return baseline
         self._raise_for_failed_sandbox(baseline, operation_name)
-        baseline_sequence = parse_cursor_sequence(sandbox_id, baseline.last_event_cursor)
-        stream_cursor = baseline.last_event_cursor or "0"
+        baseline_sequence = parse_event_sequence(baseline.last_event_sequence)
+        stream_sequence = baseline.last_event_sequence
         try:
             async with asyncio.timeout(self._operation_timeout_seconds):
-                async for event in self.subscribe_sandbox_events(sandbox_id, from_cursor=stream_cursor):
+                async for event in self.subscribe_sandbox_events(sandbox_id, from_sequence=stream_sequence):
                     if event.sequence <= baseline_sequence:
                         continue
                     current = await self.get_sandbox(sandbox_id)
@@ -425,41 +431,31 @@ class AgentsSandboxClient:
         exec_id: str,
         sandbox_id: str,
         baseline: ExecHandle,
+        baseline_sequence: int,
         operation_name: str,
     ) -> ExecHandle:
         if baseline.state.is_terminal:
             return baseline
-        sandbox_baseline = await self.get_sandbox(sandbox_id)
-        baseline_sequence = parse_cursor_sequence(sandbox_id, sandbox_baseline.last_event_cursor)
-        stream_cursor = sandbox_baseline.last_event_cursor or "0"
-        stream = self.subscribe_sandbox_events(sandbox_id, from_cursor=stream_cursor)
+        baseline_sequence = parse_event_sequence(baseline_sequence)
+        stream = self.subscribe_sandbox_events(sandbox_id, from_sequence=baseline_sequence)
         try:
             async with asyncio.timeout(self._operation_timeout_seconds):
-                while True:
-                    current = await self.get_exec(exec_id)
-                    if current.state.is_terminal:
-                        return current
-                    try:
-                        event = await asyncio.wait_for(
-                            stream.__anext__(),
-                            timeout=self._exec_poll_interval_seconds,
-                        )
-                    except TimeoutError:
-                        continue
+                async for event in stream:
                     if event.sequence <= baseline_sequence:
                         continue
+                    if event.exec_id != exec_id:
+                        continue
+                    current, _ = await self._get_exec_snapshot(exec_id)
+                    if current.state.is_terminal:
+                        return current
         except TimeoutError as exc:
             raise TimeoutError(
                 f"{operation_name} timed out while waiting for exec {exec_id} to become terminal."
             ) from exc
-        except StopAsyncIteration as exc:
-            raise SandboxClientError(
-                f"{operation_name} event stream ended before exec {exec_id} reached a terminal state."
-            ) from exc
         finally:
             await stream.aclose()
         raise SandboxClientError(
-            f"{operation_name} ended before exec {exec_id} reached a terminal state."
+            f"{operation_name} event stream ended before exec {exec_id} reached a terminal state."
         )
 
     def _raise_for_failed_sandbox(self, handle: SandboxHandle, operation_name: str) -> None:

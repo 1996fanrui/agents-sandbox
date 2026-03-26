@@ -88,8 +88,8 @@ class ExecNotRunningError(SandboxInvalidStateError):
         super().__init__(message)
 
 
-class SandboxCursorExpiredError(SandboxClientError):
-    """Raised when an event cursor has expired."""
+class SandboxSequenceExpiredError(SandboxClientError):
+    """Raised when an event sequence anchor has expired."""
 
     def __init__(self, sandbox_id: str, from_sequence: int | None = None, oldest_sequence: int | None = None):
         if from_sequence is None or oldest_sequence is None:
@@ -99,7 +99,7 @@ class SandboxCursorExpiredError(SandboxClientError):
             self.oldest_sequence = None
         else:
             message = (
-                f"Sandbox {sandbox_id} event cursor {from_sequence} expired; "
+                f"Sandbox {sandbox_id} event sequence {from_sequence} expired; "
                 f"oldest retained sequence is {oldest_sequence}."
             )
             self.sandbox_id = sandbox_id

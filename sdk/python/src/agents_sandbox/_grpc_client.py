@@ -20,7 +20,7 @@ _REASON_TO_ERROR = dict(
     SANDBOX_INVALID_STATE=errors.SandboxInvalidStateError,
     EXEC_NOT_FOUND=errors.ExecNotFoundError,
     EXEC_ALREADY_TERMINAL=errors.ExecAlreadyTerminalError,
-    SANDBOX_EVENT_CURSOR_EXPIRED=errors.SandboxCursorExpiredError,
+    SANDBOX_EVENT_SEQUENCE_EXPIRED=errors.SandboxSequenceExpiredError,
 )
 
 
@@ -85,12 +85,12 @@ class SandboxGrpcClient:
         self,
         sandbox_id: str,
         *,
-        from_cursor: str = "",
+        from_sequence: int = 0,
         include_current_snapshot: bool = False,
     ) -> Iterator[service_pb2.SandboxEvent]:
         request = service_pb2.SubscribeSandboxEventsRequest(
             sandbox_id=sandbox_id,
-            from_cursor=from_cursor,
+            from_sequence=from_sequence,
             include_current_snapshot=include_current_snapshot,
         )
         try:
