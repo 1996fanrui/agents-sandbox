@@ -1,15 +1,17 @@
 # Architecture Overview
 
-`agents-sandbox` is a Docker-backed sandbox control plane with a local gRPC API and an async Python SDK. The repository contains the daemon, the runtime backend, the protobuf contract, the Python client layers, and a small example that exercises the public SDK surface.
+`agents-sandbox` is a Docker-backed sandbox control plane with a local gRPC API, a layered Go SDK, and an async Python SDK. The repository contains the daemon, the runtime backend, the protobuf contract, the Go and Python client layers, and a small CLI entry point that exercises part of the public surface.
 
 ## System Architecture
 
-The system is organized around one local daemon process, one runtime backend, and two client layers.
+The system is organized around one local daemon process, one runtime backend, and multiple caller-facing entry points built on the same Unix-socket gRPC contract.
 
 ```mermaid
 flowchart LR
-    SDK[Python SDK\nAgentsSandboxClient] --> RPC[gRPC over Unix socket]
-    CLI[agbox CLI] --> RPC
+    PySDK[Python SDK\nAgentsSandboxClient] --> RPC[gRPC over Unix socket]
+    GoClient[Go SDK\nsdk/go/client] --> GoRaw[Go raw client\nsdk/go/rawclient]
+    GoRaw --> RPC
+    CLI[AgentsSandbox CLI] --> RPC
     RPC --> Daemon[AgentsSandbox daemon]
     Daemon --> Service[control.Service]
     Service --> Persistence[Persistent ids.db\nID registry + event store buckets]
@@ -28,7 +30,9 @@ flowchart LR
 - `internal/control/event_store.go` owns the event-store abstraction plus the persistent bbolt implementation used to replay sandbox history after daemon restart and to retain deleted sandbox streams until cleanup.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
 - `internal/profile` defines daemon-managed built-in resources such as `.claude`, `.codex`, `uv`, `npm`, `apt`, `gh-auth`, and `ssh-agent`.
-- `api/proto/service.proto` is the transport contract shared by Go and Python.
+- `api/proto/service.proto` is the transport contract shared by the daemon, the Go SDK, and the Python SDK.
+- `sdk/go/rawclient` contains the synchronous transport-facing Go client that resolves the default socket path, dials the Unix socket, wraps raw RPCs, translates typed gRPC errors, and exposes the raw event-stream primitive.
+- `sdk/go/client` contains the public high-level Go SDK. It converts protobuf payloads into public Go types, exposes direct-parameter lifecycle and exec APIs, adds `wait` behavior, and bridges sandbox events into Go channels.
 - `sdk/python` contains a thin raw gRPC wrapper plus the public async `AgentsSandboxClient`, which adds `wait=True/False`, event-based waiting, cursor handling, and public handle models.
 
 ### Primary request and event flow
@@ -39,7 +43,7 @@ flowchart LR
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
 5. The runtime backend performs Docker-side work through a shared Docker Engine API client and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
 6. The service persists ordered events before updating in-memory state, exposes them through `cursor` and `sequence`, and reconstructs recovered-only sandbox handles from that history after daemon restart.
-7. The Python SDK optionally waits on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`.
+7. The Go and Python high-level SDKs optionally wait on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`, while `sdk/go/rawclient` keeps the transport contract visible without adding high-level wait semantics.
 
 ## Core Capabilities And Usage Scenarios
 
@@ -56,13 +60,13 @@ This is the core path for products that need an isolated coding or execution env
 
 ### Command execution and direct output consumption
 
-Exec creation is asynchronous at the protocol layer, but the result model now carries `stdout`, `stderr`, `exit_code`, and terminal state directly in `ExecStatus`. The public Python SDK exposes:
+Exec creation is asynchronous at the protocol layer, but the result model now carries `stdout`, `stderr`, `exit_code`, and terminal state directly in `ExecStatus`. The public Go and Python SDKs expose the same lifecycle contract through language-appropriate APIs:
 
 - `create_exec(..., wait=False)` for accepted async execution
 - `create_exec(..., wait=True)` for event-driven waiting
 - `run(...)` as the direct "wait for completion and read stdout" path
 
-This supports both orchestration workflows and simple request-response command execution without relying on workspace result files.
+In Go, those calls live on `sdk/go/client`, while `sdk/go/rawclient` keeps the underlying accepted-state RPCs and raw event stream available to tools that want transport-level control. This supports both orchestration workflows and simple request-response command execution without relying on workspace result files.
 
 ### Filesystem ingress and built-in resources
 
@@ -91,6 +95,16 @@ The daemon exposes a per-sandbox ordered event stream with:
 
 This supports long-running orchestration, reconnect after temporary client loss, and SDK-side waiting without pretending accepted operations are already complete.
 
+### SDK layering and integration choices
+
+The repository now exposes three caller integration styles:
+
+- `sdk/go/rawclient` for transport-level Go integrations that want protobuf requests, direct RPC access, typed error translation, and manual event-stream control.
+- `sdk/go/client` for most Go applications that want public Go types, direct-parameter methods, `wait` helpers, and channel-based event consumption.
+- `sdk/python` for async Python applications that want the same lifecycle semantics with Python-native async iteration.
+
+This separation keeps the wire contract stable while letting each language expose caller-friendly northbound APIs.
+
 ## Technical Constraints And External Dependencies
 
 ### Runtime and deployment constraints
@@ -116,6 +130,7 @@ This supports long-running orchestration, reconnect after temporary client loss,
 - Go daemon and protocol implementation
 - Docker Engine API Go SDK and a reachable Docker daemon
 - gRPC and protobuf for the wire contract
+- Go gRPC client stack for `sdk/go/rawclient` and `sdk/go/client`
 - Python `grpcio` client stack and `uv`-managed SDK environment
 - Optional host resources such as `SSH_AUTH_SOCK`, `~/.claude`, `~/.codex`, `~/.agents`, and local cache directories
 
@@ -133,9 +148,13 @@ Caller-provided `sandbox_id` and `exec_id` values are part of the external contr
 
 The runtime backend uses a single Docker Engine API client per service instance instead of spawning Docker CLI subprocesses for inspect, lifecycle, image, or exec work. This keeps Docker interactions on structured API surfaces, removes text-parsing dependencies, and makes shutdown explicit because the runtime client is returned as part of the daemon's closer chain.
 
-### The public Python SDK is direct-parameter, not request-wrapper driven
+### The Go SDK is explicitly split into raw and high-level layers
 
-`AgentsSandboxClient()` now resolves the socket path internally and exposes direct-parameter `create_sandbox`, `create_exec`, and `run`. The protobuf request wrappers still exist internally for transport conversion, but they are no longer the preferred public northbound API. This keeps the SDK surface smaller and matches how callers actually use the service.
+`sdk/go/rawclient` owns socket resolution, dialing, raw RPC calls, error translation, and raw event streams. `sdk/go/client` owns public Go types, `wait` defaults, polling-plus-event wait paths, and channel-based subscription. Keeping those concerns separate lets transport-aware tools stay close to protobuf while ordinary Go callers get a smaller, more idiomatic API.
+
+### The public SDKs are direct-parameter, not request-wrapper driven
+
+`sdk/go/client.New()` and Python `AgentsSandboxClient()` both resolve the socket path internally and expose direct-parameter lifecycle and exec methods. Protobuf request wrappers still exist at the transport layer, but they are no longer the preferred public northbound API for ordinary callers. This keeps the high-level SDK surfaces smaller and matches how callers actually use the service.
 
 ### Filesystem ingress is split by semantics
 
@@ -175,6 +194,7 @@ The script downloads and caches protoc in `.local/protoc/` (project-local, git-i
 ## Related Documents
 
 - `README.md`
+- `docs/sdk_go_usage.md`
 - `docs/sdk_async_usage.md`
 - `docs/configuration_reference.md`
 - `docs/sandbox_container_lifecycle.md`
