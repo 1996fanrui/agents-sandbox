@@ -157,6 +157,22 @@ func newExecNotRunningError(message string, cause error) *ExecNotRunningError {
 	}
 }
 
+// NewSandboxClientError constructs a canonical base SDK error.
+func NewSandboxClientError(message string, cause error) *SandboxClientError {
+	if message == "" {
+		message = "RPC failed."
+	}
+	return &SandboxClientError{
+		message: message,
+		cause:   cause,
+	}
+}
+
+// NewExecNotRunningError constructs the canonical high-level exec-not-running error.
+func NewExecNotRunningError(execID string, cause error) *ExecNotRunningError {
+	return newExecNotRunningError(execID, cause)
+}
+
 // SandboxCursorExpiredError is raised when a subscription cursor is too old.
 type SandboxCursorExpiredError struct {
 	*SandboxClientError
