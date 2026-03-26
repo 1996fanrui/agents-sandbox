@@ -64,6 +64,39 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 	}
 }
 
+func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if stdout.String() != "agbox "+version+"\n" {
+		t.Fatalf("unexpected stdout %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = run(context.Background(), []string{"version"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if stdout.String() != version+"\n" {
+		t.Fatalf("unexpected stdout %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+}
+
 func TestPingFailsWhenDaemonIsUnavailable(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS uses a shared fixed home-directory socket path")
@@ -94,10 +127,55 @@ func TestPingRejectsLegacySocketOverride(t *testing.T) {
 	exitCode := run(context.Background(), []string{"ping", "--socket", filepath.Join(t.TempDir(), "socket.sock")}, &stdout, &stderr, func(string) (string, bool) {
 		return "", false
 	})
-	if exitCode != 1 {
+	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
 	if !strings.Contains(stderr.String(), "does not accept arguments") {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+}
+
+func TestSandboxCommandRequiresSubcommand(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "requires a subcommand") {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "create, list, get, delete, exec") {
+		t.Fatalf("missing subcommand list in stderr %q", stderr.String())
+	}
+}
+
+func TestSandboxCommandRejectsUnknownSubcommand(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox", "unknown"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), `unknown sandbox command "unknown"`) {
+		t.Fatalf("unexpected stderr %q", stderr.String())
+	}
+}
+
+func TestUnknownTopLevelCommandReturnsUsageError(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"unknown"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), `unknown command "unknown"`) {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
 }
