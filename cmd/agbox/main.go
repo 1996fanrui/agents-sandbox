@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
+	"strings"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/platform"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 )
 
 const version = "0.1.0"
@@ -28,51 +26,67 @@ func run(
 ) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintf(stdout, "agbox %s\n", version)
-		return 0
+		return exitCodeSuccess
 	}
 
+	var err error
 	switch args[0] {
 	case "version":
 		_, _ = fmt.Fprintln(stdout, version)
-		return 0
+		return exitCodeSuccess
 	case "ping":
-		if err := runPing(ctx, args[1:], stdout, lookupEnv); err != nil {
-			_, _ = fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
+		err = runPing(ctx, args[1:], stdout, lookupEnv)
+	case "sandbox":
+		err = runSandbox(args[1:])
 	default:
-		_, _ = fmt.Fprintf(stderr, "unknown command %q\n", args[0])
-		return 2
+		err = usageErrorf("unknown command %q", args[0])
 	}
+
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+	}
+
+	return exitCodeForError(err)
 }
 
 func runPing(ctx context.Context, args []string, stdout io.Writer, lookupEnv func(string) (string, bool)) error {
 	if len(args) != 0 {
-		return fmt.Errorf("ping command does not accept arguments: %v", args)
+		return usageErrorf("ping command does not accept arguments: %v", args)
 	}
+
 	socketPath, err := platform.SocketPath(lookupEnv)
 	if err != nil {
-		return err
+		return runtimeErrorf("resolve daemon socket: %v", err)
 	}
 
-	conn, err := grpc.NewClient(
-		"passthrough:///agboxd",
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, "unix", socketPath)
-		}),
-	)
+	client, err := rawclient.New(socketPath)
 	if err != nil {
-		return fmt.Errorf("connect daemon: %w", err)
+		return runtimeErrorf("connect daemon: %v", err)
 	}
-	defer conn.Close()
+	defer client.Close()
 
-	resp, err := agboxv1.NewSandboxServiceClient(conn).Ping(ctx, &agboxv1.PingRequest{})
+	resp, err := client.Ping(ctx)
 	if err != nil {
-		return fmt.Errorf("ping daemon: %w", err)
+		return runtimeErrorf("ping daemon: %v", err)
 	}
+
 	_, _ = fmt.Fprintf(stdout, "daemon=%s version=%s\n", resp.GetDaemon(), resp.GetVersion())
 	return nil
+}
+
+var sandboxSubcommands = []string{"create", "list", "get", "delete", "exec"}
+
+func runSandbox(args []string) error {
+	if len(args) == 0 {
+		return usageErrorf(
+			"sandbox command requires a subcommand\navailable subcommands: %s",
+			strings.Join(sandboxSubcommands, ", "),
+		)
+	}
+
+	return usageErrorf(
+		"unknown sandbox command %q\navailable subcommands: %s",
+		args[0],
+		strings.Join(sandboxSubcommands, ", "),
+	)
 }
