@@ -113,13 +113,13 @@ func (c *RawClient) DeleteSandboxes(ctx context.Context, request *agboxv1.Delete
 func (c *RawClient) SubscribeSandboxEvents(
 	ctx context.Context,
 	sandboxID string,
-	fromCursor string,
+	fromSequence uint64,
 	includeCurrentSnapshot bool,
 ) (SandboxEventStream, error) {
 	callCtx, cancel := withTimeout(ctx, c.timeout)
 	stream, err := c.client.SubscribeSandboxEvents(callCtx, &agboxv1.SubscribeSandboxEventsRequest{
 		SandboxId:              sandboxID,
-		FromCursor:             fromCursor,
+		FromSequence:           fromSequence,
 		IncludeCurrentSnapshot: includeCurrentSnapshot,
 	})
 	if err != nil {

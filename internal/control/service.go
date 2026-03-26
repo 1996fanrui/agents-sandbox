@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -387,12 +386,8 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 			}
 		}
 	}
-	nextSequence, err := parseCursor(req.GetSandboxId(), req.GetFromCursor())
-	if err != nil {
-		s.mu.RUnlock()
-		return err
-	}
-	if err := validateCursorNotStale(record, nextSequence); err != nil {
+	nextSequence := req.GetFromSequence()
+	if err := validateSequenceNotExpired(record, nextSequence); err != nil {
 		s.mu.RUnlock()
 		return err
 	}
@@ -420,7 +415,7 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 				s.mu.RUnlock()
 				return newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", req.GetSandboxId())
 			}
-			if err := validateCursorNotStale(record, nextSequence); err != nil {
+			if err := validateSequenceNotExpired(record, nextSequence); err != nil {
 				s.mu.RUnlock()
 				return err
 			}
@@ -530,11 +525,14 @@ func (s *Service) GetExec(_ context.Context, req *agboxv1.GetExecRequest) (*agbo
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	_, execRecord, err := s.requireExecLocked(req.GetExecId())
+	sandboxID, execRecord, err := s.requireExecLocked(req.GetExecId())
 	if err != nil {
 		return nil, err
 	}
-	return &agboxv1.GetExecResponse{Exec: cloneExec(execRecord)}, nil
+	record := s.boxes[sandboxID]
+	snapshot := cloneExec(execRecord)
+	snapshot.LastEventSequence = record.handle.GetLastEventSequence()
+	return &agboxv1.GetExecResponse{Exec: snapshot}, nil
 }
 
 func (s *Service) allocateSandboxID(requestedID string) (string, error) {
@@ -608,7 +606,9 @@ func (s *Service) ListActiveExecs(_ context.Context, req *agboxv1.ListActiveExec
 			if isExecTerminal(execRecord.GetState()) {
 				continue
 			}
-			execs = append(execs, cloneExec(execRecord))
+			snapshot := cloneExec(execRecord)
+			snapshot.LastEventSequence = record.handle.GetLastEventSequence()
+			execs = append(execs, snapshot)
 		}
 	}
 	slices.SortFunc(execs, func(left, right *agboxv1.ExecStatus) int {
@@ -1299,7 +1299,6 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 	event := &agboxv1.SandboxEvent{
 		EventId:      fmt.Sprintf("%s-%d", record.handle.GetSandboxId(), nextSequence),
 		Sequence:     nextSequence,
-		Cursor:       makeCursor(record.handle.GetSandboxId(), nextSequence),
 		SandboxId:    record.handle.GetSandboxId(),
 		EventType:    eventType,
 		OccurredAt:   timestamppb.Now(),
@@ -1320,7 +1319,7 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 	}
 	record.nextSequence = nextSequence
 	record.events = append(record.events, event)
-	record.handle.LastEventCursor = event.GetCursor()
+	record.handle.LastEventSequence = event.GetSequence()
 	return nil
 }
 
@@ -1366,25 +1365,6 @@ func isExecTerminal(state agboxv1.ExecState) bool {
 		state == agboxv1.ExecState_EXEC_STATE_CANCELLED
 }
 
-func makeCursor(sandboxID string, sequence uint64) string {
-	return sandboxID + ":" + strconv.FormatUint(sequence, 10)
-}
-
-func parseCursor(expectedSandboxID string, cursor string) (uint64, error) {
-	if cursor == "" || cursor == "0" {
-		return 0, nil
-	}
-	prefix, rawSequence, ok := strings.Cut(cursor, ":")
-	if !ok || prefix != expectedSandboxID {
-		return 0, status.Error(codes.InvalidArgument, "cursor must belong to the requested sandbox")
-	}
-	sequence, err := strconv.ParseUint(rawSequence, 10, 64)
-	if err != nil {
-		return 0, status.Error(codes.InvalidArgument, "cursor sequence must be numeric")
-	}
-	return sequence, nil
-}
-
 func eventsAfter(record *sandboxRecord, afterSequence uint64) []*agboxv1.SandboxEvent {
 	var result []*agboxv1.SandboxEvent
 	for _, event := range record.events {
@@ -1398,16 +1378,16 @@ func eventsAfter(record *sandboxRecord, afterSequence uint64) []*agboxv1.Sandbox
 	return result
 }
 
-func validateCursorNotStale(record *sandboxRecord, afterSequence uint64) error {
+func validateSequenceNotExpired(record *sandboxRecord, afterSequence uint64) error {
 	if afterSequence <= record.nextSequence {
 		return nil
 	}
 	return newStatusError(
 		codes.OutOfRange,
-		ReasonSandboxEventCursorExpired,
-		"cursor sequence %d is outside sandbox %s event history",
-		afterSequence,
+		ReasonSandboxEventSequenceExpired,
+		"sandbox %s event sequence %d is outside retained history",
 		record.handle.GetSandboxId(),
+		afterSequence,
 	)
 }
 
@@ -1467,9 +1447,9 @@ func newRecoveredSandboxRecord(events []*agboxv1.SandboxEvent, maxSequence uint6
 	}
 	return &sandboxRecord{
 		handle: &agboxv1.SandboxHandle{
-			SandboxId:       lastEvent.GetSandboxId(),
-			State:           sandboxState,
-			LastEventCursor: lastEvent.GetCursor(),
+			SandboxId:         lastEvent.GetSandboxId(),
+			State:             sandboxState,
+			LastEventSequence: lastEvent.GetSequence(),
 		},
 		events:            events,
 		execs:             make(map[string]*agboxv1.ExecStatus),
@@ -1496,7 +1476,6 @@ func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {
 		result = append(result, &agboxv1.SandboxEvent{
 			EventId:      record.handle.GetSandboxId() + "-snapshot-" + execRecord.GetExecId(),
 			Sequence:     record.nextSequence,
-			Cursor:       record.handle.GetLastEventCursor(),
 			SandboxId:    record.handle.GetSandboxId(),
 			EventType:    eventTypeForExec(execRecord.GetState()),
 			OccurredAt:   timestamppb.Now(),
@@ -1614,12 +1593,12 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		return nil
 	}
 	return &agboxv1.SandboxHandle{
-		SandboxId:        handle.GetSandboxId(),
-		State:            handle.GetState(),
-		LastEventCursor:  handle.GetLastEventCursor(),
-		Labels:           cloneStringMap(handle.GetLabels()),
-		RequiredServices: cloneServiceSpecs(handle.GetRequiredServices()),
-		OptionalServices: cloneServiceSpecs(handle.GetOptionalServices()),
+		SandboxId:         handle.GetSandboxId(),
+		State:             handle.GetState(),
+		LastEventSequence: handle.GetLastEventSequence(),
+		Labels:            cloneStringMap(handle.GetLabels()),
+		RequiredServices:  cloneServiceSpecs(handle.GetRequiredServices()),
+		OptionalServices:  cloneServiceSpecs(handle.GetOptionalServices()),
 	}
 }
 
@@ -1670,16 +1649,17 @@ func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {
 		return nil
 	}
 	return &agboxv1.ExecStatus{
-		ExecId:       execRecord.GetExecId(),
-		SandboxId:    execRecord.GetSandboxId(),
-		State:        execRecord.GetState(),
-		Command:      slices.Clone(execRecord.GetCommand()),
-		Cwd:          execRecord.GetCwd(),
-		EnvOverrides: cloneKeyValues(execRecord.GetEnvOverrides()),
-		ExitCode:     execRecord.GetExitCode(),
-		Error:        execRecord.GetError(),
-		Stdout:       execRecord.GetStdout(),
-		Stderr:       execRecord.GetStderr(),
+		ExecId:            execRecord.GetExecId(),
+		SandboxId:         execRecord.GetSandboxId(),
+		State:             execRecord.GetState(),
+		Command:           slices.Clone(execRecord.GetCommand()),
+		Cwd:               execRecord.GetCwd(),
+		EnvOverrides:      cloneKeyValues(execRecord.GetEnvOverrides()),
+		ExitCode:          execRecord.GetExitCode(),
+		Error:             execRecord.GetError(),
+		Stdout:            execRecord.GetStdout(),
+		Stderr:            execRecord.GetStderr(),
+		LastEventSequence: execRecord.GetLastEventSequence(),
 	}
 }
 
@@ -1690,7 +1670,6 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 	return &agboxv1.SandboxEvent{
 		EventId:      event.GetEventId(),
 		Sequence:     event.GetSequence(),
-		Cursor:       event.GetCursor(),
 		SandboxId:    event.GetSandboxId(),
 		EventType:    event.GetEventType(),
 		OccurredAt:   event.GetOccurredAt(),

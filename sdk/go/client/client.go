@@ -15,7 +15,6 @@ import (
 
 const (
 	defaultOperationTimeout = 60 * time.Second
-	defaultExecPollInterval = 250 * time.Millisecond
 )
 
 type rpcClient interface {
@@ -27,7 +26,7 @@ type rpcClient interface {
 	StopSandbox(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	DeleteSandbox(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	DeleteSandboxes(context.Context, *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error)
-	SubscribeSandboxEvents(context.Context, string, string, bool) (rawclient.SandboxEventStream, error)
+	SubscribeSandboxEvents(context.Context, string, uint64, bool) (rawclient.SandboxEventStream, error)
 	CreateExec(context.Context, *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error)
 	CancelExec(context.Context, string) (*agboxv1.AcceptedResponse, error)
 	GetExec(context.Context, string) (*agboxv1.GetExecResponse, error)
@@ -94,7 +93,6 @@ type Client struct {
 	socketPath       string
 	streamTimeout    time.Duration
 	operationTimeout time.Duration
-	execPollInterval time.Duration
 }
 
 // New builds a high-level client with the default daemon socket path.
@@ -144,7 +142,6 @@ func New(opts ...Option) (*Client, error) {
 		socketPath:       socketPath,
 		streamTimeout:    streamTimeout,
 		operationTimeout: config.operationTimeout,
-		execPollInterval: defaultExecPollInterval,
 	}, nil
 }
 
@@ -422,12 +419,12 @@ func (c *Client) CreateExec(ctx context.Context, sandboxID string, command []str
 	if err != nil {
 		return ExecHandle{}, err
 	}
-	current, err := c.GetExec(ctx, response.GetExecId())
+	current, err := c.getExecSnapshot(ctx, response.GetExecId())
 	if err != nil {
 		return ExecHandle{}, err
 	}
 	if !options.wait {
-		return current, nil
+		return current.handle, nil
 	}
 	return c.waitForExecTerminal(ctx, response.GetExecId(), sandboxID, current, "create_exec")
 }
@@ -477,23 +474,31 @@ func (c *Client) CancelExec(ctx context.Context, execID string, opts ...WaitOpti
 		}
 		return ExecHandle{}, err
 	}
-	current, err := c.GetExec(ctx, execID)
+	current, err := c.getExecSnapshot(ctx, execID)
 	if err != nil {
 		return ExecHandle{}, err
 	}
 	if !options.wait {
-		return current, nil
+		return current.handle, nil
 	}
-	return c.waitForExecTerminal(ctx, execID, current.SandboxID, current, "cancel_exec")
+	return c.waitForExecTerminal(ctx, execID, current.handle.SandboxID, current, "cancel_exec")
 }
 
 // GetExec fetches an exec handle.
 func (c *Client) GetExec(ctx context.Context, execID string) (ExecHandle, error) {
-	response, err := c.rpcClient.GetExec(ctx, execID)
+	snapshot, err := c.getExecSnapshot(ctx, execID)
 	if err != nil {
 		return ExecHandle{}, err
 	}
-	return toExecHandle(response.GetExec()), nil
+	return snapshot.handle, nil
+}
+
+func (c *Client) getExecSnapshot(ctx context.Context, execID string) (execSnapshot, error) {
+	response, err := c.rpcClient.GetExec(ctx, execID)
+	if err != nil {
+		return execSnapshot{}, err
+	}
+	return toExecSnapshot(response)
 }
 
 // ListActiveExecs lists active execs for a sandbox, or all sandboxes when sandboxID is empty.
@@ -514,13 +519,13 @@ type SubscribeOption interface {
 }
 
 type subscribeOptions struct {
-	fromCursor             string
+	fromSequence           uint64
 	includeCurrentSnapshot bool
 }
 
 func defaultSubscribeOptions() subscribeOptions {
 	return subscribeOptions{
-		fromCursor: "0",
+		fromSequence: 0,
 	}
 }
 
@@ -536,23 +541,15 @@ func (c *Client) SubscribeSandboxEvents(ctx context.Context, sandboxID string, o
 		}
 	}
 
-	normalizedCursor, err := normalizeFromCursor(sandboxID, options.fromCursor)
-	if err != nil {
-		ch := make(chan EventOrError, 1)
-		ch <- EventOrError{Err: err}
-		close(ch)
-		return ch
-	}
-
 	ch := make(chan EventOrError, 1)
-	go c.consumeSandboxEvents(ctx, sandboxID, normalizedCursor, options.includeCurrentSnapshot, ch)
+	go c.consumeSandboxEvents(ctx, sandboxID, options.fromSequence, options.includeCurrentSnapshot, ch)
 	return ch
 }
 
 func (c *Client) consumeSandboxEvents(
 	ctx context.Context,
 	sandboxID string,
-	fromCursor string,
+	fromSequence uint64,
 	includeCurrentSnapshot bool,
 	ch chan<- EventOrError,
 ) {
@@ -565,7 +562,7 @@ func (c *Client) consumeSandboxEvents(
 	}
 	defer streamClient.Close()
 
-	stream, err := streamClient.SubscribeSandboxEvents(ctx, sandboxID, fromCursor, includeCurrentSnapshot)
+	stream, err := streamClient.SubscribeSandboxEvents(ctx, sandboxID, fromSequence, includeCurrentSnapshot)
 	if err != nil {
 		sendEventOrError(ch, ctx, EventOrError{Err: err})
 		return
@@ -791,15 +788,15 @@ func withExecEnvOverrides(values map[string]string) envOverridesOption {
 	return envOverridesOption(cloneStringMap(values))
 }
 
-type fromCursorOption string
+type fromSequenceOption uint64
 
-// WithFromCursor sets the subscription start cursor.
-func WithFromCursor(cursor string) fromCursorOption {
-	return fromCursorOption(cursor)
+// WithFromSequence sets the subscription start sequence.
+func WithFromSequence(sequence uint64) fromSequenceOption {
+	return fromSequenceOption(sequence)
 }
 
-func (o fromCursorOption) applySubscribe(opts *subscribeOptions) error {
-	opts.fromCursor = string(o)
+func (o fromSequenceOption) applySubscribe(opts *subscribeOptions) error {
+	opts.fromSequence = uint64(o)
 	return nil
 }
 

@@ -118,7 +118,7 @@ message CreateSpec {
 message SandboxHandle {
   string sandbox_id = 1;
   SandboxState state = 2;
-  string last_event_cursor = 3;
+  uint64 last_event_sequence = 3;
   repeated ServiceSpec required_services = 4;
   repeated ServiceSpec optional_services = 5;
   map<string, string> labels = 6;
@@ -127,21 +127,20 @@ message SandboxHandle {
 message SandboxEvent {
   string event_id = 1;
   uint64 sequence = 2;
-  string cursor = 3;
-  string sandbox_id = 4;
-  EventType event_type = 5;
-  google.protobuf.Timestamp occurred_at = 6;
-  bool replay = 7;
-  bool snapshot = 8;
-  string phase = 9;
-  string error_code = 10;
-  string error_message = 11;
-  string reason = 12;
-  string exec_id = 13;
-  int32 exit_code = 14;
-  SandboxState sandbox_state = 15;
-  ExecState exec_state = 16;
-  string service_name = 17;
+  string sandbox_id = 3;
+  EventType event_type = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+  bool replay = 6;
+  bool snapshot = 7;
+  string phase = 8;
+  string error_code = 9;
+  string error_message = 10;
+  string reason = 11;
+  string exec_id = 12;
+  int32 exit_code = 13;
+  SandboxState sandbox_state = 14;
+  ExecState exec_state = 15;
+  string service_name = 16;
 }
 
 message ExecStatus {
@@ -155,6 +154,7 @@ message ExecStatus {
   string error = 8;
   string stdout = 9;
   string stderr = 10;
+  uint64 last_event_sequence = 11;
 }
 
 message CreateSandboxRequest {
@@ -212,7 +212,7 @@ message AcceptedResponse {
 
 message SubscribeSandboxEventsRequest {
   string sandbox_id = 1;
-  string from_cursor = 2;
+  uint64 from_sequence = 2;
   bool include_current_snapshot = 3;
 }
 

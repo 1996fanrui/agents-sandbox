@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 )
@@ -22,19 +21,12 @@ func (c *Client) waitForSandboxState(
 		return SandboxHandle{}, err
 	}
 
-	baselineSequence, err := parseCursorSequence(sandboxID, baseline.LastEventCursor)
-	if err != nil {
-		return SandboxHandle{}, err
-	}
-	streamCursor := baseline.LastEventCursor
-	if streamCursor == "" {
-		streamCursor = "0"
-	}
+	baselineSequence := baseline.LastEventSequence
 
 	waitCtx, cancel := c.withOperationTimeout(ctx)
 	defer cancel()
 
-	for item := range c.SubscribeSandboxEvents(waitCtx, sandboxID, WithFromCursor(streamCursor)) {
+	for item := range c.SubscribeSandboxEvents(waitCtx, sandboxID, WithFromSequence(baselineSequence)) {
 		if item.Err != nil {
 			return SandboxHandle{}, item.Err
 		}
@@ -66,61 +58,44 @@ func (c *Client) waitForExecTerminal(
 	ctx context.Context,
 	execID string,
 	sandboxID string,
-	baseline ExecHandle,
+	baseline execSnapshot,
 	operationName string,
 ) (ExecHandle, error) {
-	if baseline.State.IsTerminal() {
-		return baseline, nil
+	if baseline.handle.State.IsTerminal() {
+		return baseline.handle, nil
 	}
 
-	sandboxBaseline, err := c.GetSandbox(ctx, sandboxID)
-	if err != nil {
-		return ExecHandle{}, err
-	}
-	baselineSequence, err := parseCursorSequence(sandboxID, sandboxBaseline.LastEventCursor)
-	if err != nil {
-		return ExecHandle{}, err
-	}
-	streamCursor := sandboxBaseline.LastEventCursor
-	if streamCursor == "" {
-		streamCursor = "0"
-	}
+	baselineSequence := baseline.lastEventSequence
 
 	waitCtx, cancel := c.withOperationTimeout(ctx)
 	defer cancel()
 
-	events := c.SubscribeSandboxEvents(waitCtx, sandboxID, WithFromCursor(streamCursor))
-	pollTicker := time.NewTicker(c.execPollInterval)
-	defer pollTicker.Stop()
-
-	for {
-		current, getErr := c.GetExec(waitCtx, execID)
+	for item := range c.SubscribeSandboxEvents(waitCtx, sandboxID, WithFromSequence(baselineSequence)) {
+		if item.Err != nil {
+			return ExecHandle{}, item.Err
+		}
+		if item.Event == nil || item.Event.Sequence <= baselineSequence {
+			continue
+		}
+		if item.Event.ExecID == nil || *item.Event.ExecID != execID {
+			continue
+		}
+		current, getErr := c.getExecSnapshot(waitCtx, execID)
 		if getErr != nil {
 			return ExecHandle{}, getErr
 		}
-		if current.State.IsTerminal() {
-			return current, nil
-		}
-
-		select {
-		case <-waitCtx.Done():
-			return ExecHandle{}, fmt.Errorf("%s timed out while waiting for exec %s to become terminal: %w", operationName, execID, waitCtx.Err())
-		case item, ok := <-events:
-			if !ok {
-				return ExecHandle{}, rawclient.NewSandboxClientError(
-					fmt.Sprintf("%s event stream ended before exec %s reached a terminal state", operationName, execID),
-					nil,
-				)
-			}
-			if item.Err != nil {
-				return ExecHandle{}, item.Err
-			}
-			if item.Event == nil || item.Event.Sequence <= baselineSequence {
-				continue
-			}
-		case <-pollTicker.C:
+		if current.handle.State.IsTerminal() {
+			return current.handle, nil
 		}
 	}
+
+	if err := waitCtx.Err(); err != nil {
+		return ExecHandle{}, fmt.Errorf("%s timed out while waiting for exec %s to become terminal: %w", operationName, execID, waitCtx.Err())
+	}
+	return ExecHandle{}, rawclient.NewSandboxClientError(
+		fmt.Sprintf("%s event stream ended before exec %s reached a terminal state", operationName, execID),
+		nil,
+	)
 }
 
 func (c *Client) withOperationTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
