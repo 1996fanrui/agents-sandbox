@@ -120,8 +120,9 @@ The high-level Go SDK keeps the accepted async contract visible while adding lan
 
 Wait paths use the daemon event stream plus authoritative reads:
 
-- sandbox waits begin from the baseline cursor and ignore replayed or stale events
-- exec waits combine event-driven wakeups with `GetExec` polling
+- sandbox waits begin from the baseline event sequence and ignore replayed or stale events
+- exec waits seed sandbox subscriptions from `GetExec().LastEventSequence`
+- exec waits re-read `GetExec` only after relevant post-baseline exec events
 - overall wait deadlines remain explicit through `context.Context` and the client's operation timeout
 - the event stream used by waits and direct subscriptions is also bounded by the client's stream timeout
 

@@ -74,16 +74,17 @@ Exec lifecycle is part of the same event stream:
 - `CreateExec` is the only public exec-starting RPC.
 - A successful request allocates `exec_id`, starts the runtime exec asynchronously, and emits `EXEC_STARTED`.
 - Terminal states are reported as `EXEC_FINISHED`, `EXEC_FAILED`, or `EXEC_CANCELLED`.
+- `GetExec().exec.last_event_sequence` must let clients join the authoritative exec snapshot to the same sandbox event stream without a race.
 - Internal audit action reasons and strategies remain daemon-owned and must not appear in the public RPC or event schema.
 
 ## Event Replay
 
 For one `sandbox_id`:
 
-- the literal `from_cursor="0"` must replay the full ordered event history since sandbox creation
-- non-zero cursors must be daemon-issued cursors from the same sandbox stream
-- clients must treat `cursor` and `sequence` as the ordering source of truth
-- stale cursors whose sequence is beyond the retained stream must fail with `OUT_OF_RANGE` and reason `SANDBOX_EVENT_CURSOR_EXPIRED`
+- the literal `from_sequence=0` must replay the full ordered event history since sandbox creation
+- non-zero sequence anchors must be daemon-issued event sequences from the same sandbox stream
+- clients must treat event sequences as the ordering source of truth
+- stale sequence anchors beyond the retained stream must fail with `OUT_OF_RANGE` and reason `SANDBOX_EVENT_SEQUENCE_EXPIRED`
 
 The daemon persists event history in bbolt, reloads it on startup, and marks recovered sandboxes as replay-only records until runtime state is recreated in a later design. Deleted sandbox streams remain queryable until `runtime.event_retention_ttl` expires, after which cleanup removes the retained history.
 
