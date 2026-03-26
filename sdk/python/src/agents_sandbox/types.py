@@ -90,7 +90,6 @@ class CreateExecRequest:
 class SandboxEvent:
     event_id: str
     sequence: int
-    cursor: str
     sandbox_id: str
     event_type: SandboxEventType
     occurred_at: datetime
@@ -111,7 +110,7 @@ class SandboxEvent:
 class SandboxHandle:
     sandbox_id: str
     state: SandboxState
-    last_event_cursor: str = ""
+    last_event_sequence: int = 0
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
@@ -138,6 +137,7 @@ class ExecHandle:
     error: str | None = None
     stdout: str | None = None
     stderr: str | None = None
+    last_event_sequence: int = 0
 
 
 __all__ = [

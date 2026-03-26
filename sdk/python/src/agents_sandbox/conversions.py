@@ -135,12 +135,12 @@ def to_service(spec: service_pb2.ServiceSpec) -> ServiceSpec:
 
 
 def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
-    if handle.last_event_cursor:
-        parse_cursor_sequence(handle.sandbox_id, handle.last_event_cursor)
+    if handle.last_event_sequence < 0:
+        raise ValueError(f"Sequence must be non-negative: {handle.last_event_sequence}")
     return SandboxHandle(
         sandbox_id=handle.sandbox_id,
         state=map_sandbox_state(handle.state),
-        last_event_cursor=handle.last_event_cursor,
+        last_event_sequence=int(handle.last_event_sequence),
         required_services=tuple(to_service(item) for item in handle.required_services),
         optional_services=tuple(to_service(item) for item in handle.optional_services),
         labels=dict(handle.labels),
@@ -161,13 +161,24 @@ def to_exec_handle(exec_status: service_pb2.ExecStatus) -> ExecHandle:
         error=exec_status.error or None,
         stdout=exec_status.stdout or None,
         stderr=exec_status.stderr or None,
+        last_event_sequence=int(exec_status.last_event_sequence),
     )
+
+
+def to_exec_snapshot(response: object) -> tuple[ExecHandle, int]:
+    exec_status = getattr(response, "exec", None)
+    if exec_status is None:
+        raise ValueError("GetExecResponse is missing exec")
+    handle = to_exec_handle(exec_status)
+    sequence = handle.last_event_sequence
+    if sequence <= 0:
+        raise ValueError(f"Sequence must be positive: {sequence}")
+    return handle, sequence
 
 
 def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
     if not event.HasField("occurred_at"):
         raise ValueError(f"Sandbox event {event.event_id or '<unknown>'} is missing occurred_at")
-    parse_cursor_sequence(event.sandbox_id, event.cursor)
     exit_code: int | None = None
     if event.event_type == service_pb2.EXEC_FINISHED or event.exit_code != 0:
         exit_code = event.exit_code
@@ -182,7 +193,6 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
     return SandboxEvent(
         event_id=event.event_id,
         sequence=int(event.sequence),
-        cursor=event.cursor,
         sandbox_id=event.sandbox_id,
         event_type=SandboxEventType(event.event_type),
         occurred_at=event.occurred_at.ToDatetime(tzinfo=UTC),
@@ -208,33 +218,24 @@ def map_exec_state(state: int) -> ExecState:
     return ExecState(state)
 
 
-def parse_cursor_sequence(sandbox_id: str, cursor: str) -> int:
-    if cursor == "" or cursor == "0":
-        return 0
-    prefix, separator, raw_sequence = cursor.partition(":")
-    if separator == "" or prefix != sandbox_id:
-        raise ValueError(f"Cursor does not belong to sandbox {sandbox_id}: {cursor}")
-    sequence = int(raw_sequence)
+def parse_event_sequence(sequence: int) -> int:
+    sequence = int(sequence)
     if sequence < 0:
-        raise ValueError(f"Cursor sequence must be non-negative: {cursor}")
+        raise ValueError(f"Sequence must be non-negative: {sequence}")
     return sequence
 
 
-def normalize_from_cursor(sandbox_id: str, cursor: str) -> str:
-    if cursor == "0":
-        return cursor
-    if cursor == "":
-        return cursor
-    parse_cursor_sequence(sandbox_id, cursor)
-    return cursor
+def normalize_from_sequence(sequence: int) -> int:
+    return parse_event_sequence(sequence)
 
 
 __all__ = [
     "map_exec_state",
     "map_sandbox_state",
-    "normalize_from_cursor",
-    "parse_cursor_sequence",
+    "normalize_from_sequence",
+    "parse_event_sequence",
     "to_exec_handle",
+    "to_exec_snapshot",
     "to_ping_info",
     "to_proto_create_exec_request",
     "to_proto_create_sandbox_request",

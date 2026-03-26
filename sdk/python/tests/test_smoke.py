@@ -11,6 +11,7 @@ import signal
 import shutil
 import subprocess
 import time
+from types import SimpleNamespace
 
 import grpc
 import pytest
@@ -37,7 +38,7 @@ from agents_sandbox import (
     ServiceSpec,
 )
 from agents_sandbox._generated import service_pb2, service_pb2_grpc
-from agents_sandbox.conversions import to_exec_handle, to_sandbox_handle
+from agents_sandbox.conversions import to_exec_handle, to_exec_snapshot, to_sandbox_handle
 from agents_sandbox.client import _resolve_default_socket_path
 from agents_sandbox.types import CallerMetadata
 
@@ -60,6 +61,15 @@ def _legacy_sdk_type_names() -> tuple[str, ...]:
         _joined_name("Projection", "Mount", "Mode"),
         _joined_name("Workspace", "Materialization", "Mode"),
     )
+
+
+def _exec_response(
+    exec_status: service_pb2.ExecStatus,
+    *,
+    last_event_sequence: int,
+) -> service_pb2.GetExecResponse:
+    exec_status.last_event_sequence = last_event_sequence
+    return service_pb2.GetExecResponse(exec=exec_status)
 
 
 def test_package_root_exports_only_formal_client() -> None:
@@ -97,7 +107,6 @@ def test_public_models_match_protocol_contract() -> None:
     assert set(SandboxEvent.__annotations__) == {
         "event_id",
         "sequence",
-        "cursor",
         "sandbox_id",
         "event_type",
         "occurred_at",
@@ -116,11 +125,12 @@ def test_public_models_match_protocol_contract() -> None:
     assert set(SandboxHandle.__annotations__) == {
         "sandbox_id",
         "state",
-        "last_event_cursor",
+        "last_event_sequence",
         "required_services",
         "optional_services",
         "labels",
     }
+    assert SandboxHandle.__annotations__["last_event_sequence"] == "int"
     assert set(ExecHandle.__annotations__) == {
         "exec_id",
         "sandbox_id",
@@ -132,7 +142,9 @@ def test_public_models_match_protocol_contract() -> None:
         "error",
         "stdout",
         "stderr",
+        "last_event_sequence",
     }
+    assert ExecHandle.__annotations__["last_event_sequence"] == "int"
     assert DeleteSandboxesResult.__annotations__ == {
         "deleted_sandbox_ids": "tuple[str, ...]",
         "deleted_count": "int",
@@ -193,6 +205,7 @@ def test_to_exec_handle_preserves_stdout_and_stderr() -> None:
             stdout="partial",
             stderr="warn",
             exit_code=0,
+            last_event_sequence=3,
         )
     )
     finished = to_exec_handle(
@@ -205,15 +218,47 @@ def test_to_exec_handle_preserves_stdout_and_stderr() -> None:
             stdout="done",
             stderr="",
             exit_code=7,
+            last_event_sequence=7,
         )
     )
 
     assert running.stdout == "partial"
     assert running.stderr == "warn"
     assert running.exit_code is None
+    assert running.last_event_sequence == 3
     assert finished.stdout == "done"
     assert finished.stderr is None
     assert finished.exit_code == 7
+    assert finished.last_event_sequence == 7
+
+
+def test_to_exec_snapshot_requires_daemon_issued_sequence() -> None:
+    valid_exec_status = service_pb2.ExecStatus(
+        exec_id="exec-1",
+        sandbox_id="sandbox-1",
+        state=service_pb2.EXEC_STATE_RUNNING,
+        command=["echo", "hello"],
+        cwd="/workspace",
+    )
+
+    handle, sequence = to_exec_snapshot(_exec_response(valid_exec_status, last_event_sequence=7))
+
+    assert handle.exec_id == "exec-1"
+    assert sequence == 7
+
+    zero_sequence_exec_status = service_pb2.ExecStatus(
+        exec_id="exec-1",
+        sandbox_id="sandbox-1",
+        state=service_pb2.EXEC_STATE_RUNNING,
+        command=["echo", "hello"],
+        cwd="/workspace",
+    )
+
+    with pytest.raises(ValueError, match="Sequence must be positive: 0"):
+        to_exec_snapshot(SimpleNamespace(exec=zero_sequence_exec_status))
+
+    with pytest.raises(ValueError, match="Sequence must be positive: 0"):
+        to_exec_snapshot(_exec_response(zero_sequence_exec_status, last_event_sequence=0))
 
 
 def test_default_socket_path_resolution_matches_daemon_rules(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,7 +349,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
     assert list(run_signature.parameters) == ["self", "sandbox_id", "command", "cwd", "env_overrides"]
 
     subscribe_signature = inspect.signature(AgentsSandboxClient.subscribe_sandbox_events)
-    assert subscribe_signature.parameters["from_cursor"].default == "0"
+    assert subscribe_signature.parameters["from_sequence"].default == 0
     assert subscribe_signature.parameters["include_current_snapshot"].default is False
 
 
@@ -341,8 +386,8 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
     assert "optional_services" in public_docs["docs/sdk_async_usage.md"]
     assert "sandbox_id=" in public_docs["docs/sdk_async_usage.md"]
     assert "exec_id=" in public_docs["docs/sdk_async_usage.md"]
-    assert "from_cursor=\"0\"" in public_docs["docs/sdk_async_usage.md"]
-    assert "cursor" in public_docs["docs/sdk_async_usage.md"]
+    assert "from_sequence=0" in public_docs["docs/sdk_async_usage.md"]
+    assert "last_event_sequence" in public_docs["docs/sdk_async_usage.md"]
     assert "sequence" in public_docs["docs/sdk_async_usage.md"]
 
 
@@ -360,7 +405,8 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
         SandboxEventType.EXEC_FINISHED,
     ]
     assert result["service_names"] == ["postgres", None]
-    assert servicer.subscribe_requests[0].from_cursor == "0"
+    assert result["exec_last_event_sequence"] == 3
+    assert servicer.subscribe_requests[0].from_sequence == 0
     assert servicer.create_requests[0].create_spec.image == "python:3.12-slim"
     assert servicer.create_requests[0].sandbox_id == "sandbox-1"
     assert dict(servicer.create_requests[0].create_spec.labels) == {"team": "sdk", "purpose": "smoke"}
@@ -412,7 +458,7 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor=f"{sandbox_id}:1",
+                    last_event_sequence=1,
                 )
             )
 
@@ -454,7 +500,7 @@ def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_t
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor=f"{sandbox_id}:1",
+                    last_event_sequence=1,
                 )
             )
 
@@ -554,7 +600,7 @@ def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.Monk
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor="sandbox-1:1",
+                    last_event_sequence=1,
                     labels={"team": "sdk", "purpose": "test"},
                 )
             )
@@ -591,7 +637,7 @@ def test_list_sandboxes_with_label_selector(monkeypatch: pytest.MonkeyPatch) -> 
                     service_pb2.SandboxHandle(
                         sandbox_id="sandbox-1",
                         state=service_pb2.SANDBOX_STATE_READY,
-                        last_event_cursor="sandbox-1:1",
+                        last_event_sequence=1,
                         labels={"team": "sdk"},
                     )
                 ]
@@ -614,7 +660,7 @@ def test_list_sandboxes_with_label_selector(monkeypatch: pytest.MonkeyPatch) -> 
 def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeRawSandboxClient:
         delete_requests: list[service_pb2.DeleteSandboxesRequest] = []
-        subscribe_requests: list[tuple[str, str, bool]] = []
+        subscribe_requests: list[tuple[str, int, bool]] = []
 
         def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
             self.socket_path = socket_path
@@ -634,15 +680,15 @@ def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatc
         def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
             self._sandbox_reads[sandbox_id] += 1
             state = service_pb2.SANDBOX_STATE_DELETING
-            cursor = f"{sandbox_id}:1"
+            sequence = 1
             if self._sandbox_reads[sandbox_id] >= 2:
                 state = service_pb2.SANDBOX_STATE_DELETED
-                cursor = f"{sandbox_id}:2"
+                sequence = 2
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=state,
-                    last_event_cursor=cursor,
+                    last_event_sequence=sequence,
                 )
             )
 
@@ -650,14 +696,13 @@ def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatc
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=2,
-                cursor=f"{sandbox_id}:2",
                 event_type=service_pb2.SANDBOX_DELETED,
                 sandbox_state=service_pb2.SANDBOX_STATE_DELETED,
             )
@@ -677,8 +722,8 @@ def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatc
         service_pb2.DeleteSandboxesRequest(label_selector={"team": "sdk"})
     ]
     assert _FakeRawSandboxClient.subscribe_requests == [
-        ("sandbox-1", "sandbox-1:1", False),
-        ("sandbox-2", "sandbox-2:1", False),
+        ("sandbox-1", 1, False),
+        ("sandbox-2", 1, False),
     ]
 
 
@@ -687,7 +732,7 @@ def test_sandbox_handle_labels_round_trip() -> None:
         service_pb2.SandboxHandle(
             sandbox_id="sandbox-1",
             state=service_pb2.SANDBOX_STATE_READY,
-            last_event_cursor="sandbox-1:1",
+            last_event_sequence=1,
             labels={"team": "sdk"},
         )
     )
@@ -712,22 +757,23 @@ def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
             self.create_exec_requests.append(request)
             return service_pb2.CreateExecResponse(exec_id="exec-1")
 
-        def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
-            return service_pb2.GetExecResponse(
-                exec=service_pb2.ExecStatus(
+        def get_exec(self, exec_id: str) -> object:
+            return _exec_response(
+                service_pb2.ExecStatus(
                     exec_id=exec_id,
                     sandbox_id="sandbox-1",
                     state=service_pb2.EXEC_STATE_RUNNING,
                     command=["echo", "hello"],
                     cwd="/workspace",
-                )
+                ),
+                last_event_sequence=1,
             )
 
     monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
-        await client.create_exec(
+        handle = await client.create_exec(
             "sandbox-1",
             ("echo", "hello"),
             exec_id="exec-explicit",
@@ -735,7 +781,9 @@ def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
             env_overrides={"HELLO": "world"},
             wait=False,
         )
-        await client.create_exec("sandbox-1", ("echo", "hello"), wait=False)
+        assert handle.last_event_sequence == 1
+        default_handle = await client.create_exec("sandbox-1", ("echo", "hello"), wait=False)
+        assert default_handle.last_event_sequence == 1
 
     asyncio.run(run_test())
 
@@ -753,7 +801,7 @@ def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
 
 def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeRawSandboxClient:
-        subscribe_requests: list[tuple[str, str, bool]] = []
+        subscribe_requests: list[tuple[str, int, bool]] = []
 
         def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
             self.socket_path = socket_path
@@ -767,15 +815,17 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
             assert request.cwd == "/workspace"
             return service_pb2.CreateExecResponse(exec_id="exec-1")
 
-        def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
+        def get_exec(self, exec_id: str) -> object:
             self._get_exec_calls += 1
             state = service_pb2.EXEC_STATE_RUNNING
             stdout = ""
+            last_event_sequence = 10
             if self._get_exec_calls > 1:
                 state = service_pb2.EXEC_STATE_FINISHED
                 stdout = "hello"
-            return service_pb2.GetExecResponse(
-                exec=service_pb2.ExecStatus(
+                last_event_sequence = 11
+            return _exec_response(
+                service_pb2.ExecStatus(
                     exec_id=exec_id,
                     sandbox_id="sandbox-1",
                     state=state,
@@ -783,30 +833,21 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
                     cwd="/workspace",
                     stdout=stdout,
                     exit_code=0,
-                )
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
-                sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor="sandbox-1:10",
-                )
+                ),
+                last_event_sequence=last_event_sequence,
             )
 
         def subscribe_sandbox_events(
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=11,
-                cursor="sandbox-1:11",
                 event_type=service_pb2.EXEC_FINISHED,
                 exec_id="exec-1",
                 exec_state=service_pb2.EXEC_STATE_FINISHED,
@@ -823,14 +864,15 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert exec_handle.state is ExecState.FINISHED
     assert exec_handle.stdout == "hello"
-    assert _FakeRawSandboxClient.subscribe_requests == []
+    assert exec_handle.last_event_sequence == 11
+    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 10, False)]
 
 
 def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FakeRawSandboxClient:
-        subscribe_requests: list[tuple[str, str, bool]] = []
+        subscribe_requests: list[tuple[str, int, bool]] = []
 
         def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
             self.socket_path = socket_path
@@ -850,15 +892,15 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
         def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
             self._get_sandbox_calls += 1
             state = service_pb2.SANDBOX_STATE_PENDING
-            cursor = "sandbox-1:5"
+            sequence = 5
             if self._get_sandbox_calls > 1:
                 state = service_pb2.SANDBOX_STATE_READY
-                cursor = "sandbox-1:6"
+                sequence = 6
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=state,
-                    last_event_cursor=cursor,
+                    last_event_sequence=sequence,
                 )
             )
 
@@ -866,14 +908,13 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=4,
-                cursor="sandbox-1:4",
                 event_type=service_pb2.SANDBOX_READY,
                 replay=True,
                 sandbox_state=service_pb2.SANDBOX_STATE_READY,
@@ -881,7 +922,6 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=5,
-                cursor="sandbox-1:5",
                 event_type=service_pb2.SANDBOX_READY,
                 replay=True,
                 snapshot=True,
@@ -890,7 +930,6 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=6,
-                cursor="sandbox-1:6",
                 event_type=service_pb2.SANDBOX_READY,
                 sandbox_state=service_pb2.SANDBOX_STATE_READY,
             )
@@ -904,7 +943,7 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
     sandbox = asyncio.run(run_test())
 
     assert sandbox.state is SandboxState.READY
-    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", "sandbox-1:5", False)]
+    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 5, False)]
 
 
 def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_terminal(
@@ -932,7 +971,7 @@ def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_termina
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor="sandbox-1:9",
+                    last_event_sequence=9,
                 )
             )
 
@@ -957,7 +996,7 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FakeRawSandboxClient:
-        subscribe_requests: list[tuple[str, str, bool]] = []
+        subscribe_requests: list[tuple[str, int, bool]] = []
 
         def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
             self.socket_path = socket_path
@@ -968,25 +1007,25 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             self._delete_calls = 0
             self._sandbox_responses = {
                 "resume-false": [
-                    (service_pb2.SANDBOX_STATE_PENDING, "sandbox-1:1"),
+                    (service_pb2.SANDBOX_STATE_PENDING, 1),
                 ],
                 "resume-true": [
-                    (service_pb2.SANDBOX_STATE_PENDING, "sandbox-1:2"),
-                    (service_pb2.SANDBOX_STATE_READY, "sandbox-1:3"),
+                    (service_pb2.SANDBOX_STATE_PENDING, 2),
+                    (service_pb2.SANDBOX_STATE_READY, 3),
                 ],
                 "stop-false": [
-                    (service_pb2.SANDBOX_STATE_READY, "sandbox-1:4"),
+                    (service_pb2.SANDBOX_STATE_READY, 4),
                 ],
                 "stop-true": [
-                    (service_pb2.SANDBOX_STATE_READY, "sandbox-1:5"),
-                    (service_pb2.SANDBOX_STATE_STOPPED, "sandbox-1:6"),
+                    (service_pb2.SANDBOX_STATE_READY, 5),
+                    (service_pb2.SANDBOX_STATE_STOPPED, 6),
                 ],
                 "delete-false": [
-                    (service_pb2.SANDBOX_STATE_DELETING, "sandbox-1:7"),
+                    (service_pb2.SANDBOX_STATE_DELETING, 7),
                 ],
                 "delete-true": [
-                    (service_pb2.SANDBOX_STATE_DELETING, "sandbox-1:8"),
-                    (service_pb2.SANDBOX_STATE_DELETED, "sandbox-1:9"),
+                    (service_pb2.SANDBOX_STATE_DELETING, 8),
+                    (service_pb2.SANDBOX_STATE_DELETED, 9),
                 ],
             }
 
@@ -1012,12 +1051,12 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             return service_pb2.AcceptedResponse(accepted=True)
 
         def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            state, cursor = self._sandbox_responses[self._operation].pop(0)
+            state, sequence = self._sandbox_responses[self._operation].pop(0)
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
                     state=state,
-                    last_event_cursor=cursor,
+                    last_event_sequence=sequence,
                 )
             )
 
@@ -1025,15 +1064,14 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             if self._operation == "resume-true":
                 yield _event_pb(
                     sandbox_id=sandbox_id,
                     sequence=2,
-                    cursor="sandbox-1:2",
                     event_type=service_pb2.SANDBOX_READY,
                     replay=True,
                     sandbox_state=service_pb2.SANDBOX_STATE_READY,
@@ -1041,7 +1079,6 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
                 yield _event_pb(
                     sandbox_id=sandbox_id,
                     sequence=3,
-                    cursor="sandbox-1:3",
                     event_type=service_pb2.SANDBOX_READY,
                     sandbox_state=service_pb2.SANDBOX_STATE_READY,
                 )
@@ -1050,7 +1087,6 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
                 yield _event_pb(
                     sandbox_id=sandbox_id,
                     sequence=5,
-                    cursor="sandbox-1:5",
                     event_type=service_pb2.SANDBOX_STOPPED,
                     replay=True,
                     sandbox_state=service_pb2.SANDBOX_STATE_STOPPED,
@@ -1058,7 +1094,6 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
                 yield _event_pb(
                     sandbox_id=sandbox_id,
                     sequence=6,
-                    cursor="sandbox-1:6",
                     event_type=service_pb2.SANDBOX_STOPPED,
                     sandbox_state=service_pb2.SANDBOX_STATE_STOPPED,
                 )
@@ -1066,7 +1101,6 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=8,
-                cursor="sandbox-1:8",
                 event_type=service_pb2.SANDBOX_DELETED,
                 replay=True,
                 sandbox_state=service_pb2.SANDBOX_STATE_DELETED,
@@ -1074,7 +1108,6 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=9,
-                cursor="sandbox-1:9",
                 event_type=service_pb2.SANDBOX_DELETED,
                 sandbox_state=service_pb2.SANDBOX_STATE_DELETED,
             )
@@ -1114,9 +1147,9 @@ def test_sandbox_lifecycle_wait_paths_cover_wait_false_and_wait_true(
     assert delete_deleting.state is SandboxState.DELETING
     assert delete_deleted.state is SandboxState.DELETED
     assert _FakeRawSandboxClient.subscribe_requests == [
-        ("sandbox-1", "sandbox-1:2", False),
-        ("sandbox-1", "sandbox-1:5", False),
-        ("sandbox-1", "sandbox-1:8", False),
+        ("sandbox-1", 2, False),
+        ("sandbox-1", 5, False),
+        ("sandbox-1", 8, False),
     ]
 
 
@@ -1138,44 +1171,35 @@ def test_agents_sandbox_client_waits_for_exec_terminal_with_replay_dedupe(
             assert request.command == ["echo", "hello"]
             return service_pb2.CreateExecResponse(exec_id="exec-1")
 
-        def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
+        def get_exec(self, exec_id: str) -> object:
             self._get_exec_calls += 1
             state = service_pb2.EXEC_STATE_RUNNING
             exit_code = 0
-            if self._get_exec_calls >= 3:
+            if self._get_exec_calls >= 2:
                 state = service_pb2.EXEC_STATE_FINISHED
-            return service_pb2.GetExecResponse(
-                exec=service_pb2.ExecStatus(
+            return _exec_response(
+                service_pb2.ExecStatus(
                     exec_id=exec_id,
                     sandbox_id="sandbox-1",
                     state=state,
                     command=["echo", "hello"],
                     cwd="/workspace",
                     exit_code=exit_code,
-                )
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
-                sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor="sandbox-1:10",
-                )
+                ),
+                last_event_sequence=10 if self._get_exec_calls == 1 else 11,
             )
 
         def subscribe_sandbox_events(
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=10,
-                cursor="sandbox-1:10",
                 event_type=service_pb2.EXEC_FINISHED,
                 replay=True,
                 exec_id="exec-1",
@@ -1185,7 +1209,6 @@ def test_agents_sandbox_client_waits_for_exec_terminal_with_replay_dedupe(
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=11,
-                cursor="sandbox-1:11",
                 event_type=service_pb2.EXEC_FINISHED,
                 exec_id="exec-1",
                 exec_state=service_pb2.EXEC_STATE_FINISHED,
@@ -1201,14 +1224,15 @@ def test_agents_sandbox_client_waits_for_exec_terminal_with_replay_dedupe(
     exec_handle = asyncio.run(run_test())
 
     assert exec_handle.state is ExecState.FINISHED
-    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", "sandbox-1:10", False)]
+    assert exec_handle.last_event_sequence == 11
+    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 10, False)]
 
 
-def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
+def test_cancel_exec_wait_paths_follow_post_baseline_exec_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FakeRawSandboxClient:
-        subscribe_requests: list[tuple[str, str, bool]] = []
+        subscribe_requests: list[tuple[str, int, bool]] = []
 
         def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
             self.socket_path = socket_path
@@ -1226,44 +1250,52 @@ def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
             self._cancel_calls += 1
             return service_pb2.AcceptedResponse(accepted=True)
 
-        def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
+        def get_exec(self, exec_id: str) -> object:
             state = service_pb2.EXEC_STATE_RUNNING
             if self._mode == "cancel-true":
                 self._true_exec_calls += 1
-                if self._true_exec_calls >= 3:
+                if self._true_exec_calls >= 2:
                     state = service_pb2.EXEC_STATE_FINISHED
-            return service_pb2.GetExecResponse(
-                exec=service_pb2.ExecStatus(
+            return _exec_response(
+                service_pb2.ExecStatus(
                     exec_id=exec_id,
                     sandbox_id="sandbox-1",
                     state=state,
                     command=["echo", "hello"],
                     cwd="/workspace",
                     exit_code=0,
-                )
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
-                sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
-                    last_event_cursor="sandbox-1:12",
-                )
+                ),
+                last_event_sequence=12 if self._mode != "cancel-true" or self._true_exec_calls < 2 else 13,
             )
 
         def subscribe_sandbox_events(
             self,
             sandbox_id: str,
             *,
-            from_cursor: str = "",
+            from_sequence: int = 0,
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
-            self.subscribe_requests.append((sandbox_id, from_cursor, include_current_snapshot))
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
             yield _event_pb(
                 sandbox_id=sandbox_id,
                 sequence=12,
-                cursor="sandbox-1:12",
+                event_type=service_pb2.EXEC_FINISHED,
+                replay=True,
+                exec_id="exec-2",
+                exec_state=service_pb2.EXEC_STATE_FINISHED,
+                exit_code=0,
+            )
+            yield _event_pb(
+                sandbox_id=sandbox_id,
+                sequence=13,
+                event_type=service_pb2.EXEC_FINISHED,
+                exec_id="exec-1",
+                exec_state=service_pb2.EXEC_STATE_FINISHED,
+                exit_code=0,
+            )
+            yield _event_pb(
+                sandbox_id=sandbox_id,
+                sequence=14,
                 event_type=service_pb2.EXEC_FINISHED,
                 replay=True,
                 exec_id="exec-1",
@@ -1283,7 +1315,212 @@ def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
 
     assert running.state is ExecState.RUNNING
     assert finished.state is ExecState.FINISHED
-    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", "sandbox-1:12", False)]
+    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 12, False)]
+
+
+@pytest.mark.parametrize(
+    ("sequence", "pattern"),
+    [
+        (0, "Sequence must be positive: 0"),
+    ],
+)
+def test_create_exec_wait_true_requires_valid_last_event_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    sequence: int,
+    pattern: str,
+) -> None:
+    class _FakeRawSandboxClient:
+        subscribe_calls = 0
+
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
+            del request
+            return service_pb2.CreateExecResponse(exec_id="exec-1")
+
+        def get_exec(self, exec_id: str) -> object:
+            exec_status = service_pb2.ExecStatus(
+                exec_id=exec_id,
+                sandbox_id="sandbox-1",
+                state=service_pb2.EXEC_STATE_RUNNING,
+                command=["echo", "hello"],
+                cwd="/workspace",
+            )
+            return _exec_response(exec_status, last_event_sequence=sequence)
+
+        def subscribe_sandbox_events(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            del args, kwargs
+            _FakeRawSandboxClient.subscribe_calls += 1
+            raise AssertionError("subscribe should not start when the exec snapshot sequence is invalid")
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        await client.create_exec("sandbox-1", ("echo", "hello"), wait=True)
+
+    with pytest.raises(ValueError, match=pattern):
+        asyncio.run(run_test())
+
+    assert _FakeRawSandboxClient.subscribe_calls == 0
+
+
+def test_create_exec_wait_true_surfaces_stream_end_without_polling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRawSandboxClient:
+        subscribe_requests: list[tuple[str, int, bool]] = []
+        get_exec_calls = 0
+
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
+            del request
+            return service_pb2.CreateExecResponse(exec_id="exec-1")
+
+        def get_exec(self, exec_id: str) -> object:
+            _FakeRawSandboxClient.get_exec_calls += 1
+            return _exec_response(
+                service_pb2.ExecStatus(
+                    exec_id=exec_id,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.EXEC_STATE_RUNNING,
+                    command=["echo", "hello"],
+                    cwd="/workspace",
+                ),
+                last_event_sequence=10,
+            )
+
+        def subscribe_sandbox_events(
+            self,
+            sandbox_id: str,
+            *,
+            from_sequence: int = 0,
+            include_current_snapshot: bool = False,
+        ) -> Iterator[service_pb2.SandboxEvent]:
+            self.subscribe_requests.append((sandbox_id, from_sequence, include_current_snapshot))
+            if False:
+                yield service_pb2.SandboxEvent()
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        await client.create_exec("sandbox-1", ("echo", "hello"), wait=True)
+
+    with pytest.raises(SandboxClientError, match="event stream ended before exec exec-1 reached a terminal state"):
+        asyncio.run(run_test())
+
+    assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 10, False)]
+    assert _FakeRawSandboxClient.get_exec_calls == 1
+
+
+def test_create_exec_wait_true_surfaces_typed_stream_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRawSandboxClient:
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
+            del request
+            return service_pb2.CreateExecResponse(exec_id="exec-1")
+
+        def get_exec(self, exec_id: str) -> object:
+            return _exec_response(
+                service_pb2.ExecStatus(
+                    exec_id=exec_id,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.EXEC_STATE_RUNNING,
+                    command=["echo", "hello"],
+                    cwd="/workspace",
+                ),
+                last_event_sequence=10,
+            )
+
+        def subscribe_sandbox_events(
+            self,
+            sandbox_id: str,
+            *,
+            from_sequence: int = 0,
+            include_current_snapshot: bool = False,
+        ) -> Iterator[service_pb2.SandboxEvent]:
+            del sandbox_id, from_sequence, include_current_snapshot
+            raise agents_sandbox.SandboxSequenceExpiredError("sequence expired")
+            yield service_pb2.SandboxEvent()
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        await client.create_exec("sandbox-1", ("echo", "hello"), wait=True)
+
+    with pytest.raises(agents_sandbox.SandboxSequenceExpiredError, match="sequence expired"):
+        asyncio.run(run_test())
+
+
+def test_create_exec_wait_true_times_out_without_event_driven_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRawSandboxClient:
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            return None
+
+        def create_exec(self, request: service_pb2.CreateExecRequest) -> service_pb2.CreateExecResponse:
+            del request
+            return service_pb2.CreateExecResponse(exec_id="exec-1")
+
+        def get_exec(self, exec_id: str) -> object:
+            return _exec_response(
+                service_pb2.ExecStatus(
+                    exec_id=exec_id,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.EXEC_STATE_RUNNING,
+                    command=["echo", "hello"],
+                    cwd="/workspace",
+                ),
+                last_event_sequence=10,
+            )
+
+        def subscribe_sandbox_events(
+            self,
+            sandbox_id: str,
+            *,
+            from_sequence: int = 0,
+            include_current_snapshot: bool = False,
+        ) -> Iterator[service_pb2.SandboxEvent]:
+            del sandbox_id, from_sequence, include_current_snapshot
+            time.sleep(0.2)
+            if False:
+                yield service_pb2.SandboxEvent()
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        client._operation_timeout_seconds = 0.01
+        await client.create_exec("sandbox-1", ("echo", "hello"), wait=True)
+
+    with pytest.raises(TimeoutError, match="create_exec timed out while waiting for exec exec-1 to become terminal"):
+        asyncio.run(run_test())
 
 
 @pytest.mark.parametrize(
@@ -1296,7 +1533,7 @@ def test_cancel_exec_wait_paths_compensate_for_terminal_event_before_baseline(
         ("EXEC_NOT_FOUND", agents_sandbox.ExecNotFoundError),
         ("EXEC_ALREADY_TERMINAL", agents_sandbox.ExecAlreadyTerminalError),
         ("EXEC_ID_ALREADY_EXISTS", agents_sandbox.SandboxConflictError),
-        ("SANDBOX_EVENT_CURSOR_EXPIRED", agents_sandbox.SandboxCursorExpiredError),
+        ("SANDBOX_EVENT_SEQUENCE_EXPIRED", agents_sandbox.SandboxSequenceExpiredError),
     ],
 )
 def test_sdk_maps_error_info_reasons_to_public_exceptions(
@@ -1313,7 +1550,7 @@ def test_sdk_maps_error_info_reasons_to_public_exceptions(
                 await client.cancel_exec("exec-1")
             elif reason == "EXEC_ID_ALREADY_EXISTS":
                 await client.create_exec("sandbox-1", ("echo",), exec_id="exec-1")
-            elif reason == "SANDBOX_EVENT_CURSOR_EXPIRED":
+            elif reason == "SANDBOX_EVENT_SEQUENCE_EXPIRED":
                 async for _event in client.subscribe_sandbox_events("sandbox-1"):
                     raise AssertionError("event stream should fail before yielding")
             else:
@@ -1385,6 +1622,7 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
         "ping": ping,
         "sandbox_state": sandbox.state,
         "exec_state": exec_handle.state,
+        "exec_last_event_sequence": exec_handle.last_event_sequence,
         "deleted_count": delete_result.deleted_count,
         "event_types": [event.event_type for event in events],
         "service_names": [event.service_name for event in events],
@@ -1524,7 +1762,7 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                     )
                 ],
                 labels={"team": "sdk", "purpose": "smoke"},
-                last_event_cursor="sandbox-1:2",
+                last_event_sequence=2,
             )
         )
 
@@ -1537,7 +1775,7 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                     sandbox_id="sandbox-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     labels={"team": "sdk", "purpose": "smoke"},
-                    last_event_cursor="sandbox-1:2",
+                    last_event_sequence=2,
                 )
             ]
         )
@@ -1568,7 +1806,6 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
         yield _event_pb(
             sandbox_id=request.sandbox_id,
             sequence=2,
-            cursor="sandbox-1:2",
             event_type=service_pb2.SANDBOX_SERVICE_READY,
             replay=True,
             snapshot=True,
@@ -1577,7 +1814,6 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
         yield _event_pb(
             sandbox_id=request.sandbox_id,
             sequence=3,
-            cursor="sandbox-1:3",
             event_type=service_pb2.EXEC_FINISHED,
             exec_id="exec-1",
             exec_state=service_pb2.EXEC_STATE_FINISHED,
@@ -1595,7 +1831,7 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
 
     def GetExec(self, request, context):  # noqa: N802
         del context
-        return service_pb2.GetExecResponse(
+        response = service_pb2.GetExecResponse(
             exec=service_pb2.ExecStatus(
                 exec_id=request.exec_id,
                 sandbox_id="sandbox-1",
@@ -1603,8 +1839,10 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                 command=["echo", "hello"],
                 cwd="/workspace",
                 exit_code=0,
+                last_event_sequence=3,
             )
         )
+        return response
 
     def ListActiveExecs(self, request, context):  # noqa: N802
         del context
@@ -1647,7 +1885,6 @@ def _event_pb(
     *,
     sandbox_id: str,
     sequence: int,
-    cursor: str,
     event_type: int,
     replay: bool = False,
     snapshot: bool = False,
@@ -1660,7 +1897,6 @@ def _event_pb(
     return service_pb2.SandboxEvent(
         event_id=f"event-{sequence}",
         sequence=sequence,
-        cursor=cursor,
         sandbox_id=sandbox_id,
         event_type=event_type,
         occurred_at=_timestamp(),
