@@ -89,18 +89,18 @@ const (
 	EventType_EVENT_TYPE_UNSPECIFIED   EventType = 0
 	EventType_SANDBOX_ACCEPTED         EventType = 1
 	EventType_SANDBOX_PREPARING        EventType = 2
-	EventType_SANDBOX_READY            EventType = 4
-	EventType_SANDBOX_FAILED           EventType = 5
-	EventType_SANDBOX_STOP_REQUESTED   EventType = 6
-	EventType_SANDBOX_STOPPED          EventType = 7
-	EventType_SANDBOX_DELETE_REQUESTED EventType = 8
-	EventType_SANDBOX_DELETED          EventType = 9
-	EventType_EXEC_STARTED             EventType = 10
-	EventType_EXEC_FINISHED            EventType = 11
-	EventType_EXEC_FAILED              EventType = 12
-	EventType_EXEC_CANCELLED           EventType = 13
-	EventType_SANDBOX_SERVICE_READY    EventType = 14
-	EventType_SANDBOX_SERVICE_FAILED   EventType = 15
+	EventType_SANDBOX_READY            EventType = 3
+	EventType_SANDBOX_FAILED           EventType = 4
+	EventType_SANDBOX_STOP_REQUESTED   EventType = 5
+	EventType_SANDBOX_STOPPED          EventType = 6
+	EventType_SANDBOX_DELETE_REQUESTED EventType = 7
+	EventType_SANDBOX_DELETED          EventType = 8
+	EventType_EXEC_STARTED             EventType = 9
+	EventType_EXEC_FINISHED            EventType = 10
+	EventType_EXEC_FAILED              EventType = 11
+	EventType_EXEC_CANCELLED           EventType = 12
+	EventType_SANDBOX_SERVICE_READY    EventType = 13
+	EventType_SANDBOX_SERVICE_FAILED   EventType = 14
 )
 
 // Enum value maps for EventType.
@@ -109,35 +109,35 @@ var (
 		0:  "EVENT_TYPE_UNSPECIFIED",
 		1:  "SANDBOX_ACCEPTED",
 		2:  "SANDBOX_PREPARING",
-		4:  "SANDBOX_READY",
-		5:  "SANDBOX_FAILED",
-		6:  "SANDBOX_STOP_REQUESTED",
-		7:  "SANDBOX_STOPPED",
-		8:  "SANDBOX_DELETE_REQUESTED",
-		9:  "SANDBOX_DELETED",
-		10: "EXEC_STARTED",
-		11: "EXEC_FINISHED",
-		12: "EXEC_FAILED",
-		13: "EXEC_CANCELLED",
-		14: "SANDBOX_SERVICE_READY",
-		15: "SANDBOX_SERVICE_FAILED",
+		3:  "SANDBOX_READY",
+		4:  "SANDBOX_FAILED",
+		5:  "SANDBOX_STOP_REQUESTED",
+		6:  "SANDBOX_STOPPED",
+		7:  "SANDBOX_DELETE_REQUESTED",
+		8:  "SANDBOX_DELETED",
+		9:  "EXEC_STARTED",
+		10: "EXEC_FINISHED",
+		11: "EXEC_FAILED",
+		12: "EXEC_CANCELLED",
+		13: "SANDBOX_SERVICE_READY",
+		14: "SANDBOX_SERVICE_FAILED",
 	}
 	EventType_value = map[string]int32{
 		"EVENT_TYPE_UNSPECIFIED":   0,
 		"SANDBOX_ACCEPTED":         1,
 		"SANDBOX_PREPARING":        2,
-		"SANDBOX_READY":            4,
-		"SANDBOX_FAILED":           5,
-		"SANDBOX_STOP_REQUESTED":   6,
-		"SANDBOX_STOPPED":          7,
-		"SANDBOX_DELETE_REQUESTED": 8,
-		"SANDBOX_DELETED":          9,
-		"EXEC_STARTED":             10,
-		"EXEC_FINISHED":            11,
-		"EXEC_FAILED":              12,
-		"EXEC_CANCELLED":           13,
-		"SANDBOX_SERVICE_READY":    14,
-		"SANDBOX_SERVICE_FAILED":   15,
+		"SANDBOX_READY":            3,
+		"SANDBOX_FAILED":           4,
+		"SANDBOX_STOP_REQUESTED":   5,
+		"SANDBOX_STOPPED":          6,
+		"SANDBOX_DELETE_REQUESTED": 7,
+		"SANDBOX_DELETED":          8,
+		"EXEC_STARTED":             9,
+		"EXEC_FINISHED":            10,
+		"EXEC_FAILED":              11,
+		"EXEC_CANCELLED":           12,
+		"SANDBOX_SERVICE_READY":    13,
+		"SANDBOX_SERVICE_FAILED":   14,
 	}
 )
 
@@ -705,13 +705,13 @@ func (x *ServiceSpec) GetPostStartOnPrimary() []string {
 
 type CreateSpec struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	Image            string                 `protobuf:"bytes,5,opt,name=image,proto3" json:"image,omitempty"`
-	Mounts           []*MountSpec           `protobuf:"bytes,6,rep,name=mounts,proto3" json:"mounts,omitempty"`
-	Copies           []*CopySpec            `protobuf:"bytes,7,rep,name=copies,proto3" json:"copies,omitempty"`
-	BuiltinResources []string               `protobuf:"bytes,8,rep,name=builtin_resources,json=builtinResources,proto3" json:"builtin_resources,omitempty"`
-	RequiredServices []*ServiceSpec         `protobuf:"bytes,9,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
-	OptionalServices []*ServiceSpec         `protobuf:"bytes,10,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
-	Labels           map[string]string      `protobuf:"bytes,11,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Image            string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
+	Mounts           []*MountSpec           `protobuf:"bytes,2,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	Copies           []*CopySpec            `protobuf:"bytes,3,rep,name=copies,proto3" json:"copies,omitempty"`
+	BuiltinResources []string               `protobuf:"bytes,4,rep,name=builtin_resources,json=builtinResources,proto3" json:"builtin_resources,omitempty"`
+	RequiredServices []*ServiceSpec         `protobuf:"bytes,5,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
+	OptionalServices []*ServiceSpec         `protobuf:"bytes,6,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
+	Labels           map[string]string      `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -798,11 +798,11 @@ func (x *CreateSpec) GetLabels() map[string]string {
 type SandboxHandle struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	SandboxId        string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	State            SandboxState           `protobuf:"varint,3,opt,name=state,proto3,enum=agbox.v1.SandboxState" json:"state,omitempty"`
-	LastEventCursor  string                 `protobuf:"bytes,6,opt,name=last_event_cursor,json=lastEventCursor,proto3" json:"last_event_cursor,omitempty"`
-	RequiredServices []*ServiceSpec         `protobuf:"bytes,7,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
-	OptionalServices []*ServiceSpec         `protobuf:"bytes,8,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
-	Labels           map[string]string      `protobuf:"bytes,9,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	State            SandboxState           `protobuf:"varint,2,opt,name=state,proto3,enum=agbox.v1.SandboxState" json:"state,omitempty"`
+	LastEventCursor  string                 `protobuf:"bytes,3,opt,name=last_event_cursor,json=lastEventCursor,proto3" json:"last_event_cursor,omitempty"`
+	RequiredServices []*ServiceSpec         `protobuf:"bytes,4,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
+	OptionalServices []*ServiceSpec         `protobuf:"bytes,5,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
+	Labels           map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -890,14 +890,14 @@ type SandboxEvent struct {
 	Replay        bool                   `protobuf:"varint,7,opt,name=replay,proto3" json:"replay,omitempty"`
 	Snapshot      bool                   `protobuf:"varint,8,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Phase         string                 `protobuf:"bytes,9,opt,name=phase,proto3" json:"phase,omitempty"`
-	ErrorCode     string                 `protobuf:"bytes,11,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,12,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	Reason        string                 `protobuf:"bytes,13,opt,name=reason,proto3" json:"reason,omitempty"`
-	ExecId        string                 `protobuf:"bytes,14,opt,name=exec_id,json=execId,proto3" json:"exec_id,omitempty"`
-	ExitCode      int32                  `protobuf:"varint,15,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	SandboxState  SandboxState           `protobuf:"varint,16,opt,name=sandbox_state,json=sandboxState,proto3,enum=agbox.v1.SandboxState" json:"sandbox_state,omitempty"`
-	ExecState     ExecState              `protobuf:"varint,17,opt,name=exec_state,json=execState,proto3,enum=agbox.v1.ExecState" json:"exec_state,omitempty"`
-	ServiceName   string                 `protobuf:"bytes,18,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	ErrorCode     string                 `protobuf:"bytes,10,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	Reason        string                 `protobuf:"bytes,12,opt,name=reason,proto3" json:"reason,omitempty"`
+	ExecId        string                 `protobuf:"bytes,13,opt,name=exec_id,json=execId,proto3" json:"exec_id,omitempty"`
+	ExitCode      int32                  `protobuf:"varint,14,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	SandboxState  SandboxState           `protobuf:"varint,15,opt,name=sandbox_state,json=sandboxState,proto3,enum=agbox.v1.SandboxState" json:"sandbox_state,omitempty"`
+	ExecState     ExecState              `protobuf:"varint,16,opt,name=exec_state,json=execState,proto3,enum=agbox.v1.ExecState" json:"exec_state,omitempty"`
+	ServiceName   string                 `protobuf:"bytes,17,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1169,9 +1169,9 @@ func (x *ExecStatus) GetStderr() string {
 
 type CreateSandboxRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	CreateSpec     *CreateSpec            `protobuf:"bytes,2,opt,name=create_spec,json=createSpec,proto3" json:"create_spec,omitempty"`
-	CallerMetadata *CallerMetadata        `protobuf:"bytes,3,opt,name=caller_metadata,json=callerMetadata,proto3" json:"caller_metadata,omitempty"`
-	SandboxId      string                 `protobuf:"bytes,4,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	CreateSpec     *CreateSpec            `protobuf:"bytes,1,opt,name=create_spec,json=createSpec,proto3" json:"create_spec,omitempty"`
+	CallerMetadata *CallerMetadata        `protobuf:"bytes,2,opt,name=caller_metadata,json=callerMetadata,proto3" json:"caller_metadata,omitempty"`
+	SandboxId      string                 `protobuf:"bytes,3,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1369,8 +1369,8 @@ func (x *GetSandboxResponse) GetSandbox() *SandboxHandle {
 
 type ListSandboxesRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	IncludeDeleted bool                   `protobuf:"varint,2,opt,name=include_deleted,json=includeDeleted,proto3" json:"include_deleted,omitempty"`
-	LabelSelector  map[string]string      `protobuf:"bytes,3,rep,name=label_selector,json=labelSelector,proto3" json:"label_selector,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	IncludeDeleted bool                   `protobuf:"varint,1,opt,name=include_deleted,json=includeDeleted,proto3" json:"include_deleted,omitempty"`
+	LabelSelector  map[string]string      `protobuf:"bytes,2,rep,name=label_selector,json=labelSelector,proto3" json:"label_selector,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2180,31 +2180,30 @@ const file_service_proto_rawDesc = "" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x124\n" +
 	"\venvironment\x18\x03 \x03(\v2\x12.agbox.v1.KeyValueR\venvironment\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
-	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xab\x03\n" +
+	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xa5\x03\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
-	"\x05image\x18\x05 \x01(\tR\x05image\x12+\n" +
-	"\x06mounts\x18\x06 \x03(\v2\x13.agbox.v1.MountSpecR\x06mounts\x12*\n" +
-	"\x06copies\x18\a \x03(\v2\x12.agbox.v1.CopySpecR\x06copies\x12+\n" +
-	"\x11builtin_resources\x18\b \x03(\tR\x10builtinResources\x12B\n" +
-	"\x11required_services\x18\t \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
-	"\x11optional_services\x18\n" +
-	" \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x128\n" +
-	"\x06labels\x18\v \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x1a9\n" +
+	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
+	"\x06mounts\x18\x02 \x03(\v2\x13.agbox.v1.MountSpecR\x06mounts\x12*\n" +
+	"\x06copies\x18\x03 \x03(\v2\x12.agbox.v1.CopySpecR\x06copies\x12+\n" +
+	"\x11builtin_resources\x18\x04 \x03(\tR\x10builtinResources\x12B\n" +
+	"\x11required_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
+	"\x11optional_services\x18\x06 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x128\n" +
+	"\x06labels\x18\a \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x05\"\x94\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x88\x03\n" +
 	"\rSandboxHandle\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12,\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x16.agbox.v1.SandboxStateR\x05state\x12*\n" +
-	"\x11last_event_cursor\x18\x06 \x01(\tR\x0flastEventCursor\x12B\n" +
-	"\x11required_services\x18\a \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
-	"\x11optional_services\x18\b \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x12;\n" +
-	"\x06labels\x18\t \x03(\v2#.agbox.v1.SandboxHandle.LabelsEntryR\x06labels\x1a9\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x16.agbox.v1.SandboxStateR\x05state\x12*\n" +
+	"\x11last_event_cursor\x18\x03 \x01(\tR\x0flastEventCursor\x12B\n" +
+	"\x11required_services\x18\x04 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
+	"\x11optional_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x12;\n" +
+	"\x06labels\x18\x06 \x03(\v2#.agbox.v1.SandboxHandle.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03J\x04\b\x04\x10\x06\"\xe3\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdd\x04\n" +
 	"\fSandboxEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12\x16\n" +
@@ -2219,16 +2218,16 @@ const file_service_proto_rawDesc = "" +
 	"\bsnapshot\x18\b \x01(\bR\bsnapshot\x12\x14\n" +
 	"\x05phase\x18\t \x01(\tR\x05phase\x12\x1d\n" +
 	"\n" +
-	"error_code\x18\v \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\f \x01(\tR\ferrorMessage\x12\x16\n" +
-	"\x06reason\x18\r \x01(\tR\x06reason\x12\x17\n" +
-	"\aexec_id\x18\x0e \x01(\tR\x06execId\x12\x1b\n" +
-	"\texit_code\x18\x0f \x01(\x05R\bexitCode\x12;\n" +
-	"\rsandbox_state\x18\x10 \x01(\x0e2\x16.agbox.v1.SandboxStateR\fsandboxState\x122\n" +
+	"error_code\x18\n" +
+	" \x01(\tR\terrorCode\x12#\n" +
+	"\rerror_message\x18\v \x01(\tR\ferrorMessage\x12\x16\n" +
+	"\x06reason\x18\f \x01(\tR\x06reason\x12\x17\n" +
+	"\aexec_id\x18\r \x01(\tR\x06execId\x12\x1b\n" +
+	"\texit_code\x18\x0e \x01(\x05R\bexitCode\x12;\n" +
+	"\rsandbox_state\x18\x0f \x01(\x0e2\x16.agbox.v1.SandboxStateR\fsandboxState\x122\n" +
 	"\n" +
-	"exec_state\x18\x11 \x01(\x0e2\x13.agbox.v1.ExecStateR\texecState\x12!\n" +
-	"\fservice_name\x18\x12 \x01(\tR\vserviceNameJ\x04\b\n" +
-	"\x10\v\"\xb7\x02\n" +
+	"exec_state\x18\x10 \x01(\x0e2\x13.agbox.v1.ExecStateR\texecState\x12!\n" +
+	"\fservice_name\x18\x11 \x01(\tR\vserviceName\"\xb7\x02\n" +
 	"\n" +
 	"ExecStatus\x12\x17\n" +
 	"\aexec_id\x18\x01 \x01(\tR\x06execId\x12\x1d\n" +
@@ -2242,13 +2241,13 @@ const file_service_proto_rawDesc = "" +
 	"\x05error\x18\b \x01(\tR\x05error\x12\x16\n" +
 	"\x06stdout\x18\t \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\n" +
-	" \x01(\tR\x06stderr\"\xb5\x01\n" +
+	" \x01(\tR\x06stderr\"\xaf\x01\n" +
 	"\x14CreateSandboxRequest\x125\n" +
-	"\vcreate_spec\x18\x02 \x01(\v2\x14.agbox.v1.CreateSpecR\n" +
+	"\vcreate_spec\x18\x01 \x01(\v2\x14.agbox.v1.CreateSpecR\n" +
 	"createSpec\x12A\n" +
-	"\x0fcaller_metadata\x18\x03 \x01(\v2\x18.agbox.v1.CallerMetadataR\x0ecallerMetadata\x12\x1d\n" +
+	"\x0fcaller_metadata\x18\x02 \x01(\v2\x18.agbox.v1.CallerMetadataR\x0ecallerMetadata\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\x04 \x01(\tR\tsandboxIdJ\x04\b\x01\x10\x02\"s\n" +
+	"sandbox_id\x18\x03 \x01(\tR\tsandboxId\"s\n" +
 	"\x15CreateSandboxResponse\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12;\n" +
@@ -2257,13 +2256,13 @@ const file_service_proto_rawDesc = "" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\"G\n" +
 	"\x12GetSandboxResponse\x121\n" +
-	"\asandbox\x18\x01 \x01(\v2\x17.agbox.v1.SandboxHandleR\asandbox\"\xe1\x01\n" +
+	"\asandbox\x18\x01 \x01(\v2\x17.agbox.v1.SandboxHandleR\asandbox\"\xdb\x01\n" +
 	"\x14ListSandboxesRequest\x12'\n" +
-	"\x0finclude_deleted\x18\x02 \x01(\bR\x0eincludeDeleted\x12X\n" +
-	"\x0elabel_selector\x18\x03 \x03(\v21.agbox.v1.ListSandboxesRequest.LabelSelectorEntryR\rlabelSelector\x1a@\n" +
+	"\x0finclude_deleted\x18\x01 \x01(\bR\x0eincludeDeleted\x12X\n" +
+	"\x0elabel_selector\x18\x02 \x03(\v21.agbox.v1.ListSandboxesRequest.LabelSelectorEntryR\rlabelSelector\x1a@\n" +
 	"\x12LabelSelectorEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02\"N\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"N\n" +
 	"\x15ListSandboxesResponse\x125\n" +
 	"\tsandboxes\x18\x01 \x03(\v2\x17.agbox.v1.SandboxHandleR\tsandboxes\"5\n" +
 	"\x14ResumeSandboxRequest\x12\x1d\n" +
@@ -2319,24 +2318,24 @@ const file_service_proto_rawDesc = "" +
 	"\x14SANDBOX_STATE_FAILED\x10\x03\x12\x19\n" +
 	"\x15SANDBOX_STATE_STOPPED\x10\x04\x12\x1a\n" +
 	"\x16SANDBOX_STATE_DELETING\x10\x05\x12\x19\n" +
-	"\x15SANDBOX_STATE_DELETED\x10\x06*\xe6\x02\n" +
+	"\x15SANDBOX_STATE_DELETED\x10\x06*\xe0\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SANDBOX_ACCEPTED\x10\x01\x12\x15\n" +
 	"\x11SANDBOX_PREPARING\x10\x02\x12\x11\n" +
-	"\rSANDBOX_READY\x10\x04\x12\x12\n" +
-	"\x0eSANDBOX_FAILED\x10\x05\x12\x1a\n" +
-	"\x16SANDBOX_STOP_REQUESTED\x10\x06\x12\x13\n" +
-	"\x0fSANDBOX_STOPPED\x10\a\x12\x1c\n" +
-	"\x18SANDBOX_DELETE_REQUESTED\x10\b\x12\x13\n" +
-	"\x0fSANDBOX_DELETED\x10\t\x12\x10\n" +
-	"\fEXEC_STARTED\x10\n" +
-	"\x12\x11\n" +
-	"\rEXEC_FINISHED\x10\v\x12\x0f\n" +
-	"\vEXEC_FAILED\x10\f\x12\x12\n" +
-	"\x0eEXEC_CANCELLED\x10\r\x12\x19\n" +
-	"\x15SANDBOX_SERVICE_READY\x10\x0e\x12\x1a\n" +
-	"\x16SANDBOX_SERVICE_FAILED\x10\x0f\"\x04\b\x03\x10\x03*\x89\x01\n" +
+	"\rSANDBOX_READY\x10\x03\x12\x12\n" +
+	"\x0eSANDBOX_FAILED\x10\x04\x12\x1a\n" +
+	"\x16SANDBOX_STOP_REQUESTED\x10\x05\x12\x13\n" +
+	"\x0fSANDBOX_STOPPED\x10\x06\x12\x1c\n" +
+	"\x18SANDBOX_DELETE_REQUESTED\x10\a\x12\x13\n" +
+	"\x0fSANDBOX_DELETED\x10\b\x12\x10\n" +
+	"\fEXEC_STARTED\x10\t\x12\x11\n" +
+	"\rEXEC_FINISHED\x10\n" +
+	"\x12\x0f\n" +
+	"\vEXEC_FAILED\x10\v\x12\x12\n" +
+	"\x0eEXEC_CANCELLED\x10\f\x12\x19\n" +
+	"\x15SANDBOX_SERVICE_READY\x10\r\x12\x1a\n" +
+	"\x16SANDBOX_SERVICE_FAILED\x10\x0e*\x89\x01\n" +
 	"\tExecState\x12\x1a\n" +
 	"\x16EXEC_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12EXEC_STATE_RUNNING\x10\x01\x12\x17\n" +

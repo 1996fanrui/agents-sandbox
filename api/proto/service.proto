@@ -36,19 +36,18 @@ enum EventType {
   EVENT_TYPE_UNSPECIFIED = 0;
   SANDBOX_ACCEPTED = 1;
   SANDBOX_PREPARING = 2;
-  reserved 3;
-  SANDBOX_READY = 4;
-  SANDBOX_FAILED = 5;
-  SANDBOX_STOP_REQUESTED = 6;
-  SANDBOX_STOPPED = 7;
-  SANDBOX_DELETE_REQUESTED = 8;
-  SANDBOX_DELETED = 9;
-  EXEC_STARTED = 10;
-  EXEC_FINISHED = 11;
-  EXEC_FAILED = 12;
-  EXEC_CANCELLED = 13;
-  SANDBOX_SERVICE_READY = 14;
-  SANDBOX_SERVICE_FAILED = 15;
+  SANDBOX_READY = 3;
+  SANDBOX_FAILED = 4;
+  SANDBOX_STOP_REQUESTED = 5;
+  SANDBOX_STOPPED = 6;
+  SANDBOX_DELETE_REQUESTED = 7;
+  SANDBOX_DELETED = 8;
+  EXEC_STARTED = 9;
+  EXEC_FINISHED = 10;
+  EXEC_FAILED = 11;
+  EXEC_CANCELLED = 12;
+  SANDBOX_SERVICE_READY = 13;
+  SANDBOX_SERVICE_FAILED = 14;
 }
 
 enum ExecState {
@@ -107,25 +106,22 @@ message ServiceSpec {
 }
 
 message CreateSpec {
-  reserved 1 to 4;
-  string image = 5;
-  repeated MountSpec mounts = 6;
-  repeated CopySpec copies = 7;
-  repeated string builtin_resources = 8;
-  repeated ServiceSpec required_services = 9;
-  repeated ServiceSpec optional_services = 10;
-  map<string, string> labels = 11;
+  string image = 1;
+  repeated MountSpec mounts = 2;
+  repeated CopySpec copies = 3;
+  repeated string builtin_resources = 4;
+  repeated ServiceSpec required_services = 5;
+  repeated ServiceSpec optional_services = 6;
+  map<string, string> labels = 7;
 }
 
 message SandboxHandle {
   string sandbox_id = 1;
-  reserved 2;
-  SandboxState state = 3;
-  reserved 4 to 5;
-  string last_event_cursor = 6;
-  repeated ServiceSpec required_services = 7;
-  repeated ServiceSpec optional_services = 8;
-  map<string, string> labels = 9;
+  SandboxState state = 2;
+  string last_event_cursor = 3;
+  repeated ServiceSpec required_services = 4;
+  repeated ServiceSpec optional_services = 5;
+  map<string, string> labels = 6;
 }
 
 message SandboxEvent {
@@ -138,15 +134,14 @@ message SandboxEvent {
   bool replay = 7;
   bool snapshot = 8;
   string phase = 9;
-  reserved 10;
-  string error_code = 11;
-  string error_message = 12;
-  string reason = 13;
-  string exec_id = 14;
-  int32 exit_code = 15;
-  SandboxState sandbox_state = 16;
-  ExecState exec_state = 17;
-  string service_name = 18;
+  string error_code = 10;
+  string error_message = 11;
+  string reason = 12;
+  string exec_id = 13;
+  int32 exit_code = 14;
+  SandboxState sandbox_state = 15;
+  ExecState exec_state = 16;
+  string service_name = 17;
 }
 
 message ExecStatus {
@@ -163,10 +158,9 @@ message ExecStatus {
 }
 
 message CreateSandboxRequest {
-  reserved 1;
-  CreateSpec create_spec = 2;
-  CallerMetadata caller_metadata = 3;
-  string sandbox_id = 4;
+  CreateSpec create_spec = 1;
+  CallerMetadata caller_metadata = 2;
+  string sandbox_id = 3;
 }
 
 message CreateSandboxResponse {
@@ -183,9 +177,8 @@ message GetSandboxResponse {
 }
 
 message ListSandboxesRequest {
-  reserved 1;
-  bool include_deleted = 2;
-  map<string, string> label_selector = 3;
+  bool include_deleted = 1;
+  map<string, string> label_selector = 2;
 }
 
 message ListSandboxesResponse {
