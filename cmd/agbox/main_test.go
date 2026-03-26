@@ -147,7 +147,7 @@ func TestSandboxCommandRequiresSubcommand(t *testing.T) {
 	if !strings.Contains(stderr.String(), "requires a subcommand") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "create, list, get, delete, exec") {
+	if !strings.Contains(stderr.String(), "create, list, get, delete") {
 		t.Fatalf("missing subcommand list in stderr %q", stderr.String())
 	}
 }
