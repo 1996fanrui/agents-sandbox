@@ -14,9 +14,13 @@ const (
 type cliError struct {
 	exitCode int
 	err      error
+	silent   bool
 }
 
 func (e *cliError) Error() string {
+	if e.err == nil {
+		return ""
+	}
 	return e.err.Error()
 }
 
@@ -34,6 +38,13 @@ func runtimeErrorf(format string, args ...any) error {
 	}
 }
 
+func exitCodeError(exitCode int) error {
+	return &cliError{
+		exitCode: exitCode,
+		silent:   true,
+	}
+}
+
 func exitCodeForError(err error) int {
 	if err == nil {
 		return exitCodeSuccess
@@ -45,4 +56,12 @@ func exitCodeForError(err error) int {
 	}
 
 	return exitCodeRuntimeError
+}
+
+func shouldPrintError(err error) bool {
+	var commandErr *cliError
+	if errors.As(err, &commandErr) {
+		return !commandErr.silent && commandErr.err != nil
+	}
+	return true
 }
