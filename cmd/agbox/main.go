@@ -36,13 +36,15 @@ func run(
 	case "ping":
 		err = runPing(ctx, args[1:], stdout, lookupEnv)
 	case "sandbox":
-		err = runSandbox(ctx, args[1:], stdout, lookupEnv)
+		err = runSandbox(ctx, args[1:], stdout, stderr, lookupEnv)
 	default:
 		err = usageErrorf("unknown command %q", args[0])
 	}
 
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
+		if shouldPrintError(err) {
+			_, _ = fmt.Fprintln(stderr, err)
+		}
 	}
 
 	return exitCodeForError(err)
@@ -73,4 +75,4 @@ func runPing(ctx context.Context, args []string, stdout io.Writer, lookupEnv fun
 	return nil
 }
 
-var sandboxSubcommands = []string{"create", "list", "get", "delete"}
+var sandboxSubcommands = []string{"create", "list", "get", "delete", "exec"}

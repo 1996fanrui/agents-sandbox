@@ -19,21 +19,18 @@ type sandboxClient interface {
 	DeleteSandboxes(context.Context, *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error)
 }
 
-func runSandbox(ctx context.Context, args []string, stdout io.Writer, lookupEnv func(string) (string, bool)) error {
-	if len(args) == 0 {
-		return usageErrorf(
-			"sandbox command requires a subcommand\navailable subcommands: %s",
-			strings.Join(sandboxSubcommands, ", "),
-		)
-	}
-	switch args[0] {
-	case "create", "list", "get", "delete":
-	default:
-		return usageErrorf(
-			"unknown sandbox command %q\navailable subcommands: %s",
-			args[0],
-			strings.Join(sandboxSubcommands, ", "),
-		)
+type sandboxExecClient interface {
+	sandboxClient
+	CreateExec(context.Context, *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error)
+	SubscribeSandboxEvents(context.Context, string, uint64, bool) (rawclient.SandboxEventStream, error)
+	GetExec(context.Context, string) (*agboxv1.GetExecResponse, error)
+	CancelExec(context.Context, string) (*agboxv1.AcceptedResponse, error)
+}
+
+func runSandbox(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, lookupEnv func(string) (string, bool)) error {
+	subcommand, err := sandboxSubcommand(args)
+	if err != nil {
+		return err
 	}
 
 	socketPath, err := platform.SocketPath(lookupEnv)
@@ -41,24 +38,27 @@ func runSandbox(ctx context.Context, args []string, stdout io.Writer, lookupEnv 
 		return runtimeErrorf("resolve daemon socket: %v", err)
 	}
 
-	client, err := rawclient.New(socketPath)
+	var client *rawclient.RawClient
+	if subcommand == "exec" {
+		client, err = rawclient.New(socketPath, rawclient.WithTimeout(0))
+	} else {
+		client, err = rawclient.New(socketPath)
+	}
 	if err != nil {
 		return runtimeErrorf("connect daemon: %v", err)
 	}
 	defer client.Close()
 
-	return runSandboxWithClient(ctx, client, args, stdout)
+	return runSandboxWithClient(ctx, client, args, stdout, stderr)
 }
 
-func runSandboxWithClient(ctx context.Context, client sandboxClient, args []string, stdout io.Writer) error {
-	if len(args) == 0 {
-		return usageErrorf(
-			"sandbox command requires a subcommand\navailable subcommands: %s",
-			strings.Join(sandboxSubcommands, ", "),
-		)
+func runSandboxWithClient(ctx context.Context, client sandboxExecClient, args []string, stdout io.Writer, stderr io.Writer) error {
+	subcommand, err := sandboxSubcommand(args)
+	if err != nil {
+		return err
 	}
 
-	switch args[0] {
+	switch subcommand {
 	case "create":
 		return runSandboxCreate(ctx, client, args[1:], stdout)
 	case "list":
@@ -67,8 +67,26 @@ func runSandboxWithClient(ctx context.Context, client sandboxClient, args []stri
 		return runSandboxGet(ctx, client, args[1:], stdout)
 	case "delete":
 		return runSandboxDelete(ctx, client, args[1:], stdout)
+	case "exec":
+		return runSandboxExec(ctx, client, args[1:], stdout, stderr)
 	default:
-		return usageErrorf(
+		return usageErrorf("sandbox command dispatcher reached unknown subcommand %q", subcommand)
+	}
+}
+
+func sandboxSubcommand(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", usageErrorf(
+			"sandbox command requires a subcommand\navailable subcommands: %s",
+			strings.Join(sandboxSubcommands, ", "),
+		)
+	}
+
+	switch args[0] {
+	case "create", "list", "get", "delete", "exec":
+		return args[0], nil
+	default:
+		return "", usageErrorf(
 			"unknown sandbox command %q\navailable subcommands: %s",
 			args[0],
 			strings.Join(sandboxSubcommands, ", "),

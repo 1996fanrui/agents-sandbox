@@ -14,16 +14,26 @@ import (
 type fakeSandboxService struct {
 	agboxv1.UnimplementedSandboxServiceServer
 
-	createFn      func(context.Context, *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error)
-	listFn        func(context.Context, *agboxv1.ListSandboxesRequest) (*agboxv1.ListSandboxesResponse, error)
-	getFn         func(context.Context, *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error)
-	deleteFn      func(context.Context, *agboxv1.DeleteSandboxRequest) (*agboxv1.AcceptedResponse, error)
-	deleteManyFn  func(context.Context, *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error)
-	createReq     *agboxv1.CreateSandboxRequest
-	listReq       *agboxv1.ListSandboxesRequest
-	getReq        *agboxv1.GetSandboxRequest
-	deleteReq     *agboxv1.DeleteSandboxRequest
-	deleteManyReq *agboxv1.DeleteSandboxesRequest
+	createFn               func(context.Context, *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error)
+	listFn                 func(context.Context, *agboxv1.ListSandboxesRequest) (*agboxv1.ListSandboxesResponse, error)
+	getFn                  func(context.Context, *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error)
+	deleteFn               func(context.Context, *agboxv1.DeleteSandboxRequest) (*agboxv1.AcceptedResponse, error)
+	deleteManyFn           func(context.Context, *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error)
+	createExecFn           func(context.Context, *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error)
+	cancelExecFn           func(context.Context, *agboxv1.CancelExecRequest) (*agboxv1.AcceptedResponse, error)
+	getExecFn              func(context.Context, *agboxv1.GetExecRequest) (*agboxv1.GetExecResponse, error)
+	subscribeFn            func(*agboxv1.SubscribeSandboxEventsRequest, grpc.ServerStreamingServer[agboxv1.SandboxEvent]) error
+	createReq              *agboxv1.CreateSandboxRequest
+	listReq                *agboxv1.ListSandboxesRequest
+	getReq                 *agboxv1.GetSandboxRequest
+	deleteReq              *agboxv1.DeleteSandboxRequest
+	deleteManyReq          *agboxv1.DeleteSandboxesRequest
+	createExecReq          *agboxv1.CreateExecRequest
+	cancelExecReq          *agboxv1.CancelExecRequest
+	getExecReq             *agboxv1.GetExecRequest
+	subscribeReq           *agboxv1.SubscribeSandboxEventsRequest
+	subscribeEventsPayload []*agboxv1.SandboxEvent
+	subscribeErr           error
 }
 
 func (f *fakeSandboxService) CreateSandbox(ctx context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
@@ -64,6 +74,43 @@ func (f *fakeSandboxService) DeleteSandboxes(ctx context.Context, request *agbox
 		return f.deleteManyFn(ctx, request)
 	}
 	return &agboxv1.DeleteSandboxesResponse{}, nil
+}
+
+func (f *fakeSandboxService) CreateExec(ctx context.Context, request *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
+	f.createExecReq = request
+	if f.createExecFn != nil {
+		return f.createExecFn(ctx, request)
+	}
+	return &agboxv1.CreateExecResponse{}, nil
+}
+
+func (f *fakeSandboxService) CancelExec(ctx context.Context, request *agboxv1.CancelExecRequest) (*agboxv1.AcceptedResponse, error) {
+	f.cancelExecReq = request
+	if f.cancelExecFn != nil {
+		return f.cancelExecFn(ctx, request)
+	}
+	return &agboxv1.AcceptedResponse{Accepted: true}, nil
+}
+
+func (f *fakeSandboxService) GetExec(ctx context.Context, request *agboxv1.GetExecRequest) (*agboxv1.GetExecResponse, error) {
+	f.getExecReq = request
+	if f.getExecFn != nil {
+		return f.getExecFn(ctx, request)
+	}
+	return &agboxv1.GetExecResponse{}, nil
+}
+
+func (f *fakeSandboxService) SubscribeSandboxEvents(request *agboxv1.SubscribeSandboxEventsRequest, stream grpc.ServerStreamingServer[agboxv1.SandboxEvent]) error {
+	f.subscribeReq = request
+	if f.subscribeFn != nil {
+		return f.subscribeFn(request, stream)
+	}
+	for _, event := range f.subscribeEventsPayload {
+		if err := stream.Send(event); err != nil {
+			return err
+		}
+	}
+	return f.subscribeErr
 }
 
 func TestSandboxCreate(t *testing.T) {

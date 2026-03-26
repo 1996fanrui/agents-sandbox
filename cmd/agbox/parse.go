@@ -6,12 +6,16 @@ import (
 	"strings"
 )
 
-func parseLabelAssignment(raw string) (string, string, error) {
+func parseKeyValueAssignment(raw string, flagName string) (string, string, error) {
 	key, value, found := strings.Cut(raw, "=")
 	if !found {
-		return "", "", usageErrorf("--label must be in key=value form")
+		return "", "", usageErrorf("%s must be in key=value form", flagName)
 	}
 	return key, value, nil
+}
+
+func parseLabelAssignment(raw string) (string, string, error) {
+	return parseKeyValueAssignment(raw, "--label")
 }
 
 type sandboxCreateArgs struct {
@@ -35,6 +39,18 @@ type sandboxDeleteArgs struct {
 	sandboxID string
 	labels    map[string]string
 	json      bool
+}
+
+type keyValuePair struct {
+	key   string
+	value string
+}
+
+type sandboxExecArgs struct {
+	sandboxID    string
+	cwd          string
+	envOverrides []keyValuePair
+	command      []string
 }
 
 func parseSandboxCreateArgs(args []string) (sandboxCreateArgs, error) {
@@ -163,6 +179,54 @@ func parseSandboxDeleteArgs(args []string) (sandboxDeleteArgs, error) {
 	}
 
 	return parsed, nil
+}
+
+func parseSandboxExecArgs(args []string) (sandboxExecArgs, error) {
+	var parsed sandboxExecArgs
+
+	if len(args) == 0 {
+		return sandboxExecArgs{}, usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
+	}
+	if strings.HasPrefix(args[0], "-") {
+		return sandboxExecArgs{}, usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
+	}
+	parsed.sandboxID = args[0]
+
+	for index := 1; index < len(args); {
+		switch args[index] {
+		case "--":
+			parsed.command = append([]string(nil), args[index+1:]...)
+			if len(parsed.command) == 0 {
+				return sandboxExecArgs{}, usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
+			}
+			return parsed, nil
+		case "--cwd":
+			if index+1 >= len(args) {
+				return sandboxExecArgs{}, usageErrorf("sandbox exec requires --cwd <dir>")
+			}
+			parsed.cwd = args[index+1]
+			index += 2
+		case "--env":
+			if index+1 >= len(args) {
+				return sandboxExecArgs{}, usageErrorf("--env must be in key=value form")
+			}
+			key, value, err := parseKeyValueAssignment(args[index+1], "--env")
+			if err != nil {
+				return sandboxExecArgs{}, err
+			}
+			parsed.envOverrides = append(parsed.envOverrides, keyValuePair{key: key, value: value})
+			index += 2
+		case "--json":
+			return sandboxExecArgs{}, usageErrorf("sandbox exec does not support --json")
+		default:
+			if strings.HasPrefix(args[index], "-") {
+				return sandboxExecArgs{}, usageErrorf("sandbox exec does not accept argument %q", args[index])
+			}
+			return sandboxExecArgs{}, usageErrorf("sandbox exec requires -- <command> [args...]")
+		}
+	}
+
+	return sandboxExecArgs{}, usageErrorf("sandbox exec requires -- <command> [args...]")
 }
 
 func labelsToPairs(labels map[string]string) []string {

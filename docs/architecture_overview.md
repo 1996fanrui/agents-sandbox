@@ -1,6 +1,6 @@
 # Architecture Overview
 
-`agents-sandbox` is a Docker-backed sandbox control plane with a local gRPC API, a layered Go SDK, and an async Python SDK. The repository contains the daemon, the runtime backend, the protobuf contract, the Go and Python client layers, and a small CLI entry point that exercises part of the public surface.
+`agents-sandbox` is a Docker-backed sandbox control plane with a local gRPC API, a layered Go SDK, an async Python SDK, and the AgentsSandbox CLI. The repository contains the daemon, the runtime backend, the protobuf contract, the Go and Python client layers, and a first-class local management CLI for sandbox lifecycle and exec operations.
 
 ## System Architecture
 
@@ -11,7 +11,7 @@ flowchart LR
     PySDK[Python SDK\nAgentsSandboxClient] --> RPC[gRPC over Unix socket]
     GoClient[Go SDK\nsdk/go/client] --> GoRaw[Go raw client\nsdk/go/rawclient]
     GoRaw --> RPC
-    CLI[AgentsSandbox CLI] --> RPC
+    CLI[AgentsSandbox CLI\nversion/ping\nsandbox create|list|get|delete|exec] --> RPC
     RPC --> Daemon[AgentsSandbox daemon]
     Daemon --> Service[control.Service]
     Service --> Persistence[Persistent ids.db\nID registry + event store buckets]
@@ -25,13 +25,14 @@ flowchart LR
 ### Main components
 
 - `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
+- `cmd/agbox` implements the local operator CLI. It resolves the daemon socket, talks to the gRPC API through `sdk/go/rawclient`, and exposes `version`, `ping`, and `sandbox` subcommands. The `sandbox` command currently supports `create`, `list`, `get`, `delete`, and `exec`, including label-based list/delete flows and JSON output for create/list/get.
 - `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, sequence generation, async operation orchestration, recovered-only sandbox reconstruction, and retention cleanup.
 - `internal/control/id_registry.go` owns the shared bbolt-backed persistence bootstrap that opens `ids.db`, reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts, and shares the database handle with the persistent event store.
 - `internal/control/event_store.go` owns the event-store abstraction plus the persistent bbolt implementation used to replay sandbox history after daemon restart and to retain deleted sandbox streams until cleanup.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
 - `internal/profile` defines daemon-managed built-in resources such as `.claude`, `.codex`, `uv`, `npm`, `apt`, `gh-auth`, and `ssh-agent`.
 - `api/proto/service.proto` is the transport contract shared by the daemon, the Go SDK, and the Python SDK.
-- `sdk/go/rawclient` contains the synchronous transport-facing Go client that resolves the default socket path, dials the Unix socket, wraps raw RPCs, translates typed gRPC errors, and exposes the raw event-stream primitive.
+- `sdk/go/rawclient` contains the synchronous transport-facing Go client that resolves the default socket path, dials the Unix socket, wraps raw RPCs, translates typed gRPC errors, and exposes the raw event-stream primitive used by both the CLI and the high-level SDK.
 - `sdk/go/client` contains the public high-level Go SDK. It converts protobuf payloads into public Go types, exposes direct-parameter lifecycle and exec APIs, adds `wait` behavior, and bridges sandbox events into Go channels.
 - `sdk/python` contains a thin raw gRPC wrapper plus the public async `AgentsSandboxClient`, which adds `wait=True/False`, event-based waiting, sequence handling, and public handle models.
 
@@ -43,13 +44,13 @@ flowchart LR
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
 5. The runtime backend performs Docker-side work through a shared Docker Engine API client and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
 6. The service persists ordered events before updating in-memory state, exposes their numeric ordering through event sequences, and reconstructs recovered-only sandbox handles from that history after daemon restart.
-7. The Go and Python high-level SDKs optionally wait on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`, while `sdk/go/rawclient` keeps the transport contract visible without adding high-level wait semantics.
+7. The Go and Python high-level SDKs, along with the AgentsSandbox CLI `sandbox exec` command, optionally wait on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`, while `sdk/go/rawclient` keeps the transport contract visible without adding high-level wait semantics.
 
 ## Core Capabilities And Usage Scenarios
 
 ### Sandbox lifecycle management
 
-The daemon creates, resumes, stops, deletes, and lists sandboxes. Each sandbox gets:
+The daemon creates, resumes, stops, deletes, and lists sandboxes. The AgentsSandbox CLI exposes that same lifecycle surface for local operators. Each sandbox gets:
 
 - one primary container
 - one dedicated Docker network
@@ -58,6 +59,13 @@ The daemon creates, resumes, stops, deletes, and lists sandboxes. Each sandbox g
 
 This is the core path for products that need an isolated coding or execution environment with explicit lifecycle ownership.
 
+The CLI is useful for:
+
+- quick daemon reachability checks through `agbox ping`
+- sandbox creation, inspection, and deletion through `agbox sandbox create|get|delete`
+- label-based fleet operations through `agbox sandbox list` and `agbox sandbox delete --label`
+- ad hoc command execution inside an existing sandbox through `agbox sandbox exec`
+
 ### Command execution and direct output consumption
 
 Exec creation is asynchronous at the protocol layer, but the result model now carries `stdout`, `stderr`, `exit_code`, and terminal state directly in `ExecStatus`. The public Go and Python SDKs expose the same lifecycle contract through language-appropriate APIs:
@@ -65,6 +73,8 @@ Exec creation is asynchronous at the protocol layer, but the result model now ca
 - `create_exec(..., wait=False)` for accepted async execution
 - `create_exec(..., wait=True)` for event-driven waiting
 - `run(...)` as the direct "wait for completion and read stdout" path
+
+The AgentsSandbox CLI `sandbox exec` command uses the same accepted-state plus event-stream contract to wait for terminal exec state and print command output directly to the terminal.
 
 In Go, those calls live on `sdk/go/client`, while `sdk/go/rawclient` keeps the underlying accepted-state RPCs and raw event stream available to tools that want transport-level control. This supports both orchestration workflows and simple request-response command execution without relying on workspace result files.
 
