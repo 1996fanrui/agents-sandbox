@@ -85,10 +85,16 @@ else:
 
 `wait=True` adds SDK-side waiting on top of the protocol contract:
 
-- build a baseline with `GetSandbox` or `GetExec`
+- build a baseline snapshot with the authoritative read for the resource being waited on
 - subscribe to the sandbox event stream
-- use `cursor` and `sequence` to ignore replayed or stale events
+- use numeric event sequences to ignore replayed or stale events
 - fetch authoritative state again before returning
+
+For exec waits specifically:
+
+- the public `ExecHandle.last_event_sequence` returned by `get_exec`, `create_exec`, or `run` is the only supported handoff to `subscribe_sandbox_events`
+- the SDK must not borrow the sequence anchor from `GetSandbox`
+- the SDK must not fall back to timeout-driven `GetExec` polling
 
 Examples:
 
@@ -119,16 +125,16 @@ print(result.stdout)
 ```python
 async for event in client.subscribe_sandbox_events(
     sandbox_id,
-    from_cursor="0",
+    from_sequence=0,
 ):
     print(event.event_type.name, event.service_name, event.sequence)
 ```
 
 Important rules:
 
-- `from_cursor="0"` replays the full ordered event history for one sandbox
-- other cursors must be daemon-issued values from the same sandbox stream
-- callers must treat `cursor` and `sequence` as the ordering source of truth
+- `from_sequence=0` replays the full ordered event history for one sandbox
+- other sequence anchors must be daemon-issued event sequences from the same sandbox stream
+- callers must treat event sequences as the ordering source of truth
 - service lifecycle events use `SANDBOX_SERVICE_READY` and `SANDBOX_SERVICE_FAILED`
 
 ## Recommended Usage

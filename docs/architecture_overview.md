@@ -25,7 +25,7 @@ flowchart LR
 ### Main components
 
 - `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
-- `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, cursor generation, async operation orchestration, recovered-only sandbox reconstruction, and retention cleanup.
+- `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, sequence generation, async operation orchestration, recovered-only sandbox reconstruction, and retention cleanup.
 - `internal/control/id_registry.go` owns the shared bbolt-backed persistence bootstrap that opens `ids.db`, reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts, and shares the database handle with the persistent event store.
 - `internal/control/event_store.go` owns the event-store abstraction plus the persistent bbolt implementation used to replay sandbox history after daemon restart and to retain deleted sandbox streams until cleanup.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
@@ -33,7 +33,7 @@ flowchart LR
 - `api/proto/service.proto` is the transport contract shared by the daemon, the Go SDK, and the Python SDK.
 - `sdk/go/rawclient` contains the synchronous transport-facing Go client that resolves the default socket path, dials the Unix socket, wraps raw RPCs, translates typed gRPC errors, and exposes the raw event-stream primitive.
 - `sdk/go/client` contains the public high-level Go SDK. It converts protobuf payloads into public Go types, exposes direct-parameter lifecycle and exec APIs, adds `wait` behavior, and bridges sandbox events into Go channels.
-- `sdk/python` contains a thin raw gRPC wrapper plus the public async `AgentsSandboxClient`, which adds `wait=True/False`, event-based waiting, cursor handling, and public handle models.
+- `sdk/python` contains a thin raw gRPC wrapper plus the public async `AgentsSandboxClient`, which adds `wait=True/False`, event-based waiting, sequence handling, and public handle models.
 
 ### Primary request and event flow
 
@@ -42,7 +42,7 @@ flowchart LR
 3. During `CreateSandbox` and `CreateExec`, the daemon reserves the final `sandbox_id` or `exec_id` in the persistent historical ID registry before accepting the request. When the caller omits an ID, the daemon generates and reserves a UUID v4 first.
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
 5. The runtime backend performs Docker-side work through a shared Docker Engine API client and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
-6. The service persists ordered events before updating in-memory state, exposes them through `cursor` and `sequence`, and reconstructs recovered-only sandbox handles from that history after daemon restart.
+6. The service persists ordered events before updating in-memory state, exposes their numeric ordering through event sequences, and reconstructs recovered-only sandbox handles from that history after daemon restart.
 7. The Go and Python high-level SDKs optionally wait on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`, while `sdk/go/rawclient` keeps the transport contract visible without adding high-level wait semantics.
 
 ## Core Capabilities And Usage Scenarios
@@ -88,8 +88,8 @@ Services are declared explicitly as `required_services` or `optional_services` a
 
 The daemon exposes a per-sandbox ordered event stream with:
 
-- full replay from `from_cursor="0"`
-- daemon-issued `cursor` values for incremental replay
+- full replay from `from_sequence=0`
+- daemon-issued event sequence anchors for incremental replay
 - monotonic `sequence` numbers per sandbox
 - optional current-state snapshots for active exec visibility
 
@@ -140,6 +140,14 @@ This separation keeps the wire contract stable while letting each language expos
 
 Slow operations return after acceptance, not after completion. The service then exposes authoritative state through `GetSandbox` and `GetExec`, plus ordered events through `SubscribeSandboxEvents`. This keeps the protocol honest about asynchronous runtime work while still allowing the SDK to offer convenient waiting.
 
+### Exec snapshots join the sandbox event stream atomically
+
+Exec waits rely on sandbox events, so the protocol cannot ask SDKs to stitch an
+exec snapshot to a sandbox stream with a sequence anchor borrowed from some later or
+different read. `GetExec().exec.last_event_sequence` anchors the exec snapshot
+to the same ordered sandbox event stream, which lets SDK wait paths subscribe
+without a handoff race and without fallback polling.
+
 ### Historical IDs are reserved persistently, not only while a sandbox is live
 
 Caller-provided `sandbox_id` and `exec_id` values are part of the external contract, so the daemon does not treat them as temporary in-memory handles. It reserves them in a persistent registry before accepting create operations, which prevents accidental ID reuse after daemon restart and keeps conflict detection independent from Docker object discovery or any external product database.
@@ -150,7 +158,7 @@ The runtime backend uses a single Docker Engine API client per service instance 
 
 ### The Go SDK is explicitly split into raw and high-level layers
 
-`sdk/go/rawclient` owns socket resolution, dialing, raw RPC calls, error translation, and raw event streams. `sdk/go/client` owns public Go types, `wait` defaults, polling-plus-event wait paths, and channel-based subscription. Keeping those concerns separate lets transport-aware tools stay close to protobuf while ordinary Go callers get a smaller, more idiomatic API.
+`sdk/go/rawclient` owns socket resolution, dialing, raw RPC calls, error translation, and raw event streams. `sdk/go/client` owns public Go types, `wait` defaults, sequence-based wait paths, and channel-based subscription. Keeping those concerns separate lets transport-aware tools stay close to protobuf while ordinary Go callers get a smaller, more idiomatic API.
 
 ### The public SDKs are direct-parameter, not request-wrapper driven
 
