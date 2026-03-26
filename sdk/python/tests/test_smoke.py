@@ -94,22 +94,45 @@ def test_public_models_match_protocol_contract() -> None:
     assert service.healthcheck.test == ("CMD-SHELL", "pg_isready -U postgres")
     assert mount.target == "/workspace"
     assert copy.exclude_patterns == (".git",)
-    assert "payload" not in SandboxEvent.__annotations__
-    assert "service_name" in SandboxEvent.__annotations__
-    assert _underscored_name("dependency", "name") not in SandboxEvent.__annotations__
-    assert "created_at" not in SandboxHandle.__annotations__
-    assert "updated_at" not in SandboxHandle.__annotations__
-    assert "active_exec_ids" not in SandboxHandle.__annotations__
-    assert "created_at" not in ExecHandle.__annotations__
-    assert "updated_at" not in ExecHandle.__annotations__
-    assert "stdout" in ExecHandle.__annotations__
-    assert "stderr" in ExecHandle.__annotations__
-    assert "last_event_cursor" in SandboxHandle.__annotations__
-    assert "required_services" in SandboxHandle.__annotations__
-    assert "optional_services" in SandboxHandle.__annotations__
-    assert "labels" in SandboxHandle.__annotations__
-    assert "dependencies" not in SandboxHandle.__annotations__
-    assert "resolved_tooling_projections" not in SandboxHandle.__annotations__
+    assert set(SandboxEvent.__annotations__) == {
+        "event_id",
+        "sequence",
+        "cursor",
+        "sandbox_id",
+        "event_type",
+        "occurred_at",
+        "replay",
+        "snapshot",
+        "phase",
+        "service_name",
+        "error_code",
+        "error_message",
+        "reason",
+        "exec_id",
+        "exit_code",
+        "sandbox_state",
+        "exec_state",
+    }
+    assert set(SandboxHandle.__annotations__) == {
+        "sandbox_id",
+        "state",
+        "last_event_cursor",
+        "required_services",
+        "optional_services",
+        "labels",
+    }
+    assert set(ExecHandle.__annotations__) == {
+        "exec_id",
+        "sandbox_id",
+        "state",
+        "command",
+        "cwd",
+        "env_overrides",
+        "exit_code",
+        "error",
+        "stdout",
+        "stderr",
+    }
     assert DeleteSandboxesResult.__annotations__ == {
         "deleted_sandbox_ids": "tuple[str, ...]",
         "deleted_count": "int",
@@ -126,6 +149,25 @@ def test_sdk_exports_proto_backed_public_enums() -> None:
     assert ExecState(service_pb2.EXEC_STATE_FINISHED) is ExecState.FINISHED
     assert ExecState.FINISHED.is_terminal is True
     assert ExecState.RUNNING.is_terminal is False
+    assert {
+        service_pb2.SANDBOX_READY: "sandbox_ready",
+        service_pb2.SANDBOX_FAILED: "sandbox_failed",
+        service_pb2.EXEC_STARTED: "exec_started",
+        service_pb2.EXEC_FINISHED: "exec_finished",
+        service_pb2.EXEC_FAILED: "exec_failed",
+        service_pb2.EXEC_CANCELLED: "exec_cancelled",
+        service_pb2.SANDBOX_SERVICE_READY: "sandbox_service_ready",
+        service_pb2.SANDBOX_SERVICE_FAILED: "sandbox_service_failed",
+    } == {
+        3: "sandbox_ready",
+        4: "sandbox_failed",
+        9: "exec_started",
+        10: "exec_finished",
+        11: "exec_failed",
+        12: "exec_cancelled",
+        13: "sandbox_service_ready",
+        14: "sandbox_service_failed",
+    }
     assert SandboxEventType(service_pb2.EXEC_FINISHED) is SandboxEventType.EXEC_FINISHED
     assert (
         SandboxEventType(service_pb2.SANDBOX_SERVICE_READY)

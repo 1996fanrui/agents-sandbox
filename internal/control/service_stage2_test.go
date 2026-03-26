@@ -55,6 +55,31 @@ func (*scriptedRuntimeBackend) RunExec(context.Context, *sandboxRecord, *agboxv1
 	return runtimeExecResult{ExitCode: 0}, nil
 }
 
+func assertMessageFieldNames(t *testing.T, descriptor protoreflect.MessageDescriptor, want []string) {
+	t.Helper()
+	fields := descriptor.Fields()
+	got := make([]string, 0, fields.Len())
+	for i := 0; i < fields.Len(); i++ {
+		got = append(got, string(fields.Get(i).Name()))
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("unexpected fields for %s: got %v want %v", descriptor.FullName(), got, want)
+	}
+}
+
+func assertMessageFieldNumbers(t *testing.T, descriptor protoreflect.MessageDescriptor, want map[string]protoreflect.FieldNumber) {
+	t.Helper()
+	fields := descriptor.Fields()
+	got := make(map[string]protoreflect.FieldNumber, fields.Len())
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		got[string(field.Name())] = field.Number()
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected field numbers for %s: got %v want %v", descriptor.FullName(), got, want)
+	}
+}
+
 func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 	backend := &scriptedRuntimeBackend{
 		createResult: runtimeCreateResult{
@@ -1035,7 +1060,7 @@ func TestServiceLifecycleForResumeStopAndDelete(t *testing.T) {
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 }
 
-func TestBuiltinResourcesStillWorkWithoutLegacyProjectionAPI(t *testing.T) {
+func TestBuiltinResourcesForwardedToRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -1058,14 +1083,132 @@ func TestBuiltinResourcesStillWorkWithoutLegacyProjectionAPI(t *testing.T) {
 	if runtime.lastCreateSpec == nil || len(runtime.lastCreateSpec.GetBuiltinResources()) != 1 || runtime.lastCreateSpec.GetBuiltinResources()[0] != ".claude" {
 		t.Fatalf("builtin_resources were not forwarded to runtime: %#v", runtime.lastCreateSpec)
 	}
-	if _, ok := reflect.TypeOf(agboxv1.CreateSpec{}).FieldByName("Workspace"); ok {
-		t.Fatal("legacy workspace field should not exist")
+}
+
+func TestProtoMessageFieldContracts(t *testing.T) {
+	testCases := []struct {
+		name       string
+		descriptor protoreflect.MessageDescriptor
+		fieldNames []string
+		fieldNums  map[string]protoreflect.FieldNumber
+	}{
+		{
+			name:       "CreateSpec",
+			descriptor: (&agboxv1.CreateSpec{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"image",
+				"mounts",
+				"copies",
+				"builtin_resources",
+				"required_services",
+				"optional_services",
+				"labels",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"image":             1,
+				"mounts":            2,
+				"copies":            3,
+				"builtin_resources": 4,
+				"required_services": 5,
+				"optional_services": 6,
+				"labels":            7,
+			},
+		},
+		{
+			name:       "SandboxHandle",
+			descriptor: (&agboxv1.SandboxHandle{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"sandbox_id",
+				"state",
+				"last_event_cursor",
+				"required_services",
+				"optional_services",
+				"labels",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"sandbox_id":        1,
+				"state":             2,
+				"last_event_cursor": 3,
+				"required_services": 4,
+				"optional_services": 5,
+				"labels":            6,
+			},
+		},
+		{
+			name:       "SandboxEvent",
+			descriptor: (&agboxv1.SandboxEvent{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"event_id",
+				"sequence",
+				"cursor",
+				"sandbox_id",
+				"event_type",
+				"occurred_at",
+				"replay",
+				"snapshot",
+				"phase",
+				"error_code",
+				"error_message",
+				"reason",
+				"exec_id",
+				"exit_code",
+				"sandbox_state",
+				"exec_state",
+				"service_name",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"event_id":      1,
+				"sequence":      2,
+				"cursor":        3,
+				"sandbox_id":    4,
+				"event_type":    5,
+				"occurred_at":   6,
+				"replay":        7,
+				"snapshot":      8,
+				"phase":         9,
+				"error_code":    10,
+				"error_message": 11,
+				"reason":        12,
+				"exec_id":       13,
+				"exit_code":     14,
+				"sandbox_state": 15,
+				"exec_state":    16,
+				"service_name":  17,
+			},
+		},
+		{
+			name:       "CreateSandboxRequest",
+			descriptor: (&agboxv1.CreateSandboxRequest{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"create_spec",
+				"caller_metadata",
+				"sandbox_id",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"create_spec":     1,
+				"caller_metadata": 2,
+				"sandbox_id":      3,
+			},
+		},
+		{
+			name:       "ListSandboxesRequest",
+			descriptor: (&agboxv1.ListSandboxesRequest{}).ProtoReflect().Descriptor(),
+			fieldNames: []string{
+				"include_deleted",
+				"label_selector",
+			},
+			fieldNums: map[string]protoreflect.FieldNumber{
+				"include_deleted": 1,
+				"label_selector":  2,
+			},
+		},
 	}
-	if _, ok := reflect.TypeOf(agboxv1.CreateSpec{}).FieldByName("ToolingProjections"); ok {
-		t.Fatal("legacy tooling_projections field should not exist")
-	}
-	if _, ok := reflect.TypeOf(agboxv1.SandboxHandle{}).FieldByName("ResolvedToolingProjections"); ok {
-		t.Fatal("legacy resolved_tooling_projections field should not exist")
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assertMessageFieldNames(t, testCase.descriptor, testCase.fieldNames)
+			assertMessageFieldNumbers(t, testCase.descriptor, testCase.fieldNums)
+		})
 	}
 }
 
@@ -1124,27 +1267,21 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 
 func TestProtoEventTypesForServices(t *testing.T) {
 	values := agboxv1.EventType(0).Descriptor().Values()
+	sandboxReady := values.ByName("SANDBOX_READY")
 	ready := values.ByName("SANDBOX_SERVICE_READY")
 	failed := values.ByName("SANDBOX_SERVICE_FAILED")
-	if ready == nil || failed == nil {
-		t.Fatalf("service event enums are missing: ready=%v failed=%v", ready, failed)
+	if sandboxReady == nil || ready == nil || failed == nil {
+		t.Fatalf("service event enums are missing: sandbox_ready=%v ready=%v failed=%v", sandboxReady, ready, failed)
 	}
-	if ready.Number() != 14 || failed.Number() != 15 {
+	if sandboxReady.Number() != 3 {
+		t.Fatalf("unexpected sandbox ready enum number: got=%d want=3", sandboxReady.Number())
+	}
+	if ready.Number() != 13 || failed.Number() != 14 {
 		t.Fatalf("unexpected service event enum numbers: ready=%d failed=%d", ready.Number(), failed.Number())
 	}
 	legacyName := strings.Join([]string{"SANDBOX", "DEPENDENCY", "READY"}, "_")
 	if values.ByName(protoreflect.Name(legacyName)) != nil {
 		t.Fatal("legacy dependency event enum should not exist")
-	}
-}
-
-func TestServiceEventFieldNames(t *testing.T) {
-	eventType := reflect.TypeOf(agboxv1.SandboxEvent{})
-	if _, ok := eventType.FieldByName("ServiceName"); !ok {
-		t.Fatal("SandboxEvent should expose ServiceName")
-	}
-	if _, ok := eventType.FieldByName("DependencyName"); ok {
-		t.Fatal("SandboxEvent should not expose DependencyName")
 	}
 }
 
