@@ -368,10 +368,14 @@ class CreateExecRequest(_message.Message):
     def __init__(self, sandbox_id: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exec_id: _Optional[str] = ...) -> None: ...
 
 class CreateExecResponse(_message.Message):
-    __slots__ = ("exec_id",)
+    __slots__ = ("exec_id", "stdout_log_path", "stderr_log_path")
     EXEC_ID_FIELD_NUMBER: _ClassVar[int]
+    STDOUT_LOG_PATH_FIELD_NUMBER: _ClassVar[int]
+    STDERR_LOG_PATH_FIELD_NUMBER: _ClassVar[int]
     exec_id: str
-    def __init__(self, exec_id: _Optional[str] = ...) -> None: ...
+    stdout_log_path: str
+    stderr_log_path: str
+    def __init__(self, exec_id: _Optional[str] = ..., stdout_log_path: _Optional[str] = ..., stderr_log_path: _Optional[str] = ...) -> None: ...
 
 class CancelExecRequest(_message.Message):
     __slots__ = ("exec_id",)

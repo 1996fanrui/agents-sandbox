@@ -1790,6 +1790,8 @@ func (x *CreateExecRequest) GetExecId() string {
 type CreateExecResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ExecId        string                 `protobuf:"bytes,1,opt,name=exec_id,json=execId,proto3" json:"exec_id,omitempty"`
+	StdoutLogPath string                 `protobuf:"bytes,2,opt,name=stdout_log_path,json=stdoutLogPath,proto3" json:"stdout_log_path,omitempty"`
+	StderrLogPath string                 `protobuf:"bytes,3,opt,name=stderr_log_path,json=stderrLogPath,proto3" json:"stderr_log_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1827,6 +1829,20 @@ func (*CreateExecResponse) Descriptor() ([]byte, []int) {
 func (x *CreateExecResponse) GetExecId() string {
 	if x != nil {
 		return x.ExecId
+	}
+	return ""
+}
+
+func (x *CreateExecResponse) GetStdoutLogPath() string {
+	if x != nil {
+		return x.StdoutLogPath
+	}
+	return ""
+}
+
+func (x *CreateExecResponse) GetStderrLogPath() string {
+	if x != nil {
+		return x.StderrLogPath
 	}
 	return ""
 }
@@ -2194,9 +2210,11 @@ const file_service_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x03(\tR\acommand\x12\x10\n" +
 	"\x03cwd\x18\x03 \x01(\tR\x03cwd\x127\n" +
 	"\renv_overrides\x18\x04 \x03(\v2\x12.agbox.v1.KeyValueR\fenvOverrides\x12\x17\n" +
-	"\aexec_id\x18\x05 \x01(\tR\x06execId\"-\n" +
+	"\aexec_id\x18\x05 \x01(\tR\x06execId\"}\n" +
 	"\x12CreateExecResponse\x12\x17\n" +
-	"\aexec_id\x18\x01 \x01(\tR\x06execId\",\n" +
+	"\aexec_id\x18\x01 \x01(\tR\x06execId\x12&\n" +
+	"\x0fstdout_log_path\x18\x02 \x01(\tR\rstdoutLogPath\x12&\n" +
+	"\x0fstderr_log_path\x18\x03 \x01(\tR\rstderrLogPath\",\n" +
 	"\x11CancelExecRequest\x12\x17\n" +
 	"\aexec_id\x18\x01 \x01(\tR\x06execId\")\n" +
 	"\x0eGetExecRequest\x12\x17\n" +

@@ -2,7 +2,10 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -26,6 +29,29 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		return
 	}
 	s.mu.Unlock()
+
+	// Pre-create the sandbox-scoped exec log directory on the host so the docker bind-mount succeeds.
+	if s.config.ArtifactOutputRoot != "" {
+		execLogHostDir := filepath.Join(s.config.ArtifactOutputRoot, sandboxID)
+		if err := os.MkdirAll(execLogHostDir, 0o755); err != nil {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			record, ok := s.boxes[sandboxID]
+			if !ok {
+				return
+			}
+			if appendErr := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+				errorCode:    "SANDBOX_CREATE_FAILED",
+				errorMessage: fmt.Sprintf("create exec log directory: %v", err),
+				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+			}); appendErr != nil {
+				logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_SANDBOX_FAILED, appendErr)
+				return
+			}
+			record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+			return
+		}
+	}
 
 	result, err := s.config.runtimeBackend.CreateSandbox(context.Background(), record)
 
@@ -271,11 +297,11 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 	go s.scheduleIdleStop(sandboxID)
 }
 
-func (s *Service) prepareExecArtifactPath(sandboxID string, execID string) (string, error) {
+func (s *Service) prepareExecArtifactPaths(sandboxID string, execID string) (execArtifactPaths, error) {
 	if s.config.ArtifactOutputRoot == "" || s.config.ArtifactOutputTemplate == "" {
-		return "", nil
+		return execArtifactPaths{}, nil
 	}
-	return prepareExecOutputPath(
+	return prepareExecOutputPaths(
 		s.config.ArtifactOutputRoot,
 		s.config.ArtifactOutputTemplate,
 		map[string]string{

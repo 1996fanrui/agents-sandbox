@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -156,7 +155,18 @@ func validateGenericSourcePath(kind string, source string) error {
 	return nil
 }
 
-func prepareExecOutputPath(root string, template string, fields map[string]string) (string, error) {
+func prepareExecOutputPaths(root string, template string, fields map[string]string) (execArtifactPaths, error) {
+	prefix, err := prepareExecOutputPrefix(root, template, fields)
+	if err != nil {
+		return execArtifactPaths{}, err
+	}
+	return execArtifactPaths{
+		StdoutPath: prefix + ".stdout.log",
+		StderrPath: prefix + ".stderr.log",
+	}, nil
+}
+
+func prepareExecOutputPrefix(root string, template string, fields map[string]string) (string, error) {
 	relativePath, err := expandArtifactTemplate(template, fields)
 	if err != nil {
 		return "", err
@@ -175,8 +185,8 @@ func prepareExecOutputPath(root string, template string, fields map[string]strin
 	if err := os.MkdirAll(rootAbs, 0o755); err != nil {
 		return "", err
 	}
-	targetPath := filepath.Join(rootAbs, cleanRelative)
-	parentPath := filepath.Dir(targetPath)
+	targetPrefix := filepath.Join(rootAbs, cleanRelative)
+	parentPath := filepath.Dir(targetPrefix)
 	if err := os.MkdirAll(parentPath, 0o755); err != nil {
 		return "", err
 	}
@@ -187,27 +197,7 @@ func prepareExecOutputPath(root string, template string, fields map[string]strin
 	if !pathWithinRoot(rootAbs, parentRealPath) {
 		return "", errArtifactPathEscapesRoot
 	}
-	targetInfo, err := os.Lstat(targetPath)
-	if err == nil {
-		if targetInfo.Mode()&os.ModeSymlink != 0 {
-			return "", errArtifactPathUsesSymlink
-		}
-		if usesHardlink(targetInfo) {
-			return "", errArtifactPathUsesHardlink
-		}
-		return targetPath, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	return targetPath, nil
+	return targetPrefix, nil
 }
 
 func expandArtifactTemplate(template string, fields map[string]string) (string, error) {
@@ -230,9 +220,4 @@ func pathWithinRoot(root string, candidate string) bool {
 		return false
 	}
 	return relative == "." || (!strings.HasPrefix(relative, ".."+string(filepath.Separator)) && relative != "..")
-}
-
-func usesHardlink(info os.FileInfo) bool {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Nlink > 1
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import platform
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -272,15 +273,27 @@ class AgentsSandboxClient:
             self._rpc_client.create_exec,
             to_proto_create_exec_request(request),
         )
+        stdout_log_path = response.stdout_log_path or None
+        stderr_log_path = response.stderr_log_path or None
         current, last_event_sequence = await self._get_exec_snapshot(response.exec_id)
+        current = dataclasses.replace(
+            current,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
+        )
         if not wait:
             return current
-        return await self._wait_for_exec_terminal(
+        handle = await self._wait_for_exec_terminal(
             exec_id=response.exec_id,
             sandbox_id=sandbox_id,
             baseline=current,
             baseline_sequence=last_event_sequence,
             operation_name="create_exec",
+        )
+        return dataclasses.replace(
+            handle,
+            stdout_log_path=stdout_log_path,
+            stderr_log_path=stderr_log_path,
         )
 
     async def run(

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -42,7 +41,7 @@ func DefaultServiceConfig() ServiceConfig {
 		PollInterval:           10 * time.Millisecond,
 		IdleTTL:                30 * time.Minute,
 		EventRetentionTTL:      168 * time.Hour,
-		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
 		Version:                "0.1.0",
 		DaemonName:             "agboxd",
 		LogLevel:               "info",
@@ -60,10 +59,15 @@ type Service struct {
 
 var (
 	errArtifactPathEscapesRoot    = errors.New("artifact path escapes configured root")
-	errArtifactPathUsesSymlink    = errors.New("artifact path uses symlink boundary")
-	errArtifactPathUsesHardlink   = errors.New("artifact path uses hardlink boundary")
 	errArtifactTemplateFieldEmpty = errors.New("artifact template field is empty")
 )
+
+// execArtifactPaths holds the host-side log file paths for a single exec.
+// These paths correspond to the files written by the container via the bind-mounted exec log directory.
+type execArtifactPaths struct {
+	StdoutPath string
+	StderrPath string
+}
 
 type sandboxRecord struct {
 	handle                    *agboxv1.SandboxHandle
@@ -459,7 +463,7 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	if err != nil {
 		return nil, err
 	}
-	artifactPath, artifactErr := s.prepareExecArtifactPath(record.handle.GetSandboxId(), execID)
+	artifactPaths, artifactErr := s.prepareExecArtifactPaths(record.handle.GetSandboxId(), execID)
 	if artifactErr != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "prepare exec artifact output: %v", artifactErr)
 	}
@@ -476,9 +480,6 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		execState: agboxv1.ExecState_EXEC_STATE_RUNNING,
 	}); err != nil {
 		cleanupErr := s.config.idRegistry.ReleaseExecID(execID)
-		if artifactPath != "" {
-			cleanupErr = errors.Join(cleanupErr, os.Remove(artifactPath))
-		}
 		if cleanupErr != nil {
 			err = errors.Join(err, cleanupErr)
 		}
@@ -490,7 +491,11 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	record.execCancel[execID] = cancel
 	go s.completeExec(execContext, execID)
 	s.config.Logger.Info("exec started", slog.String("sandbox_id", req.GetSandboxId()), slog.String("exec_id", execID))
-	return &agboxv1.CreateExecResponse{ExecId: execID}, nil
+	return &agboxv1.CreateExecResponse{
+		ExecId:        execID,
+		StdoutLogPath: artifactPaths.StdoutPath,
+		StderrLogPath: artifactPaths.StderrPath,
+	}, nil
 }
 
 func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) (*agboxv1.AcceptedResponse, error) {

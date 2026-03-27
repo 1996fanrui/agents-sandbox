@@ -21,6 +21,7 @@ Product-specific lifecycle semantics such as archive states stay outside this re
 | Service containers | `agents-sandbox` | Required and optional services declared via `ServiceSpec`, attached to the same dedicated network |
 | Persistent event history | `agents-sandbox` | Stored in bbolt so lifecycle and exec events survive daemon restart until retention cleanup removes deleted streams |
 | Exec output artifacts | `agents-sandbox` | Files created under the configured artifact root |
+| Exec log bind-mount | `agents-sandbox` | Bind-mounts `{ArtifactOutputRoot}/{sandbox_id}/` to `/var/log/agents-sandbox/` (read-write) in primary container; each exec writes `{exec_id}.stdout.log` and `{exec_id}.stderr.log` |
 
 Docker object labels must use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`.
 User-defined sandbox labels are propagated to the dedicated network, primary container, and service containers with the user namespace prefix `io.github.1996fanrui.agents-sandbox.user.<key>`.
@@ -96,7 +97,8 @@ flowchart TB
     B --> C[Validate create spec]
     C --> D[Create dedicated network]
     D --> E[Materialize filesystem inputs and built-in resources]
-    E --> F[Create required and optional service containers]
+    E --> E1[Create exec log directory and bind-mount into primary container]
+    E1 --> F[Create required and optional service containers]
     F --> G[Start and wait each required service healthy]
     G --> H[Start primary and optional services]
     H --> I[Run post_start_on_primary for required services]

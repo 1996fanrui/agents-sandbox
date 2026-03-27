@@ -217,6 +217,8 @@ message CreateExecRequest {
 
 message CreateExecResponse {
   string exec_id = 1;
+  string stdout_log_path = 2;
+  string stderr_log_path = 3;
 }
 
 message CancelExecRequest {
