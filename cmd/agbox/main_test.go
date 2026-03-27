@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,7 +38,9 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	service, closer, err := control.NewService(control.DefaultServiceConfig())
+	cfg := control.DefaultServiceConfig()
+	cfg.Logger = slog.Default()
+	service, closer, err := control.NewService(cfg)
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}

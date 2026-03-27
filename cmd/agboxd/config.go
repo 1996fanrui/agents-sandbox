@@ -23,6 +23,7 @@ type daemonFileConfig struct {
 		IdleTTL           string `toml:"idle_ttl"`
 		EventRetentionTTL string `toml:"event_retention_ttl"`
 		StateRoot         string `toml:"state_root"`
+		LogLevel          string `toml:"log_level"`
 	} `toml:"runtime"`
 	Artifacts struct {
 		ExecOutputRoot     string `toml:"exec_output_root"`
@@ -104,6 +105,9 @@ func applyFileConfig(
 	}
 	if fileConfig.Runtime.StateRoot != "" {
 		serviceConfig.StateRoot = fileConfig.Runtime.StateRoot
+	}
+	if fileConfig.Runtime.LogLevel != "" {
+		serviceConfig.LogLevel = fileConfig.Runtime.LogLevel
 	}
 	if fileConfig.Artifacts.ExecOutputRoot != "" {
 		serviceConfig.ArtifactOutputRoot = fileConfig.Artifacts.ExecOutputRoot

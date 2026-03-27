@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"regexp"
 	"slices"
@@ -28,6 +29,8 @@ type ServiceConfig struct {
 	ArtifactOutputTemplate string
 	Version                string
 	DaemonName             string
+	LogLevel               string
+	Logger                 *slog.Logger
 	runtimeBackend         runtimeBackend
 	idRegistry             idRegistry
 	eventStore             eventStore
@@ -42,6 +45,7 @@ func DefaultServiceConfig() ServiceConfig {
 		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
 		Version:                "0.1.0",
 		DaemonName:             "agboxd",
+		LogLevel:               "info",
 	}
 }
 
@@ -92,6 +96,9 @@ type eventMutation struct {
 var callerProvidedIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{2,198}[a-zA-Z0-9]$`)
 
 func NewService(config ServiceConfig) (*Service, io.Closer, error) {
+	if config.Logger == nil {
+		return nil, nil, errors.New("ServiceConfig.Logger must not be nil")
+	}
 	defaults := DefaultServiceConfig()
 	if config.TransitionDelay <= 0 {
 		config.TransitionDelay = defaults.TransitionDelay

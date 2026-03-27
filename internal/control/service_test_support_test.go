@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"testing"
@@ -87,6 +88,9 @@ func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxService
 	if config.runtimeBackend == nil {
 		config.runtimeBackend = fakeRuntimeBackend{}
 	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -124,6 +128,9 @@ func newPersistentBufconnHarness(t *testing.T, ctx context.Context, config Servi
 	t.Helper()
 	if config.runtimeBackend == nil {
 		config.runtimeBackend = fakeRuntimeBackend{}
+	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
 	}
 
 	listener := bufconn.Listen(1024 * 1024)
