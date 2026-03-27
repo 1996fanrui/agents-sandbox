@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,20 +15,18 @@ import (
 
 const execCancelTimeout = time.Second
 
-func runSandboxExec(ctx context.Context, client sandboxExecClient, args []string, stdout io.Writer, stderr io.Writer) error {
+func runSandboxExec(ctx context.Context, client sandboxExecClient, args []string) error {
 	signalCh := make(chan os.Signal, 2)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signalCh)
 
-	return runSandboxExecWithSignals(ctx, client, args, stdout, stderr, signalCh)
+	return runSandboxExecWithSignals(ctx, client, args, signalCh)
 }
 
 func runSandboxExecWithSignals(
 	ctx context.Context,
 	client sandboxExecClient,
 	args []string,
-	stdout io.Writer,
-	stderr io.Writer,
 	signalCh <-chan os.Signal,
 ) error {
 	parsed, err := parseSandboxExecArgs(args)
@@ -78,14 +75,8 @@ func runSandboxExecWithSignals(
 					return runtimeErrorf("cancel exec: %v", cancelErr)
 				}
 			} else {
-				if err := writeExecTerminalOutput(stdout, stderr, baseline); err != nil {
-					return err
-				}
 				return exitCodeError(signalCode)
 			}
-		}
-		if err := writeExecTerminalOutput(stdout, stderr, baseline); err != nil {
-			return err
 		}
 		return exitCodeError(execExitCode(baseline.GetState(), baseline.GetExitCode(), 0))
 	}
@@ -137,9 +128,6 @@ func runSandboxExecWithSignals(
 				return runtimeErrorf("get exec: %v", err)
 			}
 			if isTerminalExecState(current.GetState()) {
-				if err := writeExecTerminalOutput(stdout, stderr, current); err != nil {
-					return err
-				}
 				if signalOverridesExitCode {
 					return exitCodeError(signalCode)
 				}
@@ -235,15 +223,3 @@ func execExitCode(state agboxv1.ExecState, exitCode int32, signalCode int) int {
 	}
 }
 
-func writeExecTerminalOutput(stdout io.Writer, stderr io.Writer, execStatus *agboxv1.ExecStatus) error {
-	if execStatus == nil {
-		return fmt.Errorf("exec status is required")
-	}
-	if _, err := io.WriteString(stdout, execStatus.GetStdout()); err != nil {
-		return runtimeErrorf("write exec stdout: %v", err)
-	}
-	if _, err := io.WriteString(stderr, execStatus.GetStderr()); err != nil {
-		return runtimeErrorf("write exec stderr: %v", err)
-	}
-	return nil
-}

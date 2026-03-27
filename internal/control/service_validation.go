@@ -161,8 +161,6 @@ func writeExecArtifact(path string, execRecord *agboxv1.ExecStatus) error {
 	payload, err := json.Marshal(map[string]any{
 		"state":     execRecord.GetState().String(),
 		"exit_code": execRecord.GetExitCode(),
-		"stdout":    execRecord.GetStdout(),
-		"stderr":    execRecord.GetStderr(),
 	})
 	if err != nil {
 		return err

@@ -529,8 +529,6 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"env_overrides",
 				"exit_code",
 				"error",
-				"stdout",
-				"stderr",
 				"last_event_sequence",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
@@ -542,9 +540,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"env_overrides":       6,
 				"exit_code":           7,
 				"error":               8,
-				"stdout":              9,
-				"stderr":              10,
-				"last_event_sequence": 11,
+				"last_event_sequence": 9,
 			},
 		},
 		{
@@ -552,13 +548,11 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			descriptor: (&agboxv1.CreateSandboxRequest{}).ProtoReflect().Descriptor(),
 			fieldNames: []string{
 				"create_spec",
-				"caller_metadata",
 				"sandbox_id",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"create_spec":     1,
-				"caller_metadata": 2,
-				"sandbox_id":      3,
+				"create_spec": 1,
+				"sandbox_id":  2,
 			},
 		},
 		{

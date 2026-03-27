@@ -68,7 +68,7 @@ func runSandboxWithClient(ctx context.Context, client sandboxExecClient, args []
 	case "delete":
 		return runSandboxDelete(ctx, client, args[1:], stdout)
 	case "exec":
-		return runSandboxExec(ctx, client, args[1:], stdout, stderr)
+		return runSandboxExec(ctx, client, args[1:])
 	default:
 		return usageErrorf("sandbox command dispatcher reached unknown subcommand %q", subcommand)
 	}

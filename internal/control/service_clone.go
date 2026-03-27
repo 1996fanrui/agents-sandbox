@@ -167,8 +167,6 @@ func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {
 		EnvOverrides:      cloneKeyValues(execRecord.GetEnvOverrides()),
 		ExitCode:          execRecord.GetExitCode(),
 		Error:             execRecord.GetError(),
-		Stdout:            execRecord.GetStdout(),
-		Stderr:            execRecord.GetStderr(),
 		LastEventSequence: execRecord.GetLastEventSequence(),
 	}
 }

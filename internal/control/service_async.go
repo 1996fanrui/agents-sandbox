@@ -249,16 +249,12 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 		delete(record.execCancel, execID)
 		execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
 		execRecord.ExitCode = result.ExitCode
-		execRecord.Stdout = result.Stdout
-		execRecord.Stderr = result.Stderr
 		execRecord.Error = execErrorMessage
 		return
 	}
 	finishedExec := cloneExec(execRecord)
 	finishedExec.State = agboxv1.ExecState_EXEC_STATE_FINISHED
 	finishedExec.ExitCode = result.ExitCode
-	finishedExec.Stdout = result.Stdout
-	finishedExec.Stderr = result.Stderr
 	if artifactPath := record.execArtifacts[execID]; artifactPath != "" {
 		if err := writeExecArtifact(artifactPath, finishedExec); err != nil {
 			artifactError := fmt.Sprintf("write exec artifact: %v", err)
@@ -274,8 +270,6 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 			delete(record.execCancel, execID)
 			execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
 			execRecord.ExitCode = result.ExitCode
-			execRecord.Stdout = result.Stdout
-			execRecord.Stderr = result.Stderr
 			execRecord.Error = artifactError
 			record.lastTerminalRunFinishedAt = time.Now().UTC()
 			return
@@ -292,8 +286,6 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 	delete(record.execCancel, execID)
 	execRecord.State = agboxv1.ExecState_EXEC_STATE_FINISHED
 	execRecord.ExitCode = result.ExitCode
-	execRecord.Stdout = result.Stdout
-	execRecord.Stderr = result.Stderr
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
 	go s.scheduleIdleStop(sandboxID)
 }

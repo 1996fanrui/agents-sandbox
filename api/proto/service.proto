@@ -65,12 +65,6 @@ message PingResponse {
   string daemon = 2;
 }
 
-message CallerMetadata {
-  string product = 1;
-  string session_id = 2;
-  string run_id = 3;
-}
-
 message KeyValue {
   string key = 1;
   string value = 2;
@@ -152,15 +146,12 @@ message ExecStatus {
   repeated KeyValue env_overrides = 6;
   int32 exit_code = 7;
   string error = 8;
-  string stdout = 9;
-  string stderr = 10;
-  uint64 last_event_sequence = 11;
+  uint64 last_event_sequence = 9;
 }
 
 message CreateSandboxRequest {
   CreateSpec create_spec = 1;
-  CallerMetadata caller_metadata = 2;
-  string sandbox_id = 3;
+  string sandbox_id = 2;
 }
 
 message CreateSandboxResponse {
@@ -221,8 +212,7 @@ message CreateExecRequest {
   repeated string command = 2;
   string cwd = 3;
   repeated KeyValue env_overrides = 4;
-  CallerMetadata caller_metadata = 5;
-  string exec_id = 6;
+  string exec_id = 5;
 }
 
 message CreateExecResponse {

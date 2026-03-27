@@ -59,16 +59,11 @@ func TestConversions(t *testing.T) {
 		State:             agboxv1.ExecState_EXEC_STATE_RUNNING,
 		Command:           []string{"echo", "hello"},
 		Cwd:               "/workspace",
-		Stdout:            "partial",
-		Stderr:            "warn",
 		ExitCode:          0,
 		LastEventSequence: 3,
 	})
 	if running.ExitCode != nil {
 		t.Fatalf("running exec should not expose exit code: %#v", running)
-	}
-	if running.Stdout == nil || *running.Stdout != "partial" {
-		t.Fatalf("unexpected running stdout: %#v", running.Stdout)
 	}
 	if running.LastEventSequence != 3 {
 		t.Fatalf("unexpected running last event sequence: %#v", running.LastEventSequence)
@@ -80,7 +75,6 @@ func TestConversions(t *testing.T) {
 		State:             agboxv1.ExecState_EXEC_STATE_FINISHED,
 		Command:           []string{"echo", "hello"},
 		Cwd:               "/workspace",
-		Stdout:            "done",
 		ExitCode:          7,
 		LastEventSequence: 7,
 	})
@@ -472,11 +466,9 @@ func TestExecOperations(t *testing.T) {
 		base.getExecFn = func(_ context.Context, execID string) (*agboxv1.GetExecResponse, error) {
 			getExecCalls++
 			state := agboxv1.ExecState_EXEC_STATE_RUNNING
-			stdout := ""
 			sequence := uint64(10)
 			if getExecCalls >= 2 {
 				state = agboxv1.ExecState_EXEC_STATE_FINISHED
-				stdout = "hello"
 				sequence = 12
 			}
 			return &agboxv1.GetExecResponse{
@@ -486,7 +478,6 @@ func TestExecOperations(t *testing.T) {
 					State:             state,
 					Command:           []string{"echo", "hello"},
 					Cwd:               "/workspace",
-					Stdout:            stdout,
 					ExitCode:          0,
 					LastEventSequence: sequence,
 				},
@@ -524,7 +515,6 @@ func TestExecOperations(t *testing.T) {
 					State:             agboxv1.ExecState_EXEC_STATE_FINISHED,
 					Command:           []string{"echo", "hello"},
 					Cwd:               "/workspace",
-					Stdout:            "hello",
 					ExitCode:          0,
 					LastEventSequence: 12,
 				},
@@ -533,9 +523,6 @@ func TestExecOperations(t *testing.T) {
 		runHandle, err := client.Run(context.Background(), "sandbox-1", []string{"echo", "hello"})
 		if err != nil {
 			t.Fatalf("Run failed: %v", err)
-		}
-		if runHandle.Stdout == nil || *runHandle.Stdout != "hello" {
-			t.Fatalf("unexpected run stdout: %#v", runHandle.Stdout)
 		}
 		if runHandle.LastEventSequence != 12 {
 			t.Fatalf("unexpected run sequence: %d", runHandle.LastEventSequence)

@@ -85,16 +85,6 @@ class PingResponse(_message.Message):
     daemon: str
     def __init__(self, version: _Optional[str] = ..., daemon: _Optional[str] = ...) -> None: ...
 
-class CallerMetadata(_message.Message):
-    __slots__ = ("product", "session_id", "run_id")
-    PRODUCT_FIELD_NUMBER: _ClassVar[int]
-    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
-    RUN_ID_FIELD_NUMBER: _ClassVar[int]
-    product: str
-    session_id: str
-    run_id: str
-    def __init__(self, product: _Optional[str] = ..., session_id: _Optional[str] = ..., run_id: _Optional[str] = ...) -> None: ...
-
 class KeyValue(_message.Message):
     __slots__ = ("key", "value")
     KEY_FIELD_NUMBER: _ClassVar[int]
@@ -238,7 +228,7 @@ class SandboxEvent(_message.Message):
     def __init__(self, event_id: _Optional[str] = ..., sequence: _Optional[int] = ..., sandbox_id: _Optional[str] = ..., event_type: _Optional[_Union[EventType, str]] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., replay: bool = ..., snapshot: bool = ..., phase: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., reason: _Optional[str] = ..., exec_id: _Optional[str] = ..., exit_code: _Optional[int] = ..., sandbox_state: _Optional[_Union[SandboxState, str]] = ..., exec_state: _Optional[_Union[ExecState, str]] = ..., service_name: _Optional[str] = ...) -> None: ...
 
 class ExecStatus(_message.Message):
-    __slots__ = ("exec_id", "sandbox_id", "state", "command", "cwd", "env_overrides", "exit_code", "error", "stdout", "stderr", "last_event_sequence")
+    __slots__ = ("exec_id", "sandbox_id", "state", "command", "cwd", "env_overrides", "exit_code", "error", "last_event_sequence")
     EXEC_ID_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
@@ -247,8 +237,6 @@ class ExecStatus(_message.Message):
     ENV_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
     EXIT_CODE_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
-    STDOUT_FIELD_NUMBER: _ClassVar[int]
-    STDERR_FIELD_NUMBER: _ClassVar[int]
     LAST_EVENT_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     exec_id: str
     sandbox_id: str
@@ -258,20 +246,16 @@ class ExecStatus(_message.Message):
     env_overrides: _containers.RepeatedCompositeFieldContainer[KeyValue]
     exit_code: int
     error: str
-    stdout: str
-    stderr: str
     last_event_sequence: int
-    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., stdout: _Optional[str] = ..., stderr: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
+    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
 
 class CreateSandboxRequest(_message.Message):
-    __slots__ = ("create_spec", "caller_metadata", "sandbox_id")
+    __slots__ = ("create_spec", "sandbox_id")
     CREATE_SPEC_FIELD_NUMBER: _ClassVar[int]
-    CALLER_METADATA_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     create_spec: CreateSpec
-    caller_metadata: CallerMetadata
     sandbox_id: str
-    def __init__(self, create_spec: _Optional[_Union[CreateSpec, _Mapping]] = ..., caller_metadata: _Optional[_Union[CallerMetadata, _Mapping]] = ..., sandbox_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, create_spec: _Optional[_Union[CreateSpec, _Mapping]] = ..., sandbox_id: _Optional[str] = ...) -> None: ...
 
 class CreateSandboxResponse(_message.Message):
     __slots__ = ("sandbox_id", "initial_state")
@@ -370,20 +354,18 @@ class SubscribeSandboxEventsRequest(_message.Message):
     def __init__(self, sandbox_id: _Optional[str] = ..., from_sequence: _Optional[int] = ..., include_current_snapshot: bool = ...) -> None: ...
 
 class CreateExecRequest(_message.Message):
-    __slots__ = ("sandbox_id", "command", "cwd", "env_overrides", "caller_metadata", "exec_id")
+    __slots__ = ("sandbox_id", "command", "cwd", "env_overrides", "exec_id")
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     CWD_FIELD_NUMBER: _ClassVar[int]
     ENV_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
-    CALLER_METADATA_FIELD_NUMBER: _ClassVar[int]
     EXEC_ID_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     command: _containers.RepeatedScalarFieldContainer[str]
     cwd: str
     env_overrides: _containers.RepeatedCompositeFieldContainer[KeyValue]
-    caller_metadata: CallerMetadata
     exec_id: str
-    def __init__(self, sandbox_id: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., caller_metadata: _Optional[_Union[CallerMetadata, _Mapping]] = ..., exec_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, sandbox_id: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exec_id: _Optional[str] = ...) -> None: ...
 
 class CreateExecResponse(_message.Message):
     __slots__ = ("exec_id",)

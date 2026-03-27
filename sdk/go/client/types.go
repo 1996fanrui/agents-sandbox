@@ -124,8 +124,6 @@ type ExecHandle struct {
 	EnvOverrides      map[string]string
 	ExitCode          *int32
 	Error             *string
-	Stdout            *string
-	Stderr            *string
 	LastEventSequence uint64
 }
 
@@ -191,8 +189,6 @@ func toExecHandle(execStatus *agboxv1.ExecStatus) ExecHandle {
 		EnvOverrides:      keyValuesToMap(execStatus.GetEnvOverrides()),
 		ExitCode:          exitCode,
 		Error:             emptyStringPtr(execStatus.GetError()),
-		Stdout:            emptyStringPtr(execStatus.GetStdout()),
-		Stderr:            emptyStringPtr(execStatus.GetStderr()),
 		LastEventSequence: execStatus.GetLastEventSequence(),
 	}
 }
