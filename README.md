@@ -5,6 +5,7 @@ Unleash the full power of your AI agents.
 - **Unrestricted execution** — Agents install anything, run anything, break anything. Your host stays untouched.
 - **No more babysitting** — Zero permission prompts, zero manual approvals. Agents run autonomously and deliver results directly.
 - **Secure by default** — Every sandbox is fully isolated. No host network. No host filesystem. No exceptions.
+- **Host credentials, zero setup** — Sandboxes inherit host authentication (SSH agent, GitHub CLI, etc.) out of the box. Claude Code and Codex work immediately — powered by your flat-rate CLI subscriptions, not per-token API billing.
 - **Local-first, cloud-optional** — Zero latency, zero cost, and your data never leaves your machine.
 
 ## Why agents-sandbox?
@@ -50,7 +51,7 @@ A remote VPS gives you isolation too — but with tradeoffs. agents-sandbox runs
 | | Local Sandbox | Remote VPS |
 |---|---|---|
 | **Latency** | Near-zero | 10–100ms+ per command round-trip |
-| **Cost** | Free — you own the hardware | Pay per hour/VM/GB |
+| **Cost** | Free — you own the hardware. Agents use flat-rate CLI subscriptions (Claude Code, Codex), not per-token API billing | Pay per hour/VM/GB, plus API metering for every token |
 | **Data privacy** | Code and credentials never leave your machine | Source code and API keys travel to a third party |
 | **Startup** | Seconds | 30s–minutes for VM provisioning |
 | **Local resources** | Direct access to files, GPU via controlled mounts | Must sync files up/down |
