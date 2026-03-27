@@ -89,7 +89,7 @@ type eventMutation struct {
 	execState    agboxv1.ExecState
 }
 
-var callerProvidedIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var callerProvidedIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{2,198}[a-zA-Z0-9]$`)
 
 func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	defaults := DefaultServiceConfig()
@@ -578,7 +578,9 @@ func validateCallerProvidedID(fieldName string, id string) error {
 		return status.Errorf(codes.InvalidArgument, "%s must be at least 4 characters", fieldName)
 	}
 	if !callerProvidedIDPattern.MatchString(id) {
-		return status.Errorf(codes.InvalidArgument, "%s must match %s", fieldName, callerProvidedIDPattern.String())
+		return status.Errorf(codes.InvalidArgument,
+			"%s must be 4-200 characters, start and end with a letter or digit, and contain only letters, digits, hyphens, or underscores",
+			fieldName)
 	}
 	return nil
 }

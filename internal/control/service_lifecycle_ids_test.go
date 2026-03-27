@@ -250,14 +250,15 @@ func TestCallerProvidedSandboxID(t *testing.T) {
 func TestCallerProvidedSandboxIDValidation(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{})
 	invalidIDs := []string{
-		"MyBox",
-		"my_box",
-		"-mybox",
-		"mybox-",
-		"ab",
-		"a234567890123456789012345678901234567890123456789012345678901234",
-		"my/box",
-		"my.box",
+		"-mybox",   // must start with letter or digit
+		"_mybox",   // must start with letter or digit
+		"mybox-",   // must end with letter or digit
+		"mybox_",   // must end with letter or digit
+		"ab",       // too short (< 4 characters)
+		"a" + strings.Repeat("x", 200) + "z", // too long (> 200)
+		"my/box",   // slashes not allowed
+		"my.box",   // dots not allowed
+		"my box",   // spaces not allowed
 	}
 	for _, sandboxID := range invalidIDs {
 		t.Run(sandboxID, func(t *testing.T) {
@@ -267,6 +268,28 @@ func TestCallerProvidedSandboxIDValidation(t *testing.T) {
 			})
 			if status.Code(err) != codes.InvalidArgument {
 				t.Fatalf("expected invalid argument, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCallerProvidedSandboxIDAcceptsFlexibleFormats(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{})
+	validIDs := []string{
+		"MyBox-1",                                     // mixed case
+		"my_box_1",                                    // underscores
+		"36d4492a-f142-4d30-afbe-7954cf698d73",        // UUID
+		"Session_With-Mixed_Chars-123",                // mixed separators
+		"ALLCAPS",                                     // all uppercase
+	}
+	for _, sandboxID := range validIDs {
+		t.Run(sandboxID, func(t *testing.T) {
+			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+				SandboxId:  sandboxID,
+				CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
+			})
+			if err != nil {
+				t.Fatalf("expected valid sandbox_id %q, got error: %v", sandboxID, err)
 			}
 		})
 	}
@@ -358,7 +381,7 @@ func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
 	}
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	for _, execID := range []string{"MyExec", "my_exec", "-myexec", "ab"} {
+	for _, execID := range []string{"-myexec", "ab", "exec/"} {
 		t.Run("invalid-"+execID, func(t *testing.T) {
 			_, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
 				SandboxId: createResp.GetSandboxId(),
