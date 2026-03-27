@@ -11,21 +11,12 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${PROJECT_ROOT}"
 
-resolve_dev_lints_command() {
-  if command -v dev-lints >/dev/null 2>&1; then
-    command -v dev-lints
-    return 0
-  fi
-
-  return 1
-}
-
 run_lints() {
-  local dev_lints_cmd=""
-  if dev_lints_cmd="$(resolve_dev_lints_command)"; then
-    "${dev_lints_cmd}" --project-root "${PROJECT_ROOT}"
+  if command -v pre-commit >/dev/null 2>&1; then
+    pre-commit run --all-files
   else
-    echo "Shared dev-lints command not found in PATH. Skipping shared lints."
+    python3 -m pip install pre-commit
+    pre-commit run --all-files
   fi
 
   for lint_script in "${PROJECT_ROOT}"/scripts/lints/*.sh; do
