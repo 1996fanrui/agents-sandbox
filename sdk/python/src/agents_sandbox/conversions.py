@@ -7,7 +7,6 @@ from datetime import UTC
 from ._generated import service_pb2
 from .models import ExecState, SandboxEventType, SandboxState
 from .types import (
-    CallerMetadata,
     CopySpec,
     CreateExecRequest,
     CreateSandboxRequest,
@@ -23,14 +22,6 @@ from .types import (
 
 def to_ping_info(response: service_pb2.PingResponse) -> PingInfo:
     return PingInfo(version=response.version, daemon=response.daemon)
-
-
-def to_proto_caller_metadata(metadata: CallerMetadata) -> service_pb2.CallerMetadata:
-    return service_pb2.CallerMetadata(
-        product=metadata.product,
-        session_id=metadata.session_id,
-        run_id=metadata.run_id,
-    )
 
 
 def to_proto_healthcheck(config: HealthcheckConfig) -> service_pb2.HealthcheckConfig:
@@ -73,9 +64,6 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
             optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
             labels=dict(request.create_spec.labels),
         ),
-        caller_metadata=(
-            None if request.caller_metadata is None else to_proto_caller_metadata(request.caller_metadata)
-        ),
     )
 
 
@@ -105,9 +93,6 @@ def to_proto_create_exec_request(request: CreateExecRequest) -> service_pb2.Crea
             service_pb2.KeyValue(key=key, value=value)
             for key, value in request.env_overrides.items()
         ],
-        caller_metadata=(
-            None if request.caller_metadata is None else to_proto_caller_metadata(request.caller_metadata)
-        ),
     )
 
 
@@ -159,8 +144,6 @@ def to_exec_handle(exec_status: service_pb2.ExecStatus) -> ExecHandle:
         env_overrides={item.key: item.value for item in exec_status.env_overrides},
         exit_code=exit_code,
         error=exec_status.error or None,
-        stdout=exec_status.stdout or None,
-        stderr=exec_status.stderr or None,
         last_event_sequence=int(exec_status.last_event_sequence),
     )
 

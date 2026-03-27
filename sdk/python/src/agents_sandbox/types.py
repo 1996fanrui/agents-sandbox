@@ -16,13 +16,6 @@ class PingInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class CallerMetadata:
-    product: str
-    session_id: str
-    run_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class HealthcheckConfig:
     test: tuple[str, ...]
     interval: str | None = None
@@ -73,7 +66,6 @@ class CreateSandboxSpec:
 class CreateSandboxRequest:
     create_spec: CreateSandboxSpec
     sandbox_id: str | None = None
-    caller_metadata: CallerMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +75,6 @@ class CreateExecRequest:
     exec_id: str | None = None
     cwd: str | None = None
     env_overrides: Mapping[str, str] = field(default_factory=dict)
-    caller_metadata: CallerMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,13 +126,10 @@ class ExecHandle:
     env_overrides: Mapping[str, str]
     exit_code: int | None = None
     error: str | None = None
-    stdout: str | None = None
-    stderr: str | None = None
     last_event_sequence: int = 0
 
 
 __all__ = [
-    "CallerMetadata",
     "CopySpec",
     "CreateExecRequest",
     "CreateSandboxRequest",

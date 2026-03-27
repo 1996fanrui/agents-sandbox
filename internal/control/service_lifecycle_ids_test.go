@@ -736,10 +736,6 @@ func TestSandboxOwnerRemoved(t *testing.T) {
 	first, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 		SandboxId:  "owner-removed-1",
 		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
-		CallerMetadata: &agboxv1.CallerMetadata{
-			Product: "p",
-			RunId:   "r1",
-		},
 	})
 	if err != nil {
 		t.Fatalf("CreateSandbox(first) failed: %v", err)
@@ -747,10 +743,6 @@ func TestSandboxOwnerRemoved(t *testing.T) {
 	second, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 		SandboxId:  "owner-removed-2",
 		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
-		CallerMetadata: &agboxv1.CallerMetadata{
-			Product: "p",
-			RunId:   "r1",
-		},
 	})
 	if err != nil {
 		t.Fatalf("CreateSandbox(second) failed: %v", err)
@@ -762,10 +754,6 @@ func TestSandboxOwnerRemoved(t *testing.T) {
 	_, err = client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 		SandboxId:  "owner-removed-1",
 		CreateSpec: createSpecWithImage("ghcr.io/agents-sandbox/coding-runtime:test"),
-		CallerMetadata: &agboxv1.CallerMetadata{
-			Product: "p",
-			RunId:   "r2",
-		},
 	})
 	if status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("expected duplicate sandbox id to fail, got %v", err)

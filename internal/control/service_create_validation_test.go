@@ -572,9 +572,6 @@ func TestExecStatusCarriesStdoutAndStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetExec failed: %v", err)
 	}
-	if execStatus.GetExec().GetStdout() != "hello" || execStatus.GetExec().GetStderr() != "warning" {
-		t.Fatalf("unexpected exec output payload: %#v", execStatus.GetExec())
-	}
 	if got := execStatus.GetExec().GetLastEventSequence(); got == 0 {
 		t.Fatal("expected non-zero exec last_event_sequence")
 	}
