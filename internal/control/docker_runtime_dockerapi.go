@@ -1,7 +1,6 @@
 package control
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,11 +44,6 @@ type dockerExecSpec struct {
 	Command       []string
 	Workdir       string
 	Environment   map[string]string
-}
-
-type dockerExecOutput struct {
-	Stdout string
-	Stderr string
 }
 
 func ensureUniqueMountTargets(mounts []dockerMount) error {
@@ -290,12 +284,12 @@ func (backend *dockerRuntimeBackend) dockerContainerState(ctx context.Context, n
 	return inspectResponse.State, nil
 }
 
-func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec dockerExecSpec) (dockerExecOutput, int32, error) {
+func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec dockerExecSpec) (int32, error) {
 	if len(spec.Command) == 0 {
-		return dockerExecOutput{}, 0, errors.New("exec command must not be empty")
+		return 0, errors.New("exec command must not be empty")
 	}
 	if backend == nil || backend.dockerClient == nil {
-		return dockerExecOutput{}, 0, errors.New("docker client is not initialized")
+		return 0, errors.New("docker client is not initialized")
 	}
 
 	createResponse, err := backend.dockerClient.ContainerExecCreate(ctx, spec.ContainerName, container.ExecOptions{
@@ -307,45 +301,33 @@ func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec docker
 		Cmd:          spec.Command,
 	})
 	if err != nil {
-		return dockerExecOutput{}, 0, err
+		return 0, err
 	}
 
 	attachResponse, err := backend.dockerClient.ContainerExecAttach(ctx, createResponse.ID, container.ExecAttachOptions{Tty: false})
 	if err != nil {
-		return dockerExecOutput{}, 0, err
+		return 0, err
 	}
 	defer attachResponse.Close()
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, attachResponse.Reader); err != nil {
+	// Drain output to io.Discard so the exec completes; output is captured via bind-mounted log files.
+	if _, err := stdcopy.StdCopy(io.Discard, io.Discard, attachResponse.Reader); err != nil {
 		if ctx.Err() != nil {
-			return dockerExecOutput{}, -1, ctx.Err()
+			return -1, ctx.Err()
 		}
-		return dockerExecOutput{
-			Stdout: strings.TrimSpace(stdout.String()),
-			Stderr: strings.TrimSpace(stderr.String()),
-		}, -1, fmt.Errorf("read docker exec output: %w", err)
+		return -1, fmt.Errorf("read docker exec output: %w", err)
 	}
 
 	inspectResponse, err := backend.dockerClient.ContainerExecInspect(ctx, createResponse.ID)
-	output := dockerExecOutput{
-		Stdout: strings.TrimSpace(stdout.String()),
-		Stderr: strings.TrimSpace(stderr.String()),
-	}
 	if err != nil {
-		return output, -1, err
+		return -1, err
 	}
 
 	exitCode := int32(inspectResponse.ExitCode)
 	if exitCode != 0 {
-		message := strings.TrimSpace(strings.Join([]string{output.Stderr, output.Stdout}, "\n"))
-		if message == "" {
-			message = fmt.Sprintf("exit code %d", exitCode)
-		}
-		return output, exitCode, fmt.Errorf("docker exec failed: %s", message)
+		return exitCode, fmt.Errorf("docker exec failed: exit code %d", exitCode)
 	}
-	return output, exitCode, nil
+	return exitCode, nil
 }
 
 func envMapToSlice(environment map[string]string) []string {

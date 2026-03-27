@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -155,23 +154,6 @@ func validateGenericSourcePath(kind string, source string) error {
 		return fmt.Errorf("%s source must be a file or directory: %s", kind, sourcePath)
 	}
 	return nil
-}
-
-func writeExecArtifact(path string, execRecord *agboxv1.ExecStatus) error {
-	payload, err := json.Marshal(map[string]any{
-		"state":     execRecord.GetState().String(),
-		"exit_code": execRecord.GetExitCode(),
-	})
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = file.WriteString(string(payload) + "\n")
-	return err
 }
 
 func prepareExecOutputPath(root string, template string, fields map[string]string) (string, error) {

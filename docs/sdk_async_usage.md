@@ -115,7 +115,7 @@ result = await client.run(
     sandbox.sandbox_id,
     ("python", "-c", "print('hello')"),
 )
-print(result.stdout)
+print(result.stdout_log_path)
 ```
 
 ## Subscription

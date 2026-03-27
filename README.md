@@ -89,7 +89,7 @@ async def main() -> None:
                 sandbox.sandbox_id,
                 ("python", "-c", "print('hello from sandbox')"),
             )
-            print(result.stdout.strip())
+            print(result.stdout_log_path)
         finally:
             await client.delete_sandbox(sandbox.sandbox_id)
 

@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -125,21 +124,10 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 	}
 	waitForExecState(t, client, execResp.GetExecId(), agboxv1.ExecState_EXEC_STATE_FINISHED)
 
+	// The artifact file is created when exec starts. Phase 2 will write output via bind-mount.
 	artifactPath := filepath.Join(artifactRoot, createResp.GetSandboxId(), execResp.GetExecId()+".log")
-	content, err := os.ReadFile(artifactPath)
-	if err != nil {
-		t.Fatalf("ReadFile failed: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("unexpected artifact content: %q", string(content))
-	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &payload); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-	if payload["state"] != agboxv1.ExecState_EXEC_STATE_FINISHED.String() {
-		t.Fatalf("unexpected artifact state: %#v", payload)
+	if _, err := os.Stat(artifactPath); err != nil {
+		t.Fatalf("artifact file not found: %v", err)
 	}
 }
 

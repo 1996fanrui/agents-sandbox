@@ -539,12 +539,10 @@ func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
 	}
 }
 
-func TestExecStatusCarriesStdoutAndStderr(t *testing.T) {
+func TestExecStatusCarriesExitCode(t *testing.T) {
 	runtime := &capturingRuntimeBackend{
 		execResult: runtimeExecResult{
 			ExitCode: 0,
-			Stdout:   "hello",
-			Stderr:   "warning",
 		},
 	}
 	client := newBufconnClient(t, ServiceConfig{

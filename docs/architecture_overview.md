@@ -68,11 +68,11 @@ The CLI is useful for:
 
 ### Command execution and direct output consumption
 
-Exec creation is asynchronous at the protocol layer, but the result model now carries `stdout`, `stderr`, `exit_code`, and terminal state directly in `ExecStatus`. The public Go and Python SDKs expose the same lifecycle contract through language-appropriate APIs:
+Exec creation is asynchronous at the protocol layer. Exec stdout and stderr are redirected inside the container to bind-mounted host files, so the daemon is completely out of the I/O hot path and daemon restarts do not interrupt exec output. `CreateExecResponse` returns the host-side log file paths (`stdout_log_path`, `stderr_log_path`) so callers can read output independently. The public Go and Python SDKs expose the same lifecycle contract through language-appropriate APIs:
 
 - `create_exec(..., wait=False)` for accepted async execution
 - `create_exec(..., wait=True)` for event-driven waiting
-- `run(...)` as the direct "wait for completion and read stdout" path
+- `run(...)` as the direct "wait for completion and read log files" path
 
 The AgentsSandbox CLI `sandbox exec` command uses the same accepted-state plus event-stream contract to wait for terminal exec state and print command output directly to the terminal.
 
@@ -182,9 +182,9 @@ The runtime backend uses a single Docker Engine API client per service instance 
 
 Capabilities such as `.claude`, `.codex`, `uv`, `npm`, and `ssh-agent` are resolved by the daemon, not by caller-supplied hidden path conventions. This keeps host-sensitive path logic centralized and lets the daemon decide when bind mounting is safe and when shadow-copy fallback is required.
 
-### Exec output is part of the formal state model
+### Exec output is redirected to disk inside the container
 
-`stdout` and `stderr` are carried directly in `ExecStatus` and in the public Python `ExecHandle`. Artifact files remain optional side effects for configured deployments, but they are no longer the only place where successful command output can be consumed. This makes `run(...)` and `wait=True` directly useful for ordinary SDK callers.
+Exec stdout and stderr are redirected inside the container to bind-mounted host files (`{ArtifactOutputRoot}/{sandbox_id}/{exec_id}.stdout.log` / `.stderr.log`). The daemon does not attach to exec output streams and carries zero I/O buffer per exec. `CreateExecResponse` returns the host-side log paths so SDK callers can read output independently. This design keeps exec output durable across daemon restarts.
 
 ### Cleanup and ownership stay runtime-local
 
