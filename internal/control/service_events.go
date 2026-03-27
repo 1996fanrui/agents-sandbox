@@ -305,10 +305,9 @@ func newRecoveredSandboxRecord(events []*agboxv1.SandboxEvent, maxSequence uint6
 			LastEventSequence: lastEvent.GetSequence(),
 		},
 		events:            events,
-		execs:             make(map[string]*agboxv1.ExecStatus),
-		execCancel:        make(map[string]context.CancelFunc),
-		execArtifacts:     make(map[string]string),
-		nextSequence:      maxSequence,
+		execs:        make(map[string]*agboxv1.ExecStatus),
+		execCancel:   make(map[string]context.CancelFunc),
+		nextSequence: maxSequence,
 		deletedAtRecorded: deletedRecorded,
 		recoveredOnly:     true,
 	}, nil

@@ -56,8 +56,6 @@ func (starts optionalServiceStarts) CancelAndWait() {
 
 type runtimeExecResult struct {
 	ExitCode int32
-	Stdout   string
-	Stderr   string
 }
 
 type sandboxRuntimeState struct {
@@ -266,7 +264,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 	for _, service := range record.requiredServices {
 		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, _, err := backend.dockerExec(ctx, dockerExecSpec{
+			if _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: state.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
 			}); err != nil {
@@ -311,7 +309,7 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	}
 	for _, service := range record.requiredServices {
 		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, _, err := backend.dockerExec(ctx, dockerExecSpec{
+			if _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: record.runtimeState.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
 			}); err != nil {
@@ -444,15 +442,11 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeExecResult{}, err
 	}
-	output, exitCode, err := backend.dockerExec(ctx, dockerExecSpec{
+	exitCode, err := backend.dockerExec(ctx, dockerExecSpec{
 		ContainerName: record.runtimeState.PrimaryContainerName,
 		Command:       execRecord.GetCommand(),
 		Workdir:       execRecord.GetCwd(),
 		Environment:   keyValuesToMap(execRecord.GetEnvOverrides()),
 	})
-	return runtimeExecResult{
-		ExitCode: exitCode,
-		Stdout:   output.Stdout,
-		Stderr:   output.Stderr,
-	}, err
+	return runtimeExecResult{ExitCode: exitCode}, err
 }

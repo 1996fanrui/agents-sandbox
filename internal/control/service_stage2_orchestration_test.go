@@ -563,7 +563,7 @@ func TestDockerContainerStopReturnsNilForMissingContainer(t *testing.T) {
 	}
 }
 
-func TestDockerExecUsesSDKAndPreservesStreams(t *testing.T) {
+func TestDockerExecUsesSDKAndDrainsOutput(t *testing.T) {
 	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
 		switch {
@@ -581,6 +581,7 @@ func TestDockerExecUsesSDKAndPreservesStreams(t *testing.T) {
 			if !slices.Equal(request.Env, []string{"FOO=bar"}) {
 				t.Fatalf("unexpected env: %#v", request.Env)
 			}
+			// AttachStdout and AttachStderr must be true so exec completion is detected via stream drain.
 			if !request.AttachStdout || !request.AttachStderr || request.Tty {
 				t.Fatalf("unexpected attach settings: %#v", request)
 			}
@@ -608,7 +609,7 @@ func TestDockerExecUsesSDKAndPreservesStreams(t *testing.T) {
 		}
 	})
 
-	output, exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
+	exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
 		ContainerName: "primary",
 		Command:       []string{"sh", "-lc", "echo hello"},
 		Workdir:       "/workspace",
@@ -619,9 +620,6 @@ func TestDockerExecUsesSDKAndPreservesStreams(t *testing.T) {
 	}
 	if exitCode != 0 {
 		t.Fatalf("unexpected exit code: %d", exitCode)
-	}
-	if output.Stdout != "hello" || output.Stderr != "warning" {
-		t.Fatalf("unexpected exec output: %#v", output)
 	}
 }
 
@@ -654,7 +652,7 @@ func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
 		}
 	})
 
-	output, exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
+	exitCode, err := backend.dockerExec(context.Background(), dockerExecSpec{
 		ContainerName: "primary",
 		Command:       []string{"false"},
 	})
@@ -662,10 +660,7 @@ func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
 		t.Fatal("expected dockerExec to fail for non-zero exit code")
 	}
 	if exitCode != 42 {
-		t.Fatalf("unexpected exit code: %d err=%v output=%#v", exitCode, err, output)
-	}
-	if output.Stdout != "partial" || output.Stderr != "boom" {
-		t.Fatalf("unexpected exec output: %#v", output)
+		t.Fatalf("unexpected exit code: %d err=%v", exitCode, err)
 	}
 	if !strings.Contains(err.Error(), "docker exec failed") {
 		t.Fatalf("unexpected exec error: %v", err)

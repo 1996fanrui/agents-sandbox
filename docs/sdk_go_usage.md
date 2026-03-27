@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	sdkclient "github.com/1996fanrui/agents-sandbox/sdk/go/client"
 )
@@ -63,8 +64,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if result.Stdout != nil {
-		fmt.Print(*result.Stdout)
+	if result.StdoutLogPath != nil {
+		data, err := os.ReadFile(*result.StdoutLogPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Print(string(data))
 	}
 }
 ```
@@ -113,7 +118,7 @@ The high-level Go SDK keeps the accepted async contract visible while adding lan
 
 - `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CancelExec` default to `wait=true`.
 - `CreateExec` defaults to `wait=false`.
-- `Run` is the direct "wait for terminal exec and read stdout/stderr" path.
+- `Run` is the direct "wait for terminal exec and return log file paths" path.
 - `CreateExec` and `Run` default `cwd` to `/workspace`.
 - `SubscribeSandboxEvents` on `sdk/go/client` returns a receive-only channel of `EventOrError`.
 - `SubscribeSandboxEvents` on `sdk/go/rawclient` returns the raw stream primitive with `Recv` and `Close`.

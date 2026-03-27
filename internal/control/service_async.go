@@ -2,9 +2,7 @@ package control
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -239,10 +237,7 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 		return
 	}
 	if runErr != nil {
-		execErrorMessage := strings.TrimSpace(strings.Join([]string{result.Stderr, result.Stdout}, "\n"))
-		if execErrorMessage == "" {
-			execErrorMessage = runErr.Error()
-		}
+		execErrorMessage := runErr.Error()
 		if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
 			execID:       execID,
 			execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
@@ -259,30 +254,6 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 		execRecord.Error = execErrorMessage
 		s.config.Logger.Warn("exec failed", slog.String("sandbox_id", sandboxID), slog.String("exec_id", execID), slog.Int("exit_code", int(result.ExitCode)), slog.Any("error", runErr))
 		return
-	}
-	finishedExec := cloneExec(execRecord)
-	finishedExec.State = agboxv1.ExecState_EXEC_STATE_FINISHED
-	finishedExec.ExitCode = result.ExitCode
-	if artifactPath := record.execArtifacts[execID]; artifactPath != "" {
-		if err := writeExecArtifact(artifactPath, finishedExec); err != nil {
-			artifactError := fmt.Sprintf("write exec artifact: %v", err)
-			if appendErr := s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
-				execID:       execID,
-				execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
-				errorCode:    "ARTIFACT_OUTPUT_WRITE_FAILED",
-				errorMessage: artifactError,
-			}); appendErr != nil {
-				logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EXEC_FAILED, appendErr)
-				return
-			}
-			delete(record.execCancel, execID)
-			execRecord.State = agboxv1.ExecState_EXEC_STATE_FAILED
-			execRecord.ExitCode = result.ExitCode
-			execRecord.Error = artifactError
-			s.config.Logger.Warn("exec failed", slog.String("sandbox_id", sandboxID), slog.String("exec_id", execID), slog.Int("exit_code", int(result.ExitCode)), slog.Any("error", err))
-			record.lastTerminalRunFinishedAt = time.Now().UTC()
-			return
-		}
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_FINISHED, eventMutation{
 		execID:    execID,

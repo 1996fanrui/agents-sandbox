@@ -74,7 +74,6 @@ type sandboxRecord struct {
 	events                    []*agboxv1.SandboxEvent
 	execs                     map[string]*agboxv1.ExecStatus
 	execCancel                map[string]context.CancelFunc
-	execArtifacts             map[string]string
 	nextSequence              uint64
 	lastTerminalRunFinishedAt time.Time
 	deletedAtRecorded         bool
@@ -180,9 +179,8 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 		createSpec:       cloneCreateSpec(req.GetCreateSpec()),
 		requiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
 		optionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
-		execs:            make(map[string]*agboxv1.ExecStatus),
-		execCancel:       make(map[string]context.CancelFunc),
-		execArtifacts:    make(map[string]string),
+		execs:      make(map[string]*agboxv1.ExecStatus),
+		execCancel: make(map[string]context.CancelFunc),
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
@@ -486,9 +484,6 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		}
 		return nil, status.Errorf(codes.Internal, "append EXEC_STARTED event: %v", err)
 	}
-	if artifactPath != "" {
-		record.execArtifacts[execID] = artifactPath
-	}
 	record.execs[execID] = execRecord
 	s.execs[execID] = req.GetSandboxId()
 	execContext, cancel := context.WithCancel(context.Background())
@@ -523,11 +518,6 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 		delete(record.execCancel, req.GetExecId())
 	}
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
-	if artifactPath := record.execArtifacts[req.GetExecId()]; artifactPath != "" {
-		if err := writeExecArtifact(artifactPath, execRecord); err != nil {
-			return nil, status.Errorf(codes.Internal, "write exec artifact: %v", err)
-		}
-	}
 	go s.scheduleIdleStop(sandboxID)
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
