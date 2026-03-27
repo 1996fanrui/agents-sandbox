@@ -34,7 +34,7 @@ func runWithDeps(
 	stderr io.Writer,
 	lookupEnv func(string) (string, bool),
 	acquireLock func(string) (*hostLock, error),
-	listenAndServe func(context.Context, string, *control.Service) error,
+	listenAndServe func(context.Context, string, *control.Service, *slog.Logger) error,
 	newService func(context.Context, control.ServiceConfig, string) (*control.Service, io.Closer, error),
 ) int {
 	startup, err := resolveStartupConfig(args, lookupEnv)
@@ -87,7 +87,7 @@ func runWithDeps(
 			logger.Error("failed to close registry", slog.String("error", closeErr.Error()))
 		}
 	}()
-	if err := listenAndServe(ctx, startup.socketPath, service); err != nil {
+	if err := listenAndServe(ctx, startup.socketPath, service, logger); err != nil {
 		logger.Error("server stopped with error", slog.String("error", err.Error()))
 		return 1
 	}

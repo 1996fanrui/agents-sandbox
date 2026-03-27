@@ -3,7 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -32,7 +32,7 @@ func (s *Service) scheduleIdleStop(sandboxID string) {
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
 		reason: "idle_ttl",
 	}); err != nil {
-		logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_SANDBOX_STOP_REQUESTED, err)
+		logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_SANDBOX_STOP_REQUESTED, err)
 		s.mu.Unlock()
 		return
 	}
@@ -59,6 +59,7 @@ func (s *Service) cleanupExpiredEvents() error {
 		}
 		delete(s.boxes, sandboxID)
 	}
+	s.config.Logger.Debug("cleanup expired sandbox events", slog.Int("removed_count", len(removedSandboxIDs)))
 	return nil
 }
 
@@ -72,7 +73,7 @@ func (s *Service) cleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := s.cleanupExpiredEvents(); err != nil {
-				log.Printf("cleanup expired sandbox events: %v", err)
+				s.config.Logger.Warn("cleanup expired sandbox events failed", slog.Any("error", err))
 			}
 		}
 	}
@@ -114,7 +115,7 @@ func (s *Service) completeOptionalServiceCreate(sandboxID string, statuses <-cha
 			continue
 		}
 		if err := s.appendServiceEventsLocked(record, []runtimeServiceStatus{serviceStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY); err != nil {
-			logAsyncEventAppendFailure(sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
+			logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
 			s.mu.Unlock()
 			return
 		}
@@ -242,12 +243,12 @@ func validateSequenceNotExpired(record *sandboxRecord, afterSequence uint64) err
 	)
 }
 
-func logAsyncEventAppendFailure(sandboxID string, eventType agboxv1.EventType, err error) {
+func logAsyncEventAppendFailure(logger *slog.Logger, sandboxID string, eventType agboxv1.EventType, err error) {
 	if eventType == agboxv1.EventType_EVENT_TYPE_UNSPECIFIED {
-		log.Printf("append sandbox events for %s: %v", sandboxID, err)
+		logger.Error("append sandbox events failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
 		return
 	}
-	log.Printf("append %s event for sandbox %s: %v", eventType.String(), sandboxID, err)
+	logger.Error("append event failed", slog.String("sandbox_id", sandboxID), slog.String("event_type", eventType.String()), slog.Any("error", err))
 }
 
 func (s *Service) restorePersistedSandboxes() error {
@@ -279,6 +280,7 @@ func (s *Service) restorePersistedSandboxes() error {
 			return fmt.Errorf("restore sandbox %s: %w", sandboxID, err)
 		}
 		s.boxes[sandboxID] = record
+		s.config.Logger.Info("sandbox restored", slog.String("sandbox_id", sandboxID), slog.String("state", record.handle.GetState().String()))
 	}
 	return nil
 }

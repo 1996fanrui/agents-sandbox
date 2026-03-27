@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -155,7 +156,7 @@ func TestRunWithDepsUsesResolvedLockPath(t *testing.T) {
 			lockPath = path
 			return &hostLock{path: path}, nil
 		},
-		func(ctx context.Context, path string, svc *control.Service) error {
+		func(ctx context.Context, path string, svc *control.Service, _ *slog.Logger) error {
 			_ = ctx
 			socketPath = path
 			service = svc
@@ -199,7 +200,7 @@ func TestRunWithDepsFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
 			}
 			return nil, errors.New("lock already held")
 		},
-		func(context.Context, string, *control.Service) error {
+		func(context.Context, string, *control.Service, *slog.Logger) error {
 			t.Fatal("listenAndServe should not run when host lock acquisition fails")
 			return nil
 		},
@@ -242,7 +243,7 @@ func TestDaemonFailsFastWhenIDStoreInitFails(t *testing.T) {
 		func(path string) (*hostLock, error) {
 			return &hostLock{path: path}, nil
 		},
-		func(context.Context, string, *control.Service) error {
+		func(context.Context, string, *control.Service, *slog.Logger) error {
 			t.Fatal("listenAndServe should not run when id store initialization fails")
 			return nil
 		},

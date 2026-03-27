@@ -151,6 +151,7 @@ func (s *Service) Ping(context.Context, *agboxv1.PingRequest) (*agboxv1.PingResp
 }
 
 func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+	s.config.Logger.Debug("gRPC CreateSandbox", slog.String("image", req.GetCreateSpec().GetImage()))
 	if req.GetCreateSpec() == nil {
 		return nil, status.Error(codes.InvalidArgument, "create_spec is required")
 	}
@@ -193,6 +194,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	}
 	s.boxes[sandboxID] = record
 	go s.completeSandboxCreate(sandboxID)
+	s.config.Logger.Info("sandbox create accepted", slog.String("sandbox_id", sandboxID))
 
 	return &agboxv1.CreateSandboxResponse{
 		SandboxId:    sandboxID,
@@ -201,6 +203,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 }
 
 func (s *Service) GetSandbox(_ context.Context, req *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+	s.config.Logger.Debug("gRPC GetSandbox", slog.String("sandbox_id", req.GetSandboxId()))
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -212,6 +215,7 @@ func (s *Service) GetSandbox(_ context.Context, req *agboxv1.GetSandboxRequest) 
 }
 
 func (s *Service) ListSandboxes(_ context.Context, req *agboxv1.ListSandboxesRequest) (*agboxv1.ListSandboxesResponse, error) {
+	s.config.Logger.Debug("gRPC ListSandboxes")
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -255,10 +259,12 @@ func (s *Service) ResumeSandbox(_ context.Context, req *agboxv1.ResumeSandboxReq
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_PENDING
 	s.mu.Unlock()
 	go s.completeSandboxResume(req.GetSandboxId())
+	s.config.Logger.Debug("gRPC ResumeSandbox", slog.String("sandbox_id", req.GetSandboxId()))
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
 
 func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest) (*agboxv1.AcceptedResponse, error) {
+	s.config.Logger.Debug("gRPC StopSandbox", slog.String("sandbox_id", req.GetSandboxId()))
 	s.mu.Lock()
 	record, err := s.requireSandboxLocked(req.GetSandboxId())
 	if err != nil {
@@ -281,10 +287,12 @@ func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest
 	}
 	s.mu.Unlock()
 	go s.completeSandboxStop(req.GetSandboxId(), "stop_requested")
+	s.config.Logger.Info("sandbox stop requested", slog.String("sandbox_id", req.GetSandboxId()), slog.String("reason", "stop_requested"))
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
 
 func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxRequest) (*agboxv1.AcceptedResponse, error) {
+	s.config.Logger.Debug("gRPC DeleteSandbox", slog.String("sandbox_id", req.GetSandboxId()))
 	s.mu.Lock()
 	record, err := s.requireSandboxLocked(req.GetSandboxId())
 	if err != nil {
@@ -321,10 +329,12 @@ func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxReq
 	}
 	s.mu.Unlock()
 	go s.completeSandboxDelete(req.GetSandboxId(), "delete_requested")
+	s.config.Logger.Info("sandbox delete requested", slog.String("sandbox_id", req.GetSandboxId()))
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
 
 func (s *Service) DeleteSandboxes(_ context.Context, req *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error) {
+	s.config.Logger.Debug("gRPC DeleteSandboxes")
 	if len(req.GetLabelSelector()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "label_selector must not be empty")
 	}
@@ -369,6 +379,7 @@ func (s *Service) DeleteSandboxes(_ context.Context, req *agboxv1.DeleteSandboxe
 }
 
 func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequest, stream agboxv1.SandboxService_SubscribeSandboxEventsServer) error {
+	s.config.Logger.Debug("gRPC SubscribeToSandboxEvents", slog.String("sandbox_id", req.GetSandboxId()))
 	s.mu.RLock()
 	record, ok := s.boxes[req.GetSandboxId()]
 	if !ok {
@@ -429,6 +440,7 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 }
 
 func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
+	s.config.Logger.Debug("gRPC ExecInSandbox", slog.String("sandbox_id", req.GetSandboxId()))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -482,6 +494,7 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	execContext, cancel := context.WithCancel(context.Background())
 	record.execCancel[execID] = cancel
 	go s.completeExec(execContext, execID)
+	s.config.Logger.Info("exec started", slog.String("sandbox_id", req.GetSandboxId()), slog.String("exec_id", execID))
 	return &agboxv1.CreateExecResponse{ExecId: execID}, nil
 }
 
@@ -504,6 +517,7 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 		return nil, status.Errorf(codes.Internal, "append EXEC_CANCELLED event: %v", err)
 	}
 	execRecord.State = agboxv1.ExecState_EXEC_STATE_CANCELLED
+	s.config.Logger.Info("exec cancelled", slog.String("sandbox_id", sandboxID), slog.String("exec_id", req.GetExecId()))
 	if cancel := record.execCancel[req.GetExecId()]; cancel != nil {
 		cancel()
 		delete(record.execCancel, req.GetExecId())
