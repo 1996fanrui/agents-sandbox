@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -705,7 +706,7 @@ func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
 func TestNewServiceDoesNotRequireReachableDockerDaemonAtConstruction(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "nonexistent-docker.sock"))
 
-	service, closer, err := NewService(ServiceConfig{})
+	service, closer, err := NewService(ServiceConfig{Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("NewService failed with unreachable docker host: %v", err)
 	}

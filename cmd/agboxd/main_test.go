@@ -188,11 +188,10 @@ func TestRunWithDepsFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
 		t.Fatalf("resolveStartupConfig returned error: %v", err)
 	}
 
-	var stderr strings.Builder
 	exitCode := runWithDeps(
 		context.Background(),
 		nil,
-		&stderr,
+		io.Discard,
 		lookupEnv,
 		func(lockPath string) (*hostLock, error) {
 			if lockPath != startup.lockPath {
@@ -209,9 +208,6 @@ func TestRunWithDepsFailsBeforeSocketMutationWhenHostLockIsHeld(t *testing.T) {
 
 	if exitCode != 1 {
 		t.Fatalf("unexpected exit code: got %d want 1", exitCode)
-	}
-	if !strings.Contains(stderr.String(), "lock already held") {
-		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
 
@@ -238,11 +234,10 @@ func TestDaemonFailsFastWhenIDStoreInitFails(t *testing.T) {
 		}
 	}
 
-	var stderr strings.Builder
 	exitCode := runWithDeps(
 		context.Background(),
 		nil,
-		&stderr,
+		io.Discard,
 		lookupEnv,
 		func(path string) (*hostLock, error) {
 			return &hostLock{path: path}, nil
@@ -256,9 +251,6 @@ func TestDaemonFailsFastWhenIDStoreInitFails(t *testing.T) {
 
 	if exitCode != 1 {
 		t.Fatalf("unexpected exit code: got %d want 1", exitCode)
-	}
-	if !strings.Contains(stderr.String(), "initialize id store") {
-		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
 }
 
@@ -296,4 +288,36 @@ func writeDaemonConfig(t *testing.T, lookupEnv func(string) (string, bool), cont
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 	return configPath
+}
+
+func TestConfigLogLevel(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS uses a shared fixed home-directory config path")
+	}
+
+	t.Run("default", func(t *testing.T) {
+		lookupEnv := fixedPathLookupEnv(t)
+		startup, err := resolveStartupConfig(nil, lookupEnv)
+		if err != nil {
+			t.Fatalf("resolveStartupConfig returned error: %v", err)
+		}
+		if startup.serviceConfig.LogLevel != "info" {
+			t.Fatalf("unexpected default log level: got %q want %q", startup.serviceConfig.LogLevel, "info")
+		}
+	})
+
+	t.Run("explicit", func(t *testing.T) {
+		lookupEnv := fixedPathLookupEnv(t)
+		writeDaemonConfig(t, lookupEnv, `
+[runtime]
+log_level = "debug"
+`)
+		startup, err := resolveStartupConfig(nil, lookupEnv)
+		if err != nil {
+			t.Fatalf("resolveStartupConfig returned error: %v", err)
+		}
+		if startup.serviceConfig.LogLevel != "debug" {
+			t.Fatalf("unexpected log level: got %q want %q", startup.serviceConfig.LogLevel, "debug")
+		}
+	})
 }

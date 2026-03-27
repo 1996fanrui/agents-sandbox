@@ -33,6 +33,7 @@ The host lock always lives next to the socket so the lock protects the exact run
 |-----|------|---------------------|----------------|---------|
 | `runtime.idle_ttl` | duration string | `"30m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
 | `runtime.event_retention_ttl` | duration string | `"168h"` | Daemon config only | How long deleted sandbox event history remains queryable before cleanup removes it |
+| `runtime.log_level` | string | `"info"` | Daemon config only | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-resource shadow-copy state |
 | `artifacts.exec_output_root` | string | unset | Daemon config only | Root directory where runtime-owned exec output files are created |
 | `artifacts.exec_output_template` | string | `"{sandbox_id}/{exec_id}.log"` | Daemon config only | Relative template expanded against `artifacts.exec_output_root`; supported fields are `sandbox_id` and `exec_id` |

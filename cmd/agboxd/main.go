@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
+	"github.com/1996fanrui/agents-sandbox/internal/logging"
 )
 
 func main() {
@@ -40,19 +42,41 @@ func runWithDeps(
 		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
-	lockHandle, err := acquireLock(startup.lockPath)
+
+	logger, err := logging.SetupLogger(startup.serviceConfig.LogLevel)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
+		return 2
+	}
+	logger = logger.With(
+		slog.String("daemon", "agboxd"),
+		slog.String("version", startup.serviceConfig.Version),
+	)
+	startup.serviceConfig.Logger = logger
+	slog.SetDefault(logger)
+
+	logger.Info("starting",
+		slog.String("socket_path", startup.socketPath),
+		slog.String("id_store_path", startup.idStorePath),
+		slog.String("state_root", startup.serviceConfig.StateRoot),
+		slog.String("idle_ttl", startup.serviceConfig.IdleTTL.String()),
+		slog.String("event_retention_ttl", startup.serviceConfig.EventRetentionTTL.String()),
+		slog.String("log_level", startup.serviceConfig.LogLevel),
+	)
+
+	lockHandle, err := acquireLock(startup.lockPath)
+	if err != nil {
+		logger.Error("failed to acquire lock", slog.String("error", err.Error()))
 		return 1
 	}
 	defer func() {
 		if releaseErr := lockHandle.release(); releaseErr != nil {
-			_, _ = fmt.Fprintln(stderr, releaseErr)
+			logger.Error("failed to release lock", slog.String("error", releaseErr.Error()))
 		}
 	}()
 	service, registryCloser, err := newService(ctx, startup.serviceConfig, startup.idStorePath)
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
+		logger.Error("failed to create service", slog.String("error", err.Error()))
 		return 1
 	}
 	defer func() {
@@ -60,11 +84,11 @@ func runWithDeps(
 			return
 		}
 		if closeErr := registryCloser.Close(); closeErr != nil {
-			_, _ = fmt.Fprintln(stderr, closeErr)
+			logger.Error("failed to close registry", slog.String("error", closeErr.Error()))
 		}
 	}()
 	if err := listenAndServe(ctx, startup.socketPath, service); err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
+		logger.Error("server stopped with error", slog.String("error", err.Error()))
 		return 1
 	}
 	return 0
