@@ -14,7 +14,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/.build"
-LOG_DIR="${PROJECT_ROOT}/logs"
 GO_BIN="${GO_BIN:-go}"
 
 if ! command -v "${GO_BIN}" >/dev/null 2>&1; then
@@ -22,8 +21,7 @@ if ! command -v "${GO_BIN}" >/dev/null 2>&1; then
     exit 1
 fi
 
-mkdir -p "${BUILD_DIR}" "${LOG_DIR}"
-exec > "${LOG_DIR}/agboxd_$(date +%Y%m%d_%H%M%S).log" 2>&1
+mkdir -p "${BUILD_DIR}"
 
 cd "${PROJECT_ROOT}"
 "${GO_BIN}" build -o "${BUILD_DIR}/agboxd" ./cmd/agboxd

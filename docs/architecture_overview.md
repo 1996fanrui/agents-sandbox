@@ -24,7 +24,7 @@ flowchart LR
 
 ### Main components
 
-- `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, derives the default socket path, acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
+- `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, initializes structured JSON logging via Go stdlib `log/slog` (written to stderr for systemd/journald capture), acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
 - `cmd/agbox` implements the local operator CLI. It resolves the daemon socket, talks to the gRPC API through `sdk/go/rawclient`, and exposes `version`, `ping`, and `sandbox` subcommands. The `sandbox` command currently supports `create`, `list`, `get`, `delete`, and `exec`, including label-based list/delete flows and JSON output for create/list/get.
 - `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, sequence generation, async operation orchestration, recovered-only sandbox reconstruction, and retention cleanup.
 - `internal/control/id_registry.go` owns the shared bbolt-backed persistence bootstrap that opens `ids.db`, reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts, and shares the database handle with the persistent event store.
@@ -137,7 +137,7 @@ This separation keeps the wire contract stable while letting each language expos
 
 ### External dependencies
 
-- Go daemon and protocol implementation
+- Go daemon and protocol implementation (structured logging via stdlib `log/slog` with JSON output)
 - Docker Engine API Go SDK and a reachable Docker daemon
 - gRPC and protobuf for the wire contract
 - Go gRPC client stack for `sdk/go/rawclient` and `sdk/go/client`
