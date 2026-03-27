@@ -52,7 +52,7 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 		})
 	}
 	go func() {
-		_ = control.ListenAndServe(ctx, socketPath, service)
+		_ = control.ListenAndServe(ctx, socketPath, service, slog.Default())
 	}()
 	waitForSocket(t, lookupEnv)
 

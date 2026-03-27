@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -195,7 +196,7 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 	}
 }
 
-func ListenAndServe(ctx context.Context, socketPath string, service *Service) error {
+func ListenAndServe(ctx context.Context, socketPath string, service *Service, logger *slog.Logger) error {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		return err
 	}
@@ -206,6 +207,7 @@ func ListenAndServe(ctx context.Context, socketPath string, service *Service) er
 	if err != nil {
 		return err
 	}
+	logger.Info("listening", slog.String("socket_path", socketPath))
 	defer listener.Close()
 
 	server := grpc.NewServer()
@@ -213,6 +215,7 @@ func ListenAndServe(ctx context.Context, socketPath string, service *Service) er
 
 	go func() {
 		<-ctx.Done()
+		logger.Info("shutting down")
 		server.GracefulStop()
 	}()
 
