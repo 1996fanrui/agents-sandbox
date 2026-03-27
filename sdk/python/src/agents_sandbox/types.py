@@ -127,6 +127,8 @@ class ExecHandle:
     exit_code: int | None = None
     error: str | None = None
     last_event_sequence: int = 0
+    stdout_log_path: str | None = None
+    stderr_log_path: str | None = None
 
 
 __all__ = [

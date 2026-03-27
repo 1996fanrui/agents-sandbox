@@ -20,6 +20,9 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
+// execLogContainerDir is the container-side directory for exec log files when output redirection is enabled.
+const execLogContainerDir = "/var/log/agents-sandbox/"
+
 type dockerMount struct {
 	Source   string
 	Target   string
@@ -44,6 +47,8 @@ type dockerExecSpec struct {
 	Command       []string
 	Workdir       string
 	Environment   map[string]string
+	LogDir        string // Container-side log directory; non-empty enables output redirection
+	ExecID        string // Used to construct log file names when LogDir is set
 }
 
 func ensureUniqueMountTargets(mounts []dockerMount) error {
@@ -292,25 +297,47 @@ func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec docker
 		return 0, errors.New("docker client is not initialized")
 	}
 
+	cmd := spec.Command
+	attachStdout := true
+	attachStderr := true
+
+	if spec.LogDir != "" {
+		// Redirect stdout and stderr to per-exec log files inside the container.
+		stdoutLog := filepath.Join(spec.LogDir, spec.ExecID+".stdout.log")
+		stderrLog := filepath.Join(spec.LogDir, spec.ExecID+".stderr.log")
+		shellCmd := fmt.Sprintf("exec \"$@\" >%s 2>%s", stdoutLog, stderrLog)
+		cmd = append([]string{"sh", "-c", shellCmd, "--"}, spec.Command...)
+		attachStdout = false
+		attachStderr = false
+	}
+
 	createResponse, err := backend.dockerClient.ContainerExecCreate(ctx, spec.ContainerName, container.ExecOptions{
-		AttachStdout: true,
-		AttachStderr: true,
+		AttachStdout: attachStdout,
+		AttachStderr: attachStderr,
 		Tty:          false,
 		Env:          envMapToSlice(spec.Environment),
 		WorkingDir:   spec.Workdir,
-		Cmd:          spec.Command,
+		Cmd:          cmd,
 	})
 	if err != nil {
 		return 0, err
 	}
 
+	if spec.LogDir != "" {
+		// Detached mode: start exec without attaching and poll for completion.
+		if err := backend.dockerClient.ContainerExecStart(ctx, createResponse.ID, container.ExecStartOptions{Detach: true}); err != nil {
+			return 0, err
+		}
+		return backend.pollExecCompletion(ctx, createResponse.ID)
+	}
+
+	// Attached mode (post-start hooks): drain output to io.Discard.
 	attachResponse, err := backend.dockerClient.ContainerExecAttach(ctx, createResponse.ID, container.ExecAttachOptions{Tty: false})
 	if err != nil {
 		return 0, err
 	}
 	defer attachResponse.Close()
 
-	// Drain output to io.Discard so the exec completes; output is captured via bind-mounted log files.
 	if _, err := stdcopy.StdCopy(io.Discard, io.Discard, attachResponse.Reader); err != nil {
 		if ctx.Err() != nil {
 			return -1, ctx.Err()
@@ -328,6 +355,27 @@ func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec docker
 		return exitCode, fmt.Errorf("docker exec failed: exit code %d", exitCode)
 	}
 	return exitCode, nil
+}
+
+func (backend *dockerRuntimeBackend) pollExecCompletion(ctx context.Context, execID string) (int32, error) {
+	for {
+		inspect, err := backend.dockerClient.ContainerExecInspect(ctx, execID)
+		if err != nil {
+			return -1, err
+		}
+		if !inspect.Running {
+			exitCode := int32(inspect.ExitCode)
+			if exitCode != 0 {
+				return exitCode, fmt.Errorf("docker exec failed: exit code %d", exitCode)
+			}
+			return exitCode, nil
+		}
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		case <-time.After(backend.config.PollInterval):
+		}
+	}
 }
 
 func envMapToSlice(environment map[string]string) []string {

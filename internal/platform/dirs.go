@@ -136,6 +136,22 @@ func idStorePathForGOOS(goos string, lookupEnv LookupEnv) (string, error) {
 	return filepath.Join(dataRoot, AgentsSandboxDirName, "ids.db"), nil
 }
 
+// ExecLogRoot returns the platform default root for exec log files.
+//
+//   - Linux: $XDG_DATA_HOME/agents-sandbox/exec-logs, falling back to ~/.local/share/agents-sandbox/exec-logs
+//   - macOS: ~/Library/Application Support/agents-sandbox/exec-logs
+func ExecLogRoot(lookupEnv LookupEnv) string {
+	return execLogRootForGOOS(runtime.GOOS, lookupEnv)
+}
+
+func execLogRootForGOOS(goos string, lookupEnv LookupEnv) string {
+	dataRoot := dataDirForGOOS(goos, lookupEnv)
+	if dataRoot == "" {
+		return ""
+	}
+	return filepath.Join(dataRoot, AgentsSandboxDirName, "exec-logs")
+}
+
 func runtimeRootPathForGOOS(goos string, lookupEnv LookupEnv) (string, error) {
 	runtimeDir := runtimeDirForGOOS(goos, lookupEnv)
 	switch goos {

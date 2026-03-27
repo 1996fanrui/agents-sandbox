@@ -622,3 +622,27 @@ func TestMaterializeGenericCopiesAppliesExcludePatterns(t *testing.T) {
 		t.Fatalf("expected excluded file to be absent, got %v", err)
 	}
 }
+
+func TestPrepareExecOutputPaths(t *testing.T) {
+	root := t.TempDir()
+	paths, err := prepareExecOutputPaths(root, "{sandbox_id}/{exec_id}", map[string]string{
+		"sandbox_id": "sb-1",
+		"exec_id":    "ex-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(paths.StdoutPath, ".stdout.log") {
+		t.Fatalf("expected stdout path to end with .stdout.log, got %q", paths.StdoutPath)
+	}
+	if !strings.HasSuffix(paths.StderrPath, ".stderr.log") {
+		t.Fatalf("expected stderr path to end with .stderr.log, got %q", paths.StderrPath)
+	}
+	// Verify parent directory was created but files were not pre-created.
+	if _, err := os.Stat(filepath.Dir(paths.StdoutPath)); err != nil {
+		t.Fatalf("parent directory should exist: %v", err)
+	}
+	if _, err := os.Stat(paths.StdoutPath); !os.IsNotExist(err) {
+		t.Fatalf("stdout file should not be created by daemon")
+	}
+}

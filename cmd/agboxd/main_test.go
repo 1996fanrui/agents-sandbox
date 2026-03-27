@@ -60,8 +60,9 @@ idle_ttl = "75s"
 	if startup.serviceConfig.IdleTTL != 75*time.Second {
 		t.Fatalf("unexpected idle ttl: got %s", startup.serviceConfig.IdleTTL)
 	}
-	if startup.serviceConfig.ArtifactOutputRoot != "" {
-		t.Fatalf("unexpected artifact output root: got %q", startup.serviceConfig.ArtifactOutputRoot)
+	wantArtifactRoot := platform.ExecLogRoot(lookupEnv)
+	if startup.serviceConfig.ArtifactOutputRoot != wantArtifactRoot {
+		t.Fatalf("unexpected artifact output root: got %q want %q", startup.serviceConfig.ArtifactOutputRoot, wantArtifactRoot)
 	}
 	if _, err := os.Stat(wantConfig); err != nil {
 		t.Fatalf("expected config file to be readable at %q: %v", wantConfig, err)

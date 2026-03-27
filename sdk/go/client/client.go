@@ -300,14 +300,24 @@ func (c *Client) CreateExec(ctx context.Context, sandboxID string, command []str
 	if err != nil {
 		return ExecHandle{}, err
 	}
+	stdoutLogPath := emptyStringPtr(response.GetStdoutLogPath())
+	stderrLogPath := emptyStringPtr(response.GetStderrLogPath())
 	current, err := c.getExecSnapshot(ctx, response.GetExecId())
 	if err != nil {
 		return ExecHandle{}, err
 	}
 	if !options.wait {
+		current.handle.StdoutLogPath = stdoutLogPath
+		current.handle.StderrLogPath = stderrLogPath
 		return current.handle, nil
 	}
-	return c.waitForExecTerminal(ctx, response.GetExecId(), sandboxID, current, "create_exec")
+	handle, err := c.waitForExecTerminal(ctx, response.GetExecId(), sandboxID, current, "create_exec")
+	if err != nil {
+		return ExecHandle{}, err
+	}
+	handle.StdoutLogPath = stdoutLogPath
+	handle.StderrLogPath = stderrLogPath
+	return handle, nil
 }
 
 // Run is a convenience wrapper around CreateExec(wait=true).

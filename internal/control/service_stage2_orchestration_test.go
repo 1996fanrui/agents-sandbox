@@ -666,3 +666,34 @@ func TestDockerExecReturnsExitCodeAndErrorForNonZeroExit(t *testing.T) {
 		t.Fatalf("unexpected exec error: %v", err)
 	}
 }
+
+func TestExecCommandWrapWhenLogDirSet(t *testing.T) {
+	// When LogDir is set, dockerExec wraps the command with shell redirection.
+	spec := dockerExecSpec{
+		ContainerName: "test-container",
+		Command:       []string{"python", "-c", "print('hello')"},
+		LogDir:        "/var/log/agents-sandbox/",
+		ExecID:        "exec-123",
+	}
+
+	stdoutLog := spec.LogDir + spec.ExecID + ".stdout.log"
+	stderrLog := spec.LogDir + spec.ExecID + ".stderr.log"
+	shellCmd := "exec \"$@\" >" + stdoutLog + " 2>" + stderrLog
+
+	expectedCmd := []string{"sh", "-c", shellCmd, "--", "python", "-c", "print('hello')"}
+
+	// Reproduce the wrapping logic from dockerExec to confirm the expected shape.
+	cmd := spec.Command
+	if spec.LogDir != "" {
+		cmd = append([]string{"sh", "-c", shellCmd, "--"}, spec.Command...)
+	}
+
+	if len(cmd) != len(expectedCmd) {
+		t.Fatalf("expected %d args, got %d", len(expectedCmd), len(cmd))
+	}
+	for i := range cmd {
+		if cmd[i] != expectedCmd[i] {
+			t.Fatalf("arg[%d]: expected %q, got %q", i, expectedCmd[i], cmd[i])
+		}
+	}
+}

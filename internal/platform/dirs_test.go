@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -153,6 +154,47 @@ func TestFixedPlatformPaths(t *testing.T) {
 				t.Fatalf("unexpected id store path: got %q want %q", idStorePath, tc.wantStore)
 			}
 		})
+	}
+}
+
+func TestExecLogRootWithXDGDataHome(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("XDG not applicable on macOS")
+	}
+	root := execLogRootForGOOS("linux", func(key string) (string, bool) {
+		if key == "XDG_DATA_HOME" {
+			return "/custom/data", true
+		}
+		return "", false
+	})
+	want := filepath.Join("/custom/data", "agents-sandbox", "exec-logs")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
+	}
+}
+
+func TestExecLogRootFallsBackToHome(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("XDG not applicable on macOS")
+	}
+	root := ExecLogRoot(func(string) (string, bool) { return "", false })
+	if root == "" {
+		t.Fatal("expected non-empty exec log root from home fallback")
+	}
+	if !strings.HasSuffix(root, filepath.Join("agents-sandbox", "exec-logs")) {
+		t.Fatalf("expected path ending in agents-sandbox/exec-logs, got %q", root)
+	}
+}
+
+func TestExecLogRootDarwin(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir returned error: %v", err)
+	}
+	root := execLogRootForGOOS("darwin", func(string) (string, bool) { return "", false })
+	want := filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "exec-logs")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
 	}
 }
 

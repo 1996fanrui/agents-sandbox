@@ -61,6 +61,9 @@ func resolveStartupConfig(args []string, lookupEnv func(string) (string, bool)) 
 	if err != nil {
 		return startupConfig{}, err
 	}
+	if serviceConfig.ArtifactOutputRoot == "" {
+		serviceConfig.ArtifactOutputRoot = platform.ExecLogRoot(lookupEnv)
+	}
 	return startupConfig{
 		socketPath:    socketPath,
 		lockPath:      lockPath,

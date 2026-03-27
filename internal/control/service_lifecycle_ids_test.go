@@ -106,7 +106,7 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 		TransitionDelay:        5 * time.Millisecond,
 		PollInterval:           2 * time.Millisecond,
 		ArtifactOutputRoot:     artifactRoot,
-		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}.log",
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("workspace-1", "ghcr.io/agents-sandbox/coding-runtime:test"))
@@ -124,10 +124,91 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 	}
 	waitForExecState(t, client, execResp.GetExecId(), agboxv1.ExecState_EXEC_STATE_FINISHED)
 
-	// The artifact file is created when exec starts. Phase 2 will write output via bind-mount.
-	artifactPath := filepath.Join(artifactRoot, createResp.GetSandboxId(), execResp.GetExecId()+".log")
-	if _, err := os.Stat(artifactPath); err != nil {
-		t.Fatalf("artifact file not found: %v", err)
+	// Daemon returns separate paths for stdout and stderr; files are written by the container, not pre-created.
+	if execResp.GetStdoutLogPath() == "" {
+		t.Fatal("expected non-empty stdout_log_path")
+	}
+	if execResp.GetStderrLogPath() == "" {
+		t.Fatal("expected non-empty stderr_log_path")
+	}
+	if !strings.HasSuffix(execResp.GetStdoutLogPath(), ".stdout.log") {
+		t.Fatalf("expected stdout path ending with .stdout.log, got %q", execResp.GetStdoutLogPath())
+	}
+	if !strings.HasSuffix(execResp.GetStderrLogPath(), ".stderr.log") {
+		t.Fatalf("expected stderr path ending with .stderr.log, got %q", execResp.GetStderrLogPath())
+	}
+	// The parent directory is created by the daemon; actual log files are written by the container process.
+	parentDir := filepath.Dir(execResp.GetStdoutLogPath())
+	if _, err := os.Stat(parentDir); err != nil {
+		t.Fatalf("expected parent directory to exist: %v", err)
+	}
+	if _, err := os.Stat(execResp.GetStdoutLogPath()); !os.IsNotExist(err) {
+		t.Fatalf("stdout file should not be pre-created by daemon, got err=%v", err)
+	}
+}
+
+func TestCreateSandboxCreatesExecLogDirectory(t *testing.T) {
+	artifactRoot := t.TempDir()
+	backend := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay:        5 * time.Millisecond,
+		PollInterval:           2 * time.Millisecond,
+		runtimeBackend:         backend,
+		ArtifactOutputRoot:     artifactRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
+	})
+
+	_, err := client.CreateSandbox(context.Background(), createSandboxRequest("exec-log-mount", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, "exec-log-mount", agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	// Exec log host directory must be created during CreateSandbox so the bind-mount succeeds.
+	execLogDir := filepath.Join(artifactRoot, "exec-log-mount")
+	info, err := os.Stat(execLogDir)
+	if err != nil {
+		t.Fatalf("exec log directory should exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory, got file at %q", execLogDir)
+	}
+}
+
+func TestCreateExecResponseIncludesLogPaths(t *testing.T) {
+	artifactRoot := t.TempDir()
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay:        5 * time.Millisecond,
+		PollInterval:           2 * time.Millisecond,
+		ArtifactOutputRoot:     artifactRoot,
+		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("resp-log-paths", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		Command:   []string{"echo", "hello"},
+		ExecId:    "exec-resp-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+	if execResp.GetStdoutLogPath() == "" {
+		t.Fatal("expected non-empty stdout_log_path")
+	}
+	if execResp.GetStderrLogPath() == "" {
+		t.Fatal("expected non-empty stderr_log_path")
+	}
+	if !strings.HasSuffix(execResp.GetStdoutLogPath(), ".stdout.log") {
+		t.Fatalf("expected stdout path ending with .stdout.log, got %q", execResp.GetStdoutLogPath())
+	}
+	if !strings.HasSuffix(execResp.GetStderrLogPath(), ".stderr.log") {
+		t.Fatalf("expected stderr path ending with .stderr.log, got %q", execResp.GetStderrLogPath())
 	}
 }
 

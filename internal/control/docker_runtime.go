@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -175,6 +176,16 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 	mounts = append(mounts, copyMounts...)
+	// Bind-mount exec log directory into the primary container so exec output is written directly to the host.
+	// The directory is pre-created by the service layer before calling this function.
+	if backend.config.ArtifactOutputRoot != "" {
+		execLogHostDir := filepath.Join(backend.config.ArtifactOutputRoot, record.handle.GetSandboxId())
+		mounts = append(mounts, dockerMount{
+			Source:   execLogHostDir,
+			Target:   execLogContainerDir,
+			ReadOnly: false,
+		})
+	}
 	if err := ensureUniqueMountTargets(mounts); err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -442,11 +453,17 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeExecResult{}, err
 	}
+	var logDir string
+	if backend.config.ArtifactOutputRoot != "" {
+		logDir = execLogContainerDir
+	}
 	exitCode, err := backend.dockerExec(ctx, dockerExecSpec{
 		ContainerName: record.runtimeState.PrimaryContainerName,
 		Command:       execRecord.GetCommand(),
 		Workdir:       execRecord.GetCwd(),
 		Environment:   keyValuesToMap(execRecord.GetEnvOverrides()),
+		LogDir:        logDir,
+		ExecID:        execRecord.GetExecId(),
 	})
 	return runtimeExecResult{ExitCode: exitCode}, err
 }

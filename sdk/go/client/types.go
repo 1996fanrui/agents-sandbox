@@ -125,6 +125,8 @@ type ExecHandle struct {
 	ExitCode          *int32
 	Error             *string
 	LastEventSequence uint64
+	StdoutLogPath     *string
+	StderrLogPath     *string
 }
 
 // SandboxEvent is the public sandbox event type.
