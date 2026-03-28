@@ -122,7 +122,7 @@ This separation keeps the wire contract stable while letting each language expos
 - The system is Docker-first. Runtime lifecycle, networking, container creation, and exec execution depend on a reachable Docker daemon.
 - The daemon is a single-writer local control plane. It acquires an exclusive host lock at a hardcoded platform path and refuses to start if another daemon already owns that lock.
 - gRPC transport is exposed over a Unix domain socket only, at a hardcoded platform-specific path (not configurable).
-- The current service still keeps sandbox and exec projections in memory, but event history is persisted in `ids.db` and replay survives daemon restart.
+- The current service still keeps sandbox and exec projections in memory, but event history is persisted in `ids.db` and replay survives daemon restart. See [`Daemon State Management`](daemon_state_management.md) for the full state classification, persistence rules, and restart recovery contract.
 - A restarted daemon restores only event-derived sandbox projections. Recovered sandboxes keep replayable history and delete support, but runtime-mutating operations remain blocked until runtime-state recovery exists.
 - Caller-visible ID uniqueness is stronger than in-memory lifecycle state: the daemon persists historical `sandbox_id` and `exec_id` reservations in a platform-derived `ids.db` file so old IDs remain unavailable after daemon restart.
 - Runtime stop, delete, and failed-create cleanup do not reuse caller RPC contexts. The service and runtime switch to daemon-owned background contexts so cleanup can finish even if the initiating request has already ended.
