@@ -32,7 +32,7 @@ type persistentEventStore struct {
 	db *bbolt.DB
 }
 
-var eventMetaBucket = []byte("event-meta")
+var eventMetaBucket = []byte("sandbox-deleted-at")
 
 const eventsBucketPrefix = "events:"
 
