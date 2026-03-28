@@ -77,10 +77,10 @@ func ResolveProjectionMode(projectionRoot string, declaredRoots []string, writab
 			return err
 		}
 		if _, err := os.Stat(targetPath); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return ErrProjectionTargetUnreadable
-			}
-			return err
+			// Unresolvable symlink (broken target or permission denied): skip for
+			// projection mode decision. The symlink passes through as-is in a bind
+			// mount (stale cache entries, cross-environment paths, root-owned paths).
+			return nil
 		}
 		if !withinAnyRoot(targetPath, allowedRoots) {
 			resolution.Mode = ProjectionModeShadowCopy

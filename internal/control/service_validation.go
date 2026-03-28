@@ -87,8 +87,8 @@ func validateServiceSpecs(items []*agboxv1.ServiceSpec, required bool, seen map[
 		if required && service.GetHealthcheck() == nil {
 			return fmt.Errorf("required service %q must define healthcheck", service.GetName())
 		}
-		if !required && len(service.GetPostStartOnPrimary()) > 0 {
-			return fmt.Errorf("optional service %q must not define post_start_on_primary", service.GetName())
+		if !required && len(service.GetPostStartOnPrimary()) > 0 && service.GetHealthcheck() == nil {
+			return fmt.Errorf("optional service %q with post_start_on_primary must define healthcheck", service.GetName())
 		}
 		if err := validateHealthcheck(service.GetName(), service.GetHealthcheck(), required); err != nil {
 			return err

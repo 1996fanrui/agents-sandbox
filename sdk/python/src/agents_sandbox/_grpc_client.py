@@ -27,7 +27,7 @@ _REASON_TO_ERROR = dict(
 class SandboxGrpcClient:
     """Thin synchronous wrapper around the generated gRPC stub."""
 
-    def __init__(self, socket_path: str, *, timeout_seconds: float = 5.0) -> None:
+    def __init__(self, socket_path: str, *, timeout_seconds: float | None = 5.0) -> None:
         self._timeout_seconds = timeout_seconds
         self._channel = grpc.insecure_channel(f"unix://{socket_path}")
         self._stub = service_pb2_grpc.SandboxServiceStub(self._channel)

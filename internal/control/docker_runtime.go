@@ -238,7 +238,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
 	}
 
-	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, record.optionalServices, userLabels, func(ctx context.Context, spec dockerContainerSpec) error {
+	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.optionalServices, userLabels, backend, func(ctx context.Context, spec dockerContainerSpec) error {
 		return backend.dockerContainerCreate(ctx, spec)
 	}, func(ctx context.Context, name string) error {
 		return backend.dockerContainerStart(ctx, name)
@@ -278,6 +278,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			if _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: state.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
+				Environment:   keyValuesToMap(service.GetEnvironment()),
 			}); err != nil {
 				return runtimeCreateResult{}, err
 			}
@@ -343,8 +344,10 @@ func startOptionalServicesAsync(
 	ctx context.Context,
 	sandboxID string,
 	networkName string,
+	primaryContainerName string,
 	services []*agboxv1.ServiceSpec,
 	userLabels map[string]string,
+	backend *dockerRuntimeBackend,
 	createContainer func(context.Context, dockerContainerSpec) error,
 	startContainer func(context.Context, string) error,
 ) optionalServiceStarts {
@@ -375,8 +378,28 @@ func startOptionalServicesAsync(
 			if err := startContainer(optionalCtx, containerName); err != nil {
 				status.Ready = false
 				status.Message = err.Error()
+				results <- status
+				return
 			}
 			results <- status
+			// Run post_start_on_primary hooks after healthcheck passes in a separate
+			// goroutine so sandbox ready is not delayed by optional service setup.
+			if len(service.GetPostStartOnPrimary()) > 0 && service.GetHealthcheck() != nil {
+				go func(svc *agboxv1.ServiceSpec, ctrName string) {
+					if err := backend.dockerWaitRequiredServiceHealthy(optionalCtx, ctrName, svc.GetHealthcheck()); err != nil {
+						return
+					}
+					for _, hook := range svc.GetPostStartOnPrimary() {
+						if _, err := backend.dockerExec(optionalCtx, dockerExecSpec{
+							ContainerName: primaryContainerName,
+							Command:       []string{"sh", "-lc", hook},
+							Environment:   keyValuesToMap(svc.GetEnvironment()),
+						}); err != nil {
+							return
+						}
+					}
+				}(service, containerName)
+			}
 		}(service, containerName)
 	}
 	go func() {
@@ -462,6 +485,7 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 		Command:       execRecord.GetCommand(),
 		Workdir:       execRecord.GetCwd(),
 		Environment:   keyValuesToMap(execRecord.GetEnvOverrides()),
+		User:          "agbox",
 		LogDir:        logDir,
 		ExecID:        execRecord.GetExecId(),
 	})

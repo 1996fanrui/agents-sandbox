@@ -47,6 +47,7 @@ type dockerExecSpec struct {
 	Command       []string
 	Workdir       string
 	Environment   map[string]string
+	User          string // Override exec user; empty = container default
 	LogDir        string // Container-side log directory; non-empty enables output redirection
 	ExecID        string // Used to construct log file names when LogDir is set
 }
@@ -317,6 +318,7 @@ func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec docker
 		Tty:          false,
 		Env:          envMapToSlice(spec.Environment),
 		WorkingDir:   spec.Workdir,
+		User:         spec.User,
 		Cmd:          cmd,
 	})
 	if err != nil {
