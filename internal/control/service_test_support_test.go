@@ -19,13 +19,19 @@ import (
 )
 
 type scriptedEventStore struct {
-	appendFn            func(string, *agboxv1.SandboxEvent) error
-	loadEventsFn        func(string) ([]*agboxv1.SandboxEvent, error)
-	loadAllSandboxIDsFn func() ([]string, error)
-	maxSequenceFn       func(string) (uint64, error)
-	deletedAtFn         func(string) (time.Time, bool, error)
-	markDeletedFn       func(string, time.Time) error
-	cleanupFn           func(time.Duration) ([]string, error)
+	appendFn              func(string, *agboxv1.SandboxEvent) error
+	loadEventsFn          func(string) ([]*agboxv1.SandboxEvent, error)
+	loadAllSandboxIDsFn   func() ([]string, error)
+	maxSequenceFn         func(string) (uint64, error)
+	deletedAtFn           func(string) (time.Time, bool, error)
+	markDeletedFn         func(string, time.Time) error
+	cleanupFn             func(time.Duration) ([]string, error)
+	saveSandboxConfigFn   func(string, *agboxv1.CreateSpec) error
+	loadSandboxConfigFn   func(string) (*agboxv1.CreateSpec, error)
+	loadAllSandboxConfigs func() (map[string]*agboxv1.CreateSpec, error)
+	deleteSandboxConfigFn func(string) error
+	saveExecConfigFn      func(string, *agboxv1.CreateExecRequest) error
+	loadExecConfigsFn     func(string) ([]*agboxv1.CreateExecRequest, error)
 }
 
 type persistentBufconnHarness struct {
@@ -79,6 +85,48 @@ func (store scriptedEventStore) MarkDeleted(sandboxID string, deletedAt time.Tim
 func (store scriptedEventStore) Cleanup(retentionTTL time.Duration) ([]string, error) {
 	if store.cleanupFn != nil {
 		return store.cleanupFn(retentionTTL)
+	}
+	return nil, nil
+}
+
+func (store scriptedEventStore) SaveSandboxConfig(sandboxID string, spec *agboxv1.CreateSpec) error {
+	if store.saveSandboxConfigFn != nil {
+		return store.saveSandboxConfigFn(sandboxID, spec)
+	}
+	return nil
+}
+
+func (store scriptedEventStore) LoadSandboxConfig(sandboxID string) (*agboxv1.CreateSpec, error) {
+	if store.loadSandboxConfigFn != nil {
+		return store.loadSandboxConfigFn(sandboxID)
+	}
+	return nil, nil
+}
+
+func (store scriptedEventStore) LoadAllSandboxConfigs() (map[string]*agboxv1.CreateSpec, error) {
+	if store.loadAllSandboxConfigs != nil {
+		return store.loadAllSandboxConfigs()
+	}
+	return nil, nil
+}
+
+func (store scriptedEventStore) DeleteSandboxConfig(sandboxID string) error {
+	if store.deleteSandboxConfigFn != nil {
+		return store.deleteSandboxConfigFn(sandboxID)
+	}
+	return nil
+}
+
+func (store scriptedEventStore) SaveExecConfig(sandboxID string, req *agboxv1.CreateExecRequest) error {
+	if store.saveExecConfigFn != nil {
+		return store.saveExecConfigFn(sandboxID, req)
+	}
+	return nil
+}
+
+func (store scriptedEventStore) LoadExecConfigs(sandboxID string) ([]*agboxv1.CreateExecRequest, error) {
+	if store.loadExecConfigsFn != nil {
+		return store.loadExecConfigsFn(sandboxID)
 	}
 	return nil, nil
 }

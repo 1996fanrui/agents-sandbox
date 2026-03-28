@@ -136,6 +136,9 @@ func openBoltDB(path string) (*bbolt.DB, error) {
 		if _, err := tx.CreateBucketIfNotExists(eventMetaBucket); err != nil {
 			return fmt.Errorf("create bucket %q: %w", eventMetaBucket, err)
 		}
+		if _, err := tx.CreateBucketIfNotExists(sandboxConfigBucket); err != nil {
+			return fmt.Errorf("create bucket %q: %w", sandboxConfigBucket, err)
+		}
 		return nil
 	}); err != nil {
 		_ = db.Close()

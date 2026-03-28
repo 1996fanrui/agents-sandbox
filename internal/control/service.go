@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type ServiceConfig struct {
@@ -188,6 +189,12 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	if err != nil {
 		return nil, err
 	}
+	if err := s.config.eventStore.SaveSandboxConfig(sandboxID, proto.Clone(req.GetCreateSpec()).(*agboxv1.CreateSpec)); err != nil {
+		if releaseErr := s.config.idRegistry.ReleaseSandboxID(sandboxID); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("release sandbox id %s: %w", sandboxID, releaseErr))
+		}
+		return nil, status.Errorf(codes.Internal, "save sandbox config: %v", err)
+	}
 	record := &sandboxRecord{
 		handle: &agboxv1.SandboxHandle{
 			SandboxId:        sandboxID,
@@ -205,6 +212,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
 	}); err != nil {
+		_ = s.config.eventStore.DeleteSandboxConfig(sandboxID)
 		if releaseErr := s.config.idRegistry.ReleaseSandboxID(sandboxID); releaseErr != nil {
 			err = errors.Join(err, fmt.Errorf("release sandbox id %s: %w", sandboxID, releaseErr))
 		}
@@ -478,6 +486,20 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 	execID, err := s.allocateExecID(req.GetExecId())
 	if err != nil {
 		return nil, err
+	}
+	execConfigCopy := &agboxv1.CreateExecRequest{
+		SandboxId:    req.GetSandboxId(),
+		ExecId:       execID,
+		Command:      slices.Clone(req.GetCommand()),
+		Cwd:          req.GetCwd(),
+		EnvOverrides: cloneKeyValues(req.GetEnvOverrides()),
+	}
+	if err := s.config.eventStore.SaveExecConfig(req.GetSandboxId(), execConfigCopy); err != nil {
+		cleanupErr := s.config.idRegistry.ReleaseExecID(execID)
+		if cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
+		return nil, status.Errorf(codes.Internal, "save exec config: %v", err)
 	}
 	artifactPaths, artifactErr := s.prepareExecArtifactPaths(record.handle.GetSandboxId(), execID)
 	if artifactErr != nil {
