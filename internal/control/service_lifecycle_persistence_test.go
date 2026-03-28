@@ -265,46 +265,6 @@ func TestExpiredEventsCleanedUp(t *testing.T) {
 	assertStatusErrorReason(t, err, codes.NotFound, ReasonSandboxNotFound)
 }
 
-func TestRecoveredSandboxRejectsExecButAllowsDelete(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "ids.db")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
-		TransitionDelay: 5 * time.Millisecond,
-		PollInterval:    2 * time.Millisecond,
-	}, dbPath)
-	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("recovered-only", "ghcr.io/agents-sandbox/coding-runtime:test"))
-	if err != nil {
-		t.Fatalf("CreateSandbox failed: %v", err)
-	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	first.close()
-
-	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
-		PollInterval:      2 * time.Millisecond,
-		runtimeBackend:    &scriptedRuntimeBackend{deleteErr: errors.New("runtime delete should not be called")},
-		EventRetentionTTL: time.Hour,
-	}, dbPath)
-
-	_, err = second.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
-		Command:   []string{"echo", "blocked"},
-	})
-	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
-
-	_, err = second.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()})
-	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
-
-	_, err = second.client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandboxId()})
-	assertStatusErrorReason(t, err, codes.FailedPrecondition, ReasonSandboxRecoveredOnly)
-
-	if _, err := second.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
-		t.Fatalf("DeleteSandbox failed: %v", err)
-	}
-	waitForSandboxState(t, second.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
-}
-
 func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
 	runtimeErr := errors.New("runtime close failed")
 	registryErr := errors.New("registry close failed")

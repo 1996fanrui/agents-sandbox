@@ -28,7 +28,7 @@ type scriptedEventStore struct {
 	cleanupFn             func(time.Duration) ([]string, error)
 	saveSandboxConfigFn   func(string, *agboxv1.CreateSpec) error
 	loadSandboxConfigFn   func(string) (*agboxv1.CreateSpec, error)
-	loadAllSandboxConfigs func() (map[string]*agboxv1.CreateSpec, error)
+	loadAllSandboxConfigsFn func() (map[string]*agboxv1.CreateSpec, error)
 	deleteSandboxConfigFn func(string) error
 	saveExecConfigFn      func(string, *agboxv1.CreateExecRequest) error
 	loadExecConfigsFn     func(string) ([]*agboxv1.CreateExecRequest, error)
@@ -104,8 +104,8 @@ func (store scriptedEventStore) LoadSandboxConfig(sandboxID string) (*agboxv1.Cr
 }
 
 func (store scriptedEventStore) LoadAllSandboxConfigs() (map[string]*agboxv1.CreateSpec, error) {
-	if store.loadAllSandboxConfigs != nil {
-		return store.loadAllSandboxConfigs()
+	if store.loadAllSandboxConfigsFn != nil {
+		return store.loadAllSandboxConfigsFn()
 	}
 	return nil, nil
 }
@@ -318,6 +318,8 @@ type capturingRuntimeBackend struct {
 	lastCreateSpec  *agboxv1.CreateSpec
 	execResult      runtimeExecResult
 	inspectResults  map[string]ContainerInspectResult
+	watchEventCh    chan ContainerEvent
+	watchErrCh      chan error
 }
 
 func (backend *capturingRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
@@ -356,6 +358,13 @@ func (backend *capturingRuntimeBackend) InspectContainer(_ context.Context, cont
 		}
 	}
 	return ContainerInspectResult{}, nil
+}
+
+func (backend *capturingRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
+	if backend.watchEventCh != nil {
+		return backend.watchEventCh, backend.watchErrCh
+	}
+	return make(chan ContainerEvent), make(chan error)
 }
 
 func createSandboxRequest(sandboxID string, image string) *agboxv1.CreateSandboxRequest {
