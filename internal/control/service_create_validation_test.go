@@ -646,3 +646,86 @@ func TestPrepareExecOutputPaths(t *testing.T) {
 		t.Fatalf("stdout file should not be created by daemon")
 	}
 }
+
+func TestCreateSandboxWithYAML(t *testing.T) {
+	t.Run("yaml_only_provides_image", func(t *testing.T) {
+		runtime := &capturingRuntimeBackend{}
+		client := newBufconnClient(t, ServiceConfig{
+			TransitionDelay: 5 * time.Millisecond,
+			PollInterval:    2 * time.Millisecond,
+			runtimeBackend:  runtime,
+		})
+
+		yamlContent := []byte("image: yaml-provided:latest\n")
+		resp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+			SandboxId:  "yaml-only",
+			ConfigYaml: yamlContent,
+		})
+		if err != nil {
+			t.Fatalf("CreateSandbox with YAML failed: %v", err)
+		}
+		waitForSandboxState(t, client, resp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+		if runtime.lastCreateImage != "yaml-provided:latest" {
+			t.Fatalf("expected yaml-provided:latest, got %q", runtime.lastCreateImage)
+		}
+	})
+
+	t.Run("yaml_plus_create_spec_merge", func(t *testing.T) {
+		runtime := &capturingRuntimeBackend{}
+		client := newBufconnClient(t, ServiceConfig{
+			TransitionDelay: 5 * time.Millisecond,
+			PollInterval:    2 * time.Millisecond,
+			runtimeBackend:  runtime,
+		})
+
+		yamlContent := []byte("image: yaml-base:v1\nlabels:\n  from_yaml: \"true\"\n  shared: yaml_value\n")
+		resp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+			SandboxId:  "yaml-merge",
+			ConfigYaml: yamlContent,
+			CreateSpec: &agboxv1.CreateSpec{
+				Image:  "override:v2",
+				Labels: map[string]string{"shared": "code_value", "from_code": "true"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateSandbox with YAML+spec failed: %v", err)
+		}
+		waitForSandboxState(t, client, resp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+		if runtime.lastCreateImage != "override:v2" {
+			t.Fatalf("expected override:v2, got %q", runtime.lastCreateImage)
+		}
+		labels := runtime.lastCreateSpec.GetLabels()
+		if labels["from_yaml"] != "true" {
+			t.Fatalf("expected from_yaml label preserved, got %v", labels)
+		}
+		if labels["shared"] != "code_value" {
+			t.Fatalf("expected shared label overridden to code_value, got %v", labels)
+		}
+		if labels["from_code"] != "true" {
+			t.Fatalf("expected from_code label, got %v", labels)
+		}
+	})
+
+	t.Run("invalid_yaml_returns_error", func(t *testing.T) {
+		client := newBufconnClient(t, ServiceConfig{
+			TransitionDelay: 5 * time.Millisecond,
+			PollInterval:    2 * time.Millisecond,
+		})
+
+		yamlContent := []byte("unknown_field: bad\n")
+		_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+			SandboxId:  "yaml-invalid",
+			ConfigYaml: yamlContent,
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid YAML")
+		}
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "config_yaml") {
+			t.Fatalf("expected error to mention config_yaml, got %v", err)
+		}
+	})
+}

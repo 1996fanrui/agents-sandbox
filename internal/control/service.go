@@ -156,6 +156,21 @@ func (s *Service) Ping(context.Context, *agboxv1.PingRequest) (*agboxv1.PingResp
 
 func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
 	s.config.Logger.Debug("gRPC CreateSandbox", slog.String("image", req.GetCreateSpec().GetImage()))
+
+	// YAML parsing and merging (must happen before validation).
+	if len(req.GetConfigYaml()) > 0 {
+		yamlCfg, err := parseYAMLConfig(req.GetConfigYaml())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid config_yaml: %v", err)
+		}
+		yamlSpec := yamlConfigToCreateSpec(yamlCfg)
+		override := req.GetCreateSpec()
+		if override == nil {
+			override = &agboxv1.CreateSpec{}
+		}
+		req.CreateSpec = mergeCreateSpecs(yamlSpec, override)
+	}
+
 	if req.GetCreateSpec() == nil {
 		return nil, status.Error(codes.InvalidArgument, "create_spec is required")
 	}

@@ -250,12 +250,14 @@ class ExecStatus(_message.Message):
     def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
 
 class CreateSandboxRequest(_message.Message):
-    __slots__ = ("create_spec", "sandbox_id")
+    __slots__ = ("create_spec", "sandbox_id", "config_yaml")
     CREATE_SPEC_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_YAML_FIELD_NUMBER: _ClassVar[int]
     create_spec: CreateSpec
     sandbox_id: str
-    def __init__(self, create_spec: _Optional[_Union[CreateSpec, _Mapping]] = ..., sandbox_id: _Optional[str] = ...) -> None: ...
+    config_yaml: bytes
+    def __init__(self, create_spec: _Optional[_Union[CreateSpec, _Mapping]] = ..., sandbox_id: _Optional[str] = ..., config_yaml: _Optional[bytes] = ...) -> None: ...
 
 class CreateSandboxResponse(_message.Message):
     __slots__ = ("sandbox_id", "initial_state")

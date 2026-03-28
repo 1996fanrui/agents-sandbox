@@ -1095,6 +1095,7 @@ type CreateSandboxRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CreateSpec    *CreateSpec            `protobuf:"bytes,1,opt,name=create_spec,json=createSpec,proto3" json:"create_spec,omitempty"`
 	SandboxId     string                 `protobuf:"bytes,2,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	ConfigYaml    []byte                 `protobuf:"bytes,3,opt,name=config_yaml,json=configYaml,proto3" json:"config_yaml,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1141,6 +1142,13 @@ func (x *CreateSandboxRequest) GetSandboxId() string {
 		return x.SandboxId
 	}
 	return ""
+}
+
+func (x *CreateSandboxRequest) GetConfigYaml() []byte {
+	if x != nil {
+		return x.ConfigYaml
+	}
+	return nil
 }
 
 type CreateSandboxResponse struct {
@@ -2157,12 +2165,14 @@ const file_service_proto_rawDesc = "" +
 	"\renv_overrides\x18\x06 \x03(\v2\x12.agbox.v1.KeyValueR\fenvOverrides\x12\x1b\n" +
 	"\texit_code\x18\a \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\b \x01(\tR\x05error\x12.\n" +
-	"\x13last_event_sequence\x18\t \x01(\x04R\x11lastEventSequence\"l\n" +
+	"\x13last_event_sequence\x18\t \x01(\x04R\x11lastEventSequence\"\x8d\x01\n" +
 	"\x14CreateSandboxRequest\x125\n" +
 	"\vcreate_spec\x18\x01 \x01(\v2\x14.agbox.v1.CreateSpecR\n" +
 	"createSpec\x12\x1d\n" +
 	"\n" +
-	"sandbox_id\x18\x02 \x01(\tR\tsandboxId\"s\n" +
+	"sandbox_id\x18\x02 \x01(\tR\tsandboxId\x12\x1f\n" +
+	"\vconfig_yaml\x18\x03 \x01(\fR\n" +
+	"configYaml\"s\n" +
 	"\x15CreateSandboxResponse\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12;\n" +
