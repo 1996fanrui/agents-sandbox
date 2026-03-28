@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -157,10 +158,15 @@ func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWrit
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	t.Cleanup(server.Close)
 
-	host := strings.Replace(server.URL, "http://", "tcp://", 1)
+	serverAddr := server.Listener.Addr().String()
+	// Use WithDialContext to route all connections (including hijacked exec
+	// streams) to the test server. WithHTTPClient alone does not cover
+	// hijacked connections because the Docker client dials them directly.
 	dockerClient, err := client.NewClientWithOpts(
-		client.WithHost(host),
-		client.WithHTTPClient(server.Client()),
+		client.WithHost("tcp://"+serverAddr),
+		client.WithDialContext(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return net.Dial("tcp", serverAddr)
+		}),
 		client.WithVersion("1.44"),
 	)
 	if err != nil {
