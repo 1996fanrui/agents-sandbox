@@ -24,7 +24,7 @@ from agents_sandbox import (
 )
 from agents_sandbox._generated import service_pb2
 from agents_sandbox.client import _resolve_default_socket_path
-from agents_sandbox.conversions import to_exec_handle, to_exec_snapshot, to_sandbox_handle
+from agents_sandbox._conversions import to_exec_handle, to_exec_snapshot, to_sandbox_handle
 from agents_sandbox.types import CallerMetadata
 
 from tests.smoke_support import (

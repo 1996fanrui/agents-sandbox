@@ -49,35 +49,6 @@ class CopySpec:
 
 
 @dataclass(frozen=True, slots=True)
-class CreateSandboxSpec:
-    image: str
-    mounts: tuple[MountSpec, ...] = ()
-    copies: tuple[CopySpec, ...] = ()
-    builtin_resources: tuple[str, ...] = ()
-    required_services: tuple[ServiceSpec, ...] = ()
-    optional_services: tuple[ServiceSpec, ...] = ()
-    labels: Mapping[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "labels", dict(self.labels))
-
-
-@dataclass(frozen=True, slots=True)
-class CreateSandboxRequest:
-    create_spec: CreateSandboxSpec
-    sandbox_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CreateExecRequest:
-    sandbox_id: str
-    command: tuple[str, ...]
-    exec_id: str | None = None
-    cwd: str | None = None
-    env_overrides: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
 class SandboxEvent:
     event_id: str
     sequence: int
@@ -133,9 +104,6 @@ class ExecHandle:
 
 __all__ = [
     "CopySpec",
-    "CreateExecRequest",
-    "CreateSandboxRequest",
-    "CreateSandboxSpec",
     "DeleteSandboxesResult",
     "ExecHandle",
     "HealthcheckConfig",
