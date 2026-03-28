@@ -317,6 +317,7 @@ type capturingRuntimeBackend struct {
 	lastCreateImage string
 	lastCreateSpec  *agboxv1.CreateSpec
 	execResult      runtimeExecResult
+	inspectResults  map[string]ContainerInspectResult
 }
 
 func (backend *capturingRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
@@ -346,6 +347,15 @@ func (backend *capturingRuntimeBackend) RunExec(context.Context, *sandboxRecord,
 		return runtimeExecResult{ExitCode: 0}, nil
 	}
 	return backend.execResult, nil
+}
+
+func (backend *capturingRuntimeBackend) InspectContainer(_ context.Context, containerName string) (ContainerInspectResult, error) {
+	if backend.inspectResults != nil {
+		if result, ok := backend.inspectResults[containerName]; ok {
+			return result, nil
+		}
+	}
+	return ContainerInspectResult{}, nil
 }
 
 func createSandboxRequest(sandboxID string, image string) *agboxv1.CreateSandboxRequest {

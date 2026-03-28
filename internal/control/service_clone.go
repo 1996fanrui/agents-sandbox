@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/grpc"
@@ -49,6 +48,7 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		BuiltinResources: slices.Clone(spec.GetBuiltinResources()),
 		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
+		Envs:             cloneKeyValues(spec.GetEnvs()),
 	}
 }
 
@@ -138,21 +138,6 @@ func (s *Service) beginSandboxDeleteLocked(record *sandboxRecord, reason string)
 	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETING
 	return true, nil
-}
-
-func (s *Service) finishRecoveredSandboxDeleteLocked(record *sandboxRecord, reason string) error {
-	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{
-		reason:       reason,
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETED,
-	}); err != nil {
-		return err
-	}
-	if err := s.config.eventStore.MarkDeleted(record.handle.GetSandboxId(), time.Now()); err != nil {
-		return err
-	}
-	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_DELETED
-	record.deletedAtRecorded = true
-	return nil
 }
 
 func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {

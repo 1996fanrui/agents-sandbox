@@ -87,7 +87,7 @@ For one `sandbox_id`:
 - clients must treat event sequences as the ordering source of truth
 - stale sequence anchors beyond the retained stream must fail with `OUT_OF_RANGE` and reason `SANDBOX_EVENT_SEQUENCE_EXPIRED`
 
-The daemon persists event history in bbolt, reloads it on startup, and marks recovered sandboxes as replay-only records until runtime state is recreated in a later design. Deleted sandbox streams remain queryable until `runtime.event_retention_ttl` expires, after which cleanup removes the retained history.
+The daemon persists event history, sandbox configs, and exec configs in bbolt. On restart, it loads all persisted state, reconciles with Docker container inspect results, and rebuilds fully operational sandbox records. READY sandboxes with running containers remain READY; READY sandboxes with exited or missing containers become FAILED; STOPPED sandboxes with existing containers stay STOPPED; PENDING and DELETING sandboxes are resolved to FAILED and DELETED respectively. Restored sandboxes support all operations without restriction. Deleted sandbox streams remain queryable until `runtime.event_retention_ttl` expires, after which cleanup removes the retained history.
 
 ## Create Path
 

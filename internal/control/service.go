@@ -83,7 +83,6 @@ type sandboxRecord struct {
 	nextSequence              uint64
 	lastTerminalRunFinishedAt time.Time
 	deletedAtRecorded         bool
-	recoveredOnly             bool
 }
 
 type eventMutation struct {
@@ -268,10 +267,6 @@ func (s *Service) ResumeSandbox(_ context.Context, req *agboxv1.ResumeSandboxReq
 		s.mu.Unlock()
 		return nil, err
 	}
-	if err := requireMutableSandbox(record); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_STOPPED {
 		s.mu.Unlock()
 		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not stopped", req.GetSandboxId())
@@ -294,10 +289,6 @@ func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest
 	s.mu.Lock()
 	record, err := s.requireSandboxLocked(req.GetSandboxId())
 	if err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	if err := requireMutableSandbox(record); err != nil {
 		s.mu.Unlock()
 		return nil, err
 	}
@@ -345,14 +336,6 @@ func (s *Service) DeleteSandbox(_ context.Context, req *agboxv1.DeleteSandboxReq
 		s.mu.Unlock()
 		return &agboxv1.AcceptedResponse{Accepted: true}, nil
 	}
-	if record.recoveredOnly {
-		if err := s.finishRecoveredSandboxDeleteLocked(record, "delete_requested"); err != nil {
-			s.mu.Unlock()
-			return nil, status.Errorf(codes.Internal, "delete recovered sandbox: %v", err)
-		}
-		s.mu.Unlock()
-		return &agboxv1.AcceptedResponse{Accepted: true}, nil
-	}
 	s.mu.Unlock()
 	go s.completeSandboxDelete(req.GetSandboxId(), "delete_requested")
 	s.config.Logger.Info("sandbox delete requested", slog.String("sandbox_id", req.GetSandboxId()))
@@ -381,13 +364,6 @@ func (s *Service) DeleteSandboxes(_ context.Context, req *agboxv1.DeleteSandboxe
 			continue
 		}
 		sandboxIDs = append(sandboxIDs, sandboxID)
-		if record.recoveredOnly {
-			if err := s.finishRecoveredSandboxDeleteLocked(record, "delete_requested"); err != nil {
-				s.mu.Unlock()
-				return nil, status.Errorf(codes.Internal, "delete recovered sandbox: %v", err)
-			}
-			continue
-		}
 		asyncDeleteSandboxIDs = append(asyncDeleteSandboxIDs, sandboxID)
 	}
 	s.mu.Unlock()
@@ -472,9 +448,6 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 
 	record, err := s.requireSandboxLocked(req.GetSandboxId())
 	if err != nil {
-		return nil, err
-	}
-	if err := requireMutableSandbox(record); err != nil {
 		return nil, err
 	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
