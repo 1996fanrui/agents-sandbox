@@ -7,6 +7,7 @@ import dataclasses
 import os
 import platform
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from pathlib import Path
 from threading import Event as ThreadEvent
 from threading import Thread
 from typing import cast
@@ -108,8 +109,9 @@ class AgentsSandboxClient:
 
     async def create_sandbox(
         self,
-        image: str,
         *,
+        config: str | Path | None = None,
+        image: str | None = None,
         sandbox_id: str | None = None,
         mounts: tuple[MountSpec, ...] = (),
         copies: tuple[CopySpec, ...] = (),
@@ -119,6 +121,13 @@ class AgentsSandboxClient:
         labels: Mapping[str, str] | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
+        if config is None and image is None:
+            raise ValueError("at least one of 'config' or 'image' must be provided")
+
+        config_yaml = b""
+        if config is not None:
+            config_yaml = Path(config).read_bytes()
+
         request = CreateSandboxRequest(
             sandbox_id=_validate_optional_id("sandbox_id", sandbox_id),
             create_spec=CreateSandboxSpec(
@@ -130,6 +139,7 @@ class AgentsSandboxClient:
                 optional_services=optional_services,
                 labels={} if labels is None else dict(labels),
             ),
+            config_yaml=config_yaml,
         )
         try:
             response = await asyncio.to_thread(

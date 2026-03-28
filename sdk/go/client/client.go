@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -111,7 +113,8 @@ func (c *Client) Ping(ctx context.Context) (PingInfo, error) {
 }
 
 // CreateSandbox creates a sandbox and optionally waits until it becomes ready.
-func (c *Client) CreateSandbox(ctx context.Context, image string, opts ...CreateSandboxOption) (SandboxHandle, error) {
+// At least one of WithImage or WithConfig must be provided.
+func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption) (SandboxHandle, error) {
 	options := defaultCreateSandboxOptions()
 	for _, opt := range opts {
 		if err := opt.applyCreateSandbox(&options); err != nil {
@@ -119,8 +122,27 @@ func (c *Client) CreateSandbox(ctx context.Context, image string, opts ...Create
 		}
 	}
 
+	if options.image == nil && options.configPath == nil {
+		return SandboxHandle{}, fmt.Errorf("at least one of WithImage or WithConfig must be provided")
+	}
+
+	var configYaml []byte
+	if options.configPath != nil {
+		data, err := os.ReadFile(*options.configPath)
+		if err != nil {
+			return SandboxHandle{}, fmt.Errorf("read config file: %w", err)
+		}
+		configYaml = data
+	}
+
+	image := ""
+	if options.image != nil {
+		image = *options.image
+	}
+
 	request := &agboxv1.CreateSandboxRequest{
-		SandboxId: valueOrEmpty(options.sandboxID),
+		SandboxId:  valueOrEmpty(options.sandboxID),
+		ConfigYaml: configYaml,
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:            image,
 			Mounts:           toProtoMounts(options.mounts),

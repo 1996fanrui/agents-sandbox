@@ -10,7 +10,7 @@ from .types import CopySpec, MountSpec, ServiceSpec
 
 @dataclass(frozen=True, slots=True)
 class CreateSandboxSpec:
-    image: str
+    image: str | None = None
     mounts: tuple[MountSpec, ...] = ()
     copies: tuple[CopySpec, ...] = ()
     builtin_resources: tuple[str, ...] = ()
@@ -26,6 +26,7 @@ class CreateSandboxSpec:
 class CreateSandboxRequest:
     create_spec: CreateSandboxSpec
     sandbox_id: str | None = None
+    config_yaml: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)

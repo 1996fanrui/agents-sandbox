@@ -276,6 +276,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
     create_signature = inspect.signature(AgentsSandboxClient.create_sandbox)
     assert list(create_signature.parameters) == [
         "self",
+        "config",
         "image",
         "sandbox_id",
         "mounts",
@@ -419,8 +420,8 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
-        await client.create_sandbox("python:3.12-slim", sandbox_id="sandbox-explicit")
-        await client.create_sandbox("python:3.12-slim")
+        await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-explicit")
+        await client.create_sandbox(image="python:3.12-slim")
 
     asyncio.run(run_test())
 
@@ -462,7 +463,7 @@ def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_t
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
         await client.create_sandbox(
-            "python:3.12-slim",
+            image="python:3.12-slim",
             mounts=(
                 MountSpec(source="/host/workspace", target="/workspace", writable=True),
             ),
@@ -563,7 +564,7 @@ def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.Monk
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
         await client.create_sandbox(
-            "python:3.12-slim",
+            image="python:3.12-slim",
             labels={"team": "sdk", "purpose": "test"},
         )
 

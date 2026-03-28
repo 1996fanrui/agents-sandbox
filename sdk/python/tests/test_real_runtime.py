@@ -124,7 +124,7 @@ async def _run_real_runtime_exec_flow(*, socket_path: Path, workspace: Path) -> 
     client = await _wait_for_client(socket_path)
     async with client:
         sandbox = await client.create_sandbox(
-            RUNTIME_IMAGE,
+            image=RUNTIME_IMAGE,
             sandbox_id="real-runtime-exec",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
         )
@@ -160,7 +160,7 @@ async def _run_real_runtime_create_with_image(
     client = await _wait_for_client(socket_path)
     async with client:
         await client.create_sandbox(
-            image,
+            image=image,
             sandbox_id="real-runtime-empty-image",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
         )
@@ -170,7 +170,7 @@ async def _run_real_runtime_projection_flow(*, socket_path: Path, workspace: Pat
     client = await _wait_for_client(socket_path)
     async with client:
         sandbox = await client.create_sandbox(
-            RUNTIME_IMAGE,
+            image=RUNTIME_IMAGE,
             sandbox_id="real-runtime-claude",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
             builtin_resources=(".claude",),

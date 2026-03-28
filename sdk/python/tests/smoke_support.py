@@ -60,7 +60,7 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
     client = _new_client(socket_path, timeout_seconds=5.0, stream_timeout_seconds=5.0)
     ping = await client.ping()
     sandbox = await client.create_sandbox(
-        "python:3.12-slim",
+        image="python:3.12-slim",
         sandbox_id="sandbox-1",
         required_services=(
             ServiceSpec(

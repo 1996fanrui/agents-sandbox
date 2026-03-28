@@ -203,7 +203,7 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
 
     async def run_test() -> SandboxHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
-        return await client.create_sandbox("python:3.12-slim", sandbox_id="sandbox-1", wait=True)
+        return await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-1", wait=True)
 
     sandbox = asyncio.run(run_test())
 
@@ -249,7 +249,7 @@ def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_termina
 
     async def run_test() -> SandboxHandle:
         client = _new_client("/tmp/agents-sandbox.sock")
-        return await client.create_sandbox("python:3.12-slim", sandbox_id="sandbox-1", wait=True)
+        return await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-1", wait=True)
 
     sandbox = asyncio.run(run_test())
 
