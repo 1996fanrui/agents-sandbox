@@ -25,6 +25,10 @@ labels:
   team: my-team
   env: dev
 
+envs:
+  APP_ENV: production
+  LOG_LEVEL: info
+
 required_services:
   postgres:
     image: postgres:16-alpine
@@ -60,6 +64,7 @@ optional_services:
 | `required_services` | `CreateSpec.required_services` | map of ServiceSpec | Services that must be healthy before sandbox is READY |
 | `optional_services` | `CreateSpec.optional_services` | map of ServiceSpec | Services started concurrently, not blocking READY |
 | `labels` | `CreateSpec.labels` | map of string | Key-value labels attached to the sandbox |
+| `envs` | `CreateSpec.envs` | map of string | Environment variables set on the primary container and inherited by all execs |
 
 ### CopySpec Fields
 
@@ -113,6 +118,7 @@ sandbox = await client.create_sandbox(
     config="agents-sandbox.yaml",
     image="custom:latest",
     labels={"team": "my-team"},
+    envs={"APP_ENV": "staging"},
 )
 
 # No YAML (existing behavior)
@@ -130,6 +136,7 @@ sandbox, err := client.CreateSandbox(ctx,
     sdkclient.WithConfig("agents-sandbox.yaml"),
     sdkclient.WithImage("custom:latest"),
     sdkclient.WithLabels(map[string]string{"team": "my-team"}),
+    sdkclient.WithEnvs(map[string]string{"APP_ENV": "staging"}),
 )
 
 // No YAML
@@ -144,11 +151,15 @@ When both YAML config and explicit parameters are provided, explicit parameters 
 |---|---|
 | Scalar (`image`) | Non-empty explicit value overwrites YAML value |
 | Repeated (`mounts`, `copies`, `builtin_resources`, `required_services`, `optional_services`) | Non-empty explicit value replaces YAML value entirely |
-| Map (`labels`) | Key-level merge: explicit keys overwrite same-name YAML keys; YAML-only keys are preserved |
+| Map (`labels`, `envs`) | Key-level merge: explicit keys overwrite same-name YAML keys; YAML-only keys are preserved |
 
 ### Known Limitation
 
 Callers cannot use explicit parameters to _clear_ a repeated field defined in YAML. For example, passing empty `required_services` will not remove services defined in the YAML file, because empty values are treated as "not set" and the YAML value is preserved.
+
+## Environment Variable Inheritance
+
+Sandbox-level `envs` are applied to the primary container at creation time and automatically inherited by all exec commands. When an exec specifies `env_overrides`, the values are merged on top of the sandbox-level envs — exec keys take precedence over sandbox keys with the same name.
 
 ## Architecture
 

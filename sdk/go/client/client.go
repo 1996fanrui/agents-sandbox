@@ -151,6 +151,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 			RequiredServices: toProtoServices(options.requiredServices),
 			OptionalServices: toProtoServices(options.optionalServices),
 			Labels:           cloneStringMap(options.labels),
+			Envs:             mapToKeyValues(options.envs),
 		},
 	}
 	response, err := c.rpcClient.CreateSandbox(ctx, request)

@@ -62,6 +62,10 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
             required_services=[to_proto_service(item) for item in request.create_spec.required_services],
             optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
             labels=dict(request.create_spec.labels),
+            envs=[
+                service_pb2.KeyValue(key=key, value=value)
+                for key, value in request.create_spec.envs.items()
+            ],
         ),
         config_yaml=request.config_yaml,
     )

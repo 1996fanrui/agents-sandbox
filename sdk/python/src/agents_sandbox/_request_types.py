@@ -17,9 +17,11 @@ class CreateSandboxSpec:
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
+    envs: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))
+        object.__setattr__(self, "envs", dict(self.envs))
 
 
 @dataclass(frozen=True, slots=True)

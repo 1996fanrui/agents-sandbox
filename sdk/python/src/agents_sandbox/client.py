@@ -119,6 +119,7 @@ class AgentsSandboxClient:
         required_services: tuple[ServiceSpec, ...] = (),
         optional_services: tuple[ServiceSpec, ...] = (),
         labels: Mapping[str, str] | None = None,
+        envs: Mapping[str, str] | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
         if config is None and image is None:
@@ -138,6 +139,7 @@ class AgentsSandboxClient:
                 required_services=required_services,
                 optional_services=optional_services,
                 labels={} if labels is None else dict(labels),
+                envs={} if envs is None else dict(envs),
             ),
             config_yaml=config_yaml,
         )

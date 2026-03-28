@@ -44,6 +44,9 @@ optional_services:
 labels:
   owner: team-a
   env: dev
+envs:
+  APP_ENV: production
+  DB_HOST: localhost
 `)
 
 	cfg, err := parseYAMLConfig(raw)
@@ -88,6 +91,9 @@ labels:
 	}
 	if len(cfg.Labels) != 2 || cfg.Labels["owner"] != "team-a" || cfg.Labels["env"] != "dev" {
 		t.Fatalf("unexpected labels: %v", cfg.Labels)
+	}
+	if len(cfg.Envs) != 2 || cfg.Envs["APP_ENV"] != "production" || cfg.Envs["DB_HOST"] != "localhost" {
+		t.Fatalf("unexpected envs: %v", cfg.Envs)
 	}
 }
 
@@ -137,6 +143,7 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 			"cache": {Image: "redis:7"},
 		},
 		Labels: map[string]string{"owner": "team-a"},
+		Envs:   map[string]string{"Z_VAR": "z_val", "A_VAR": "a_val"},
 	}
 
 	spec := yamlConfigToCreateSpec(cfg)
@@ -194,6 +201,18 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 	// Labels.
 	if spec.GetLabels()["owner"] != "team-a" {
 		t.Fatalf("unexpected labels: %v", spec.GetLabels())
+	}
+
+	// Envs should be sorted: A_VAR before Z_VAR.
+	envs := spec.GetEnvs()
+	if len(envs) != 2 {
+		t.Fatalf("expected 2 envs, got %d", len(envs))
+	}
+	if envs[0].GetKey() != "A_VAR" || envs[1].GetKey() != "Z_VAR" {
+		t.Fatalf("envs not sorted: %s, %s", envs[0].GetKey(), envs[1].GetKey())
+	}
+	if envs[0].GetValue() != "a_val" || envs[1].GetValue() != "z_val" {
+		t.Fatalf("unexpected env values: %s, %s", envs[0].GetValue(), envs[1].GetValue())
 	}
 }
 
@@ -303,6 +322,47 @@ func TestMergeCreateSpecs(t *testing.T) {
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
 				if result.GetLabels()["a"] != "1" {
 					t.Fatalf("expected base labels preserved, got %v", result.GetLabels())
+				}
+			},
+		},
+		{
+			name: "envs_merge",
+			base: &agboxv1.CreateSpec{
+				Envs: []*agboxv1.KeyValue{
+					{Key: "A", Value: "1"},
+					{Key: "B", Value: "2"},
+				},
+			},
+			override: &agboxv1.CreateSpec{
+				Envs: []*agboxv1.KeyValue{
+					{Key: "B", Value: "3"},
+					{Key: "C", Value: "4"},
+				},
+			},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				envMap := make(map[string]string)
+				for _, kv := range result.GetEnvs() {
+					envMap[kv.GetKey()] = kv.GetValue()
+				}
+				if envMap["A"] != "1" || envMap["B"] != "3" || envMap["C"] != "4" {
+					t.Fatalf("unexpected merged envs: %v", envMap)
+				}
+				if len(envMap) != 3 {
+					t.Fatalf("expected 3 envs, got %d", len(envMap))
+				}
+			},
+		},
+		{
+			name: "envs_no_override",
+			base: &agboxv1.CreateSpec{
+				Envs: []*agboxv1.KeyValue{
+					{Key: "A", Value: "1"},
+				},
+			},
+			override: &agboxv1.CreateSpec{},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				if len(result.GetEnvs()) != 1 || result.GetEnvs()[0].GetKey() != "A" {
+					t.Fatalf("expected base envs preserved, got %v", result.GetEnvs())
 				}
 			},
 		},

@@ -72,13 +72,15 @@ type createSandboxOptions struct {
 	requiredServices []ServiceSpec
 	optionalServices []ServiceSpec
 	labels           map[string]string
+	envs             map[string]string
 	wait             bool
 }
 
 func defaultCreateSandboxOptions() createSandboxOptions {
 	return createSandboxOptions{
 		labels: map[string]string{},
-		wait:   true,
+		envs:   map[string]string{},
+		wait:        true,
 	}
 }
 
@@ -284,6 +286,19 @@ func WithOptionalServices(services ...ServiceSpec) optionalServicesOption {
 
 func (o optionalServicesOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	opts.optionalServices = slicesClone([]ServiceSpec(o))
+	return nil
+}
+
+type envsOption map[string]string
+
+// WithEnvs sets sandbox-level environment variables applied to the primary container
+// and inherited by all exec commands.
+func WithEnvs(envs map[string]string) envsOption {
+	return envsOption(cloneStringMap(envs))
+}
+
+func (o envsOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	opts.envs = cloneStringMap(map[string]string(o))
 	return nil
 }
 

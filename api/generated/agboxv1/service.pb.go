@@ -652,6 +652,7 @@ type CreateSpec struct {
 	RequiredServices []*ServiceSpec         `protobuf:"bytes,5,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
 	OptionalServices []*ServiceSpec         `protobuf:"bytes,6,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
 	Labels           map[string]string      `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Envs             []*KeyValue            `protobuf:"bytes,8,rep,name=envs,proto3" json:"envs,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -731,6 +732,13 @@ func (x *CreateSpec) GetOptionalServices() []*ServiceSpec {
 func (x *CreateSpec) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *CreateSpec) GetEnvs() []*KeyValue {
+	if x != nil {
+		return x.Envs
 	}
 	return nil
 }
@@ -2107,7 +2115,7 @@ const file_service_proto_rawDesc = "" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x124\n" +
 	"\venvironment\x18\x03 \x03(\v2\x12.agbox.v1.KeyValueR\venvironment\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
-	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xa5\x03\n" +
+	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xcd\x03\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
@@ -2116,7 +2124,8 @@ const file_service_proto_rawDesc = "" +
 	"\x11builtin_resources\x18\x04 \x03(\tR\x10builtinResources\x12B\n" +
 	"\x11required_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
 	"\x11optional_services\x18\x06 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x128\n" +
-	"\x06labels\x18\a \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\a \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x12&\n" +
+	"\x04envs\x18\b \x03(\v2\x12.agbox.v1.KeyValueR\x04envs\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8c\x03\n" +
@@ -2348,56 +2357,57 @@ var file_service_proto_depIdxs = []int32{
 	9,  // 4: agbox.v1.CreateSpec.required_services:type_name -> agbox.v1.ServiceSpec
 	9,  // 5: agbox.v1.CreateSpec.optional_services:type_name -> agbox.v1.ServiceSpec
 	34, // 6: agbox.v1.CreateSpec.labels:type_name -> agbox.v1.CreateSpec.LabelsEntry
-	0,  // 7: agbox.v1.SandboxHandle.state:type_name -> agbox.v1.SandboxState
-	9,  // 8: agbox.v1.SandboxHandle.required_services:type_name -> agbox.v1.ServiceSpec
-	9,  // 9: agbox.v1.SandboxHandle.optional_services:type_name -> agbox.v1.ServiceSpec
-	35, // 10: agbox.v1.SandboxHandle.labels:type_name -> agbox.v1.SandboxHandle.LabelsEntry
-	1,  // 11: agbox.v1.SandboxEvent.event_type:type_name -> agbox.v1.EventType
-	38, // 12: agbox.v1.SandboxEvent.occurred_at:type_name -> google.protobuf.Timestamp
-	0,  // 13: agbox.v1.SandboxEvent.sandbox_state:type_name -> agbox.v1.SandboxState
-	2,  // 14: agbox.v1.SandboxEvent.exec_state:type_name -> agbox.v1.ExecState
-	2,  // 15: agbox.v1.ExecStatus.state:type_name -> agbox.v1.ExecState
-	5,  // 16: agbox.v1.ExecStatus.env_overrides:type_name -> agbox.v1.KeyValue
-	10, // 17: agbox.v1.CreateSandboxRequest.create_spec:type_name -> agbox.v1.CreateSpec
-	0,  // 18: agbox.v1.CreateSandboxResponse.initial_state:type_name -> agbox.v1.SandboxState
-	11, // 19: agbox.v1.GetSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
-	36, // 20: agbox.v1.ListSandboxesRequest.label_selector:type_name -> agbox.v1.ListSandboxesRequest.LabelSelectorEntry
-	11, // 21: agbox.v1.ListSandboxesResponse.sandboxes:type_name -> agbox.v1.SandboxHandle
-	37, // 22: agbox.v1.DeleteSandboxesRequest.label_selector:type_name -> agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
-	5,  // 23: agbox.v1.CreateExecRequest.env_overrides:type_name -> agbox.v1.KeyValue
-	13, // 24: agbox.v1.GetExecResponse.exec:type_name -> agbox.v1.ExecStatus
-	13, // 25: agbox.v1.ListActiveExecsResponse.execs:type_name -> agbox.v1.ExecStatus
-	3,  // 26: agbox.v1.SandboxService.Ping:input_type -> agbox.v1.PingRequest
-	14, // 27: agbox.v1.SandboxService.CreateSandbox:input_type -> agbox.v1.CreateSandboxRequest
-	16, // 28: agbox.v1.SandboxService.GetSandbox:input_type -> agbox.v1.GetSandboxRequest
-	18, // 29: agbox.v1.SandboxService.ListSandboxes:input_type -> agbox.v1.ListSandboxesRequest
-	20, // 30: agbox.v1.SandboxService.ResumeSandbox:input_type -> agbox.v1.ResumeSandboxRequest
-	21, // 31: agbox.v1.SandboxService.StopSandbox:input_type -> agbox.v1.StopSandboxRequest
-	22, // 32: agbox.v1.SandboxService.DeleteSandbox:input_type -> agbox.v1.DeleteSandboxRequest
-	23, // 33: agbox.v1.SandboxService.DeleteSandboxes:input_type -> agbox.v1.DeleteSandboxesRequest
-	26, // 34: agbox.v1.SandboxService.SubscribeSandboxEvents:input_type -> agbox.v1.SubscribeSandboxEventsRequest
-	27, // 35: agbox.v1.SandboxService.CreateExec:input_type -> agbox.v1.CreateExecRequest
-	29, // 36: agbox.v1.SandboxService.CancelExec:input_type -> agbox.v1.CancelExecRequest
-	30, // 37: agbox.v1.SandboxService.GetExec:input_type -> agbox.v1.GetExecRequest
-	32, // 38: agbox.v1.SandboxService.ListActiveExecs:input_type -> agbox.v1.ListActiveExecsRequest
-	4,  // 39: agbox.v1.SandboxService.Ping:output_type -> agbox.v1.PingResponse
-	15, // 40: agbox.v1.SandboxService.CreateSandbox:output_type -> agbox.v1.CreateSandboxResponse
-	17, // 41: agbox.v1.SandboxService.GetSandbox:output_type -> agbox.v1.GetSandboxResponse
-	19, // 42: agbox.v1.SandboxService.ListSandboxes:output_type -> agbox.v1.ListSandboxesResponse
-	25, // 43: agbox.v1.SandboxService.ResumeSandbox:output_type -> agbox.v1.AcceptedResponse
-	25, // 44: agbox.v1.SandboxService.StopSandbox:output_type -> agbox.v1.AcceptedResponse
-	25, // 45: agbox.v1.SandboxService.DeleteSandbox:output_type -> agbox.v1.AcceptedResponse
-	24, // 46: agbox.v1.SandboxService.DeleteSandboxes:output_type -> agbox.v1.DeleteSandboxesResponse
-	12, // 47: agbox.v1.SandboxService.SubscribeSandboxEvents:output_type -> agbox.v1.SandboxEvent
-	28, // 48: agbox.v1.SandboxService.CreateExec:output_type -> agbox.v1.CreateExecResponse
-	25, // 49: agbox.v1.SandboxService.CancelExec:output_type -> agbox.v1.AcceptedResponse
-	31, // 50: agbox.v1.SandboxService.GetExec:output_type -> agbox.v1.GetExecResponse
-	33, // 51: agbox.v1.SandboxService.ListActiveExecs:output_type -> agbox.v1.ListActiveExecsResponse
-	39, // [39:52] is the sub-list for method output_type
-	26, // [26:39] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	5,  // 7: agbox.v1.CreateSpec.envs:type_name -> agbox.v1.KeyValue
+	0,  // 8: agbox.v1.SandboxHandle.state:type_name -> agbox.v1.SandboxState
+	9,  // 9: agbox.v1.SandboxHandle.required_services:type_name -> agbox.v1.ServiceSpec
+	9,  // 10: agbox.v1.SandboxHandle.optional_services:type_name -> agbox.v1.ServiceSpec
+	35, // 11: agbox.v1.SandboxHandle.labels:type_name -> agbox.v1.SandboxHandle.LabelsEntry
+	1,  // 12: agbox.v1.SandboxEvent.event_type:type_name -> agbox.v1.EventType
+	38, // 13: agbox.v1.SandboxEvent.occurred_at:type_name -> google.protobuf.Timestamp
+	0,  // 14: agbox.v1.SandboxEvent.sandbox_state:type_name -> agbox.v1.SandboxState
+	2,  // 15: agbox.v1.SandboxEvent.exec_state:type_name -> agbox.v1.ExecState
+	2,  // 16: agbox.v1.ExecStatus.state:type_name -> agbox.v1.ExecState
+	5,  // 17: agbox.v1.ExecStatus.env_overrides:type_name -> agbox.v1.KeyValue
+	10, // 18: agbox.v1.CreateSandboxRequest.create_spec:type_name -> agbox.v1.CreateSpec
+	0,  // 19: agbox.v1.CreateSandboxResponse.initial_state:type_name -> agbox.v1.SandboxState
+	11, // 20: agbox.v1.GetSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
+	36, // 21: agbox.v1.ListSandboxesRequest.label_selector:type_name -> agbox.v1.ListSandboxesRequest.LabelSelectorEntry
+	11, // 22: agbox.v1.ListSandboxesResponse.sandboxes:type_name -> agbox.v1.SandboxHandle
+	37, // 23: agbox.v1.DeleteSandboxesRequest.label_selector:type_name -> agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
+	5,  // 24: agbox.v1.CreateExecRequest.env_overrides:type_name -> agbox.v1.KeyValue
+	13, // 25: agbox.v1.GetExecResponse.exec:type_name -> agbox.v1.ExecStatus
+	13, // 26: agbox.v1.ListActiveExecsResponse.execs:type_name -> agbox.v1.ExecStatus
+	3,  // 27: agbox.v1.SandboxService.Ping:input_type -> agbox.v1.PingRequest
+	14, // 28: agbox.v1.SandboxService.CreateSandbox:input_type -> agbox.v1.CreateSandboxRequest
+	16, // 29: agbox.v1.SandboxService.GetSandbox:input_type -> agbox.v1.GetSandboxRequest
+	18, // 30: agbox.v1.SandboxService.ListSandboxes:input_type -> agbox.v1.ListSandboxesRequest
+	20, // 31: agbox.v1.SandboxService.ResumeSandbox:input_type -> agbox.v1.ResumeSandboxRequest
+	21, // 32: agbox.v1.SandboxService.StopSandbox:input_type -> agbox.v1.StopSandboxRequest
+	22, // 33: agbox.v1.SandboxService.DeleteSandbox:input_type -> agbox.v1.DeleteSandboxRequest
+	23, // 34: agbox.v1.SandboxService.DeleteSandboxes:input_type -> agbox.v1.DeleteSandboxesRequest
+	26, // 35: agbox.v1.SandboxService.SubscribeSandboxEvents:input_type -> agbox.v1.SubscribeSandboxEventsRequest
+	27, // 36: agbox.v1.SandboxService.CreateExec:input_type -> agbox.v1.CreateExecRequest
+	29, // 37: agbox.v1.SandboxService.CancelExec:input_type -> agbox.v1.CancelExecRequest
+	30, // 38: agbox.v1.SandboxService.GetExec:input_type -> agbox.v1.GetExecRequest
+	32, // 39: agbox.v1.SandboxService.ListActiveExecs:input_type -> agbox.v1.ListActiveExecsRequest
+	4,  // 40: agbox.v1.SandboxService.Ping:output_type -> agbox.v1.PingResponse
+	15, // 41: agbox.v1.SandboxService.CreateSandbox:output_type -> agbox.v1.CreateSandboxResponse
+	17, // 42: agbox.v1.SandboxService.GetSandbox:output_type -> agbox.v1.GetSandboxResponse
+	19, // 43: agbox.v1.SandboxService.ListSandboxes:output_type -> agbox.v1.ListSandboxesResponse
+	25, // 44: agbox.v1.SandboxService.ResumeSandbox:output_type -> agbox.v1.AcceptedResponse
+	25, // 45: agbox.v1.SandboxService.StopSandbox:output_type -> agbox.v1.AcceptedResponse
+	25, // 46: agbox.v1.SandboxService.DeleteSandbox:output_type -> agbox.v1.AcceptedResponse
+	24, // 47: agbox.v1.SandboxService.DeleteSandboxes:output_type -> agbox.v1.DeleteSandboxesResponse
+	12, // 48: agbox.v1.SandboxService.SubscribeSandboxEvents:output_type -> agbox.v1.SandboxEvent
+	28, // 49: agbox.v1.SandboxService.CreateExec:output_type -> agbox.v1.CreateExecResponse
+	25, // 50: agbox.v1.SandboxService.CancelExec:output_type -> agbox.v1.AcceptedResponse
+	31, // 51: agbox.v1.SandboxService.GetExec:output_type -> agbox.v1.GetExecResponse
+	33, // 52: agbox.v1.SandboxService.ListActiveExecs:output_type -> agbox.v1.ListActiveExecsResponse
+	40, // [40:53] is the sub-list for method output_type
+	27, // [27:40] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_service_proto_init() }
