@@ -142,15 +142,17 @@ Important rules:
 - normal lifecycle flow: use `wait=True` or call `run(...)` when you want a completed exec result
 - advanced orchestration: use `wait=False` and call `subscribe_sandbox_events` directly
 - example/demo flow: pass the runtime image explicitly on every `create_sandbox(...)` call
-- declarative config: use `config="agents-sandbox.yaml"` to load sandbox configuration from a YAML file (see `docs/declarative_yaml_config.md`)
+- declarative config: pass `config_yaml=...` with YAML content generated in memory or loaded by your application (see `docs/declarative_yaml_config.md`)
 
 ```python
-# Create from YAML config file
-sandbox = await client.create_sandbox(config="agents-sandbox.yaml")
+# Create from YAML content
+sandbox = await client.create_sandbox(
+    config_yaml="image: ghcr.io/agents-sandbox/coding-runtime:latest\n"
+)
 
 # YAML config with parameter overrides
 sandbox = await client.create_sandbox(
-    config="agents-sandbox.yaml",
+    config_yaml="builtin_resources:\n  - .claude\n",
     image="custom:latest",
     labels={"team": "my-team"},
 )

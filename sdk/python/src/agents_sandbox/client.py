@@ -7,7 +7,6 @@ import dataclasses
 import os
 import platform
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from pathlib import Path
 from threading import Event as ThreadEvent
 from threading import Thread
 from typing import cast
@@ -77,6 +76,16 @@ def _validate_optional_id(field_name: str, value: str | None) -> str | None:
     return value
 
 
+def _normalize_config_yaml(config_yaml: str | bytes | None) -> bytes:
+    if config_yaml is None:
+        return b""
+    if isinstance(config_yaml, bytes):
+        return config_yaml
+    if isinstance(config_yaml, str):
+        return config_yaml.encode("utf-8")
+    raise TypeError("config_yaml must be str, bytes, or None")
+
+
 class AgentsSandboxClient:
     """Async high-level client that exposes the northbound SDK surface."""
 
@@ -110,7 +119,7 @@ class AgentsSandboxClient:
     async def create_sandbox(
         self,
         *,
-        config: str | Path | None = None,
+        config_yaml: str | bytes | None = None,
         image: str | None = None,
         sandbox_id: str | None = None,
         mounts: tuple[MountSpec, ...] = (),
@@ -122,12 +131,9 @@ class AgentsSandboxClient:
         envs: Mapping[str, str] | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
-        if config is None and image is None:
-            raise ValueError("at least one of 'config' or 'image' must be provided")
-
-        config_yaml = b""
-        if config is not None:
-            config_yaml = Path(config).read_bytes()
+        resolved_config_yaml = _normalize_config_yaml(config_yaml)
+        if not resolved_config_yaml and image is None:
+            raise ValueError("at least one of 'config_yaml' or 'image' must be provided")
 
         request = CreateSandboxRequest(
             sandbox_id=_validate_optional_id("sandbox_id", sandbox_id),
@@ -141,7 +147,7 @@ class AgentsSandboxClient:
                 labels={} if labels is None else dict(labels),
                 envs={} if envs is None else dict(envs),
             ),
-            config_yaml=config_yaml,
+            config_yaml=resolved_config_yaml,
         )
         try:
             response = await asyncio.to_thread(
