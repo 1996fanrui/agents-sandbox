@@ -555,10 +555,12 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 			fieldNames: []string{
 				"create_spec",
 				"sandbox_id",
+				"config_yaml",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"create_spec": 1,
 				"sandbox_id":  2,
+				"config_yaml": 3,
 			},
 		},
 		{

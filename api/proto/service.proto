@@ -152,6 +152,7 @@ message ExecStatus {
 message CreateSandboxRequest {
   CreateSpec create_spec = 1;
   string sandbox_id = 2;
+  bytes config_yaml = 3;
 }
 
 message CreateSandboxResponse {
