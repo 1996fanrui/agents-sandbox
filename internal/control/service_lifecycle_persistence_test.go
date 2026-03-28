@@ -56,11 +56,19 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 		}
 		rawSandbox := tx.Bucket(sandboxIDBucket).Get([]byte("persistent-sandbox"))
 		rawExec := tx.Bucket(execIDBucket).Get([]byte("persistent-exec"))
-		if _, err := time.Parse(time.RFC3339Nano, string(rawSandbox)); err != nil {
-			t.Fatalf("sandbox registry timestamp is invalid: %v", err)
+		if len(rawSandbox) != 8 {
+			t.Fatalf("sandbox registry timestamp must be 8 bytes (int64), got %d bytes", len(rawSandbox))
 		}
-		if _, err := time.Parse(time.RFC3339Nano, string(rawExec)); err != nil {
-			t.Fatalf("exec registry timestamp is invalid: %v", err)
+		sandboxNano := decodeInt64(rawSandbox)
+		if sandboxNano <= 0 {
+			t.Fatalf("sandbox registry timestamp must be positive UnixNano, got %d", sandboxNano)
+		}
+		if len(rawExec) != 8 {
+			t.Fatalf("exec registry timestamp must be 8 bytes (int64), got %d bytes", len(rawExec))
+		}
+		execNano := decodeInt64(rawExec)
+		if execNano <= 0 {
+			t.Fatalf("exec registry timestamp must be positive UnixNano, got %d", execNano)
 		}
 		return nil
 	}); err != nil {
@@ -103,6 +111,28 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 		t.Fatalf("expected already exists for exec id, got %v", err)
 	}
 	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
+}
+
+func TestDeletedAtBucketName(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	db, err := openBoltDB(dbPath)
+	if err != nil {
+		t.Fatalf("openBoltDB failed: %v", err)
+	}
+	defer db.Close()
+
+	err = db.View(func(tx *bbolt.Tx) error {
+		if tx.Bucket([]byte("sandbox-deleted-at")) == nil {
+			t.Fatal("expected sandbox-deleted-at bucket to exist")
+		}
+		if tx.Bucket([]byte("event-meta")) != nil {
+			t.Fatal("event-meta bucket should not exist")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("db.View failed: %v", err)
+	}
 }
 
 func TestEventPersistenceAcrossRestart(t *testing.T) {

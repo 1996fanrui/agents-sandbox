@@ -33,14 +33,14 @@ type idRegistry interface {
 
 type memoryIDRegistry struct {
 	mu         sync.Mutex
-	sandboxIDs map[string]string
-	execIDs    map[string]string
+	sandboxIDs map[string]int64
+	execIDs    map[string]int64
 }
 
 func newMemoryIDRegistry() *memoryIDRegistry {
 	return &memoryIDRegistry{
-		sandboxIDs: make(map[string]string),
-		execIDs:    make(map[string]string),
+		sandboxIDs: make(map[string]int64),
+		execIDs:    make(map[string]int64),
 	}
 }
 
@@ -68,13 +68,13 @@ func (registry *memoryIDRegistry) ReleaseExecID(id string) error {
 	return nil
 }
 
-func (registry *memoryIDRegistry) reserve(ids map[string]string, id string, createdAt time.Time, duplicateErr error) error {
+func (registry *memoryIDRegistry) reserve(ids map[string]int64, id string, createdAt time.Time, duplicateErr error) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	if _, exists := ids[id]; exists {
 		return duplicateErr
 	}
-	ids[id] = createdAt.UTC().Format(time.RFC3339Nano)
+	ids[id] = createdAt.UTC().UnixNano()
 	return nil
 }
 
@@ -189,7 +189,7 @@ func (registry *persistentIDRegistry) reserve(bucketName []byte, id string, crea
 		if bucket.Get(key) != nil {
 			return duplicateErr
 		}
-		return bucket.Put(key, []byte(createdAt.UTC().Format(time.RFC3339Nano)))
+		return bucket.Put(key, encodeInt64(createdAt.UTC().UnixNano()))
 	})
 }
 
