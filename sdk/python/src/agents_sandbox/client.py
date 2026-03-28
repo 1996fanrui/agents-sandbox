@@ -13,7 +13,7 @@ from typing import cast
 
 from ._generated import service_pb2
 from ._grpc_client import SandboxGrpcClient
-from .conversions import (
+from ._conversions import (
     normalize_from_sequence,
     parse_event_sequence,
     to_exec_handle,
@@ -31,11 +31,9 @@ from .errors import (
     SandboxInvalidStateError,
 )
 from .models import SandboxState
+from ._request_types import CreateExecRequest, CreateSandboxRequest, CreateSandboxSpec
 from .types import (
     CopySpec,
-    CreateExecRequest,
-    CreateSandboxRequest,
-    CreateSandboxSpec,
     DeleteSandboxesResult,
     ExecHandle,
     MountSpec,

@@ -6,10 +6,9 @@ from datetime import UTC
 
 from ._generated import service_pb2
 from .models import ExecState, SandboxEventType, SandboxState
+from ._request_types import CreateExecRequest, CreateSandboxRequest
 from .types import (
     CopySpec,
-    CreateExecRequest,
-    CreateSandboxRequest,
     ExecHandle,
     HealthcheckConfig,
     MountSpec,
