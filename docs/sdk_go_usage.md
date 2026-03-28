@@ -52,7 +52,7 @@ func main() {
 
 	sandbox, err := client.CreateSandbox(
 		ctx,
-		"ghcr.io/agents-sandbox/coding-runtime:latest",
+		sdkclient.WithImage("ghcr.io/agents-sandbox/coding-runtime:latest"),
 		sdkclient.WithLabels(map[string]string{"team": "sdk"}),
 	)
 	if err != nil {

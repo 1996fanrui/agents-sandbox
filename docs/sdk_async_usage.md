@@ -142,3 +142,16 @@ Important rules:
 - normal lifecycle flow: use `wait=True` or call `run(...)` when you want a completed exec result
 - advanced orchestration: use `wait=False` and call `subscribe_sandbox_events` directly
 - example/demo flow: pass the runtime image explicitly on every `create_sandbox(...)` call
+- declarative config: use `config="agents-sandbox.yaml"` to load sandbox configuration from a YAML file (see `docs/declarative_yaml_config.md`)
+
+```python
+# Create from YAML config file
+sandbox = await client.create_sandbox(config="agents-sandbox.yaml")
+
+# YAML config with parameter overrides
+sandbox = await client.create_sandbox(
+    config="agents-sandbox.yaml",
+    image="custom:latest",
+    labels={"team": "my-team"},
+)
+```
