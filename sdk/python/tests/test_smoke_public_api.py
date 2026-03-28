@@ -25,7 +25,6 @@ from agents_sandbox import (
 from agents_sandbox._generated import service_pb2
 from agents_sandbox.client import _resolve_default_socket_path
 from agents_sandbox._conversions import to_exec_handle, to_exec_snapshot, to_sandbox_handle
-from agents_sandbox.types import CallerMetadata
 
 from tests.smoke_support import (
     _RecordingSandboxService,
@@ -106,8 +105,8 @@ def test_public_models_match_protocol_contract() -> None:
         "env_overrides",
         "exit_code",
         "error",
-        "stdout",
-        "stderr",
+        "stdout_log_path",
+        "stderr_log_path",
         "last_event_sequence",
     }
     assert ExecHandle.__annotations__["last_event_sequence"] == "int"
@@ -116,10 +115,6 @@ def test_public_models_match_protocol_contract() -> None:
         "deleted_count": "int",
     }
 
-
-def test_caller_metadata_rejects_protocol_unsupported_extra_field() -> None:
-    with pytest.raises(TypeError):
-        CallerMetadata(product="p", session_id="s", run_id="r", extra={"k": "v"})
 
 
 def test_sdk_exports_proto_backed_public_enums() -> None:
@@ -160,7 +155,7 @@ def test_public_root_exports_remove_legacy_sdk_types() -> None:
         assert legacy_name not in exports
 
 
-def test_to_exec_handle_preserves_stdout_and_stderr() -> None:
+def test_to_exec_handle_maps_exit_code_and_sequence() -> None:
     running = to_exec_handle(
         service_pb2.ExecStatus(
             exec_id="exec-running",
@@ -168,8 +163,6 @@ def test_to_exec_handle_preserves_stdout_and_stderr() -> None:
             state=service_pb2.EXEC_STATE_RUNNING,
             command=["echo", "hello"],
             cwd="/workspace",
-            stdout="partial",
-            stderr="warn",
             exit_code=0,
             last_event_sequence=3,
         )
@@ -181,19 +174,13 @@ def test_to_exec_handle_preserves_stdout_and_stderr() -> None:
             state=service_pb2.EXEC_STATE_FINISHED,
             command=["echo", "hello"],
             cwd="/workspace",
-            stdout="done",
-            stderr="",
             exit_code=7,
             last_event_sequence=7,
         )
     )
 
-    assert running.stdout == "partial"
-    assert running.stderr == "warn"
-    assert running.exit_code is None
+    assert running.exit_code is None  # not terminal, exit_code suppressed
     assert running.last_event_sequence == 3
-    assert finished.stdout == "done"
-    assert finished.stderr is None
     assert finished.exit_code == 7
     assert finished.last_event_sequence == 7
 
