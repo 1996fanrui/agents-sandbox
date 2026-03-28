@@ -68,7 +68,7 @@ def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
     assert list(default_request.env_overrides) == []
 
 
-def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_waits_and_returns_exec_handle(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeRawSandboxClient:
         subscribe_requests: list[tuple[str, int, bool]] = []
 
@@ -87,11 +87,9 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
         def get_exec(self, exec_id: str) -> object:
             self._get_exec_calls += 1
             state = service_pb2.EXEC_STATE_RUNNING
-            stdout = ""
             last_event_sequence = 10
             if self._get_exec_calls > 1:
                 state = service_pb2.EXEC_STATE_FINISHED
-                stdout = "hello"
                 last_event_sequence = 11
             return _exec_response(
                 service_pb2.ExecStatus(
@@ -100,7 +98,6 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
                     state=state,
                     command=["echo", "hello"],
                     cwd="/workspace",
-                    stdout=stdout,
                     exit_code=0,
                 ),
                 last_event_sequence=last_event_sequence,
@@ -132,7 +129,6 @@ def test_run_waits_and_returns_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     exec_handle = asyncio.run(run_test())
 
     assert exec_handle.state is ExecState.FINISHED
-    assert exec_handle.stdout == "hello"
     assert exec_handle.last_event_sequence == 11
     assert _FakeRawSandboxClient.subscribe_requests == [("sandbox-1", 10, False)]
 
