@@ -359,7 +359,7 @@ func TestPostStartOnPrimaryRequiredOnly(t *testing.T) {
 			},
 		},
 	}
-	if err := validateCreateSpec(optionalSpec); err == nil || !strings.Contains(err.Error(), "must not define post_start_on_primary") {
+	if err := validateCreateSpec(optionalSpec); err == nil || !strings.Contains(err.Error(), "with post_start_on_primary must define healthcheck") {
 		t.Fatalf("optional service post_start_on_primary should be rejected, got %v", err)
 	}
 }
@@ -616,27 +616,21 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 		t.Fatalf("Symlink failed: %v", err)
 	}
 
-	if _, err := backendWithoutState.materializeBuiltinResources("sandbox-builtin", []string{".claude"}, &sandboxRuntimeState{}); err == nil || !strings.Contains(err.Error(), "runtime.state_root is required for builtin resource shadow copies") {
-		t.Fatalf("expected builtin shadow copy state_root error, got %v", err)
-	}
-
-	backendWithState := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
+	// Builtin resources are mounted directly from the host path without shadow
+	// copies; StateRoot is not required and symlinks are preserved as-is.
 	runtimeState := &sandboxRuntimeState{}
-	mounts, err := backendWithState.materializeBuiltinResources("sandbox-builtin", []string{".claude"}, runtimeState)
+	mounts, err := backendWithoutState.materializeBuiltinResources("sandbox-builtin", []string{".claude"}, runtimeState)
 	if err != nil {
 		t.Fatalf("materializeBuiltinResources failed: %v", err)
 	}
 	if len(mounts) != 1 {
 		t.Fatalf("expected one builtin mount, got %d", len(mounts))
 	}
-	if runtimeState.ShadowRoot == "" {
-		t.Fatal("expected shadow root for builtin shadow copy")
-	}
-	if !strings.Contains(mounts[0].Source, runtimeState.ShadowRoot) {
-		t.Fatalf("expected builtin source to be under shadow root, got source=%q shadow_root=%q", mounts[0].Source, runtimeState.ShadowRoot)
+	if mounts[0].Source != builtinSource {
+		t.Fatalf("expected builtin source to be %q, got %q", builtinSource, mounts[0].Source)
 	}
 	if mounts[0].ReadOnly {
-		t.Fatal("expected writable builtin shadow copy mount to preserve capability mode")
+		t.Fatal("expected writable builtin mount to preserve capability mode")
 	}
 }
 
