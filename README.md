@@ -1,10 +1,10 @@
 # Agents Sandbox
 
-Unleash the full power of your AI agents.
+**Full power for your AI agents. Full safety for the host.**
 
-- **Unrestricted execution** — Agents install anything, run anything, break anything. Your host stays untouched.
-- **No more babysitting** — Zero permission prompts, zero manual approvals. Agents run autonomously and deliver results directly.
-- **Secure by default** — Every sandbox is fully isolated. No host network. No host filesystem. No exceptions.
+- **Unrestricted AI agent** — Agents install anything, run anything, break anything. Zero permission prompts, zero manual approvals.
+- **Untouchable host** — No host filesystem access. No host network access. No exceptions. A bad command destroys only the disposable sandbox, never your machine.
+- **Agents deliver results, not questions** — With both guarantees in place, AI agents run autonomously and deliver results directly. No babysitting. No manual review loops.
 - **Host credentials, zero setup** — Sandboxes inherit host authentication (SSH agent, GitHub CLI, etc.) out of the box. Claude Code and Codex work immediately — powered by your flat-rate CLI subscriptions, not per-token API billing.
 - **Local-first, cloud-optional** — Zero latency, zero cost, and your data never leaves your machine.
 
@@ -15,9 +15,18 @@ Today's AI agents face an impossible dilemma on the host machine:
 - **Grant full permissions?** The agent runs fast — but a single bad command can delete your files, leak credentials, or compromise the entire machine. One prompt injection away from disaster.
 - **Keep permissions locked down?** Every `npm install`, every file write, every shell command triggers a manual confirmation. The agent spends more time waiting for "yes" than actually working. You end up babysitting the agent instead of letting it work for you.
 
-Either way, **agents on bare hosts can never reach their full potential.** You are forced to choose between speed and safety — and both options lose.
+This is not a hypothetical problem — it is exactly how today's agent CLIs work:
 
-A sandbox eliminates this tradeoff entirely. The agent gets an isolated container where it has **full, unrestricted permissions** — install anything, run anything, delete anything — while your host sees none of it. No compromise. Full speed. Full safety.
+| | Restricted | Unrestricted |
+|---|---|---|
+| **Codex** | `workspace-write` — constant approvals, `.git` read-only | `danger-full-access` — host fully exposed |
+| **Claude Code** | `default` — approval prompts on every tool call | `--dangerously-skip-permissions` — all checks bypassed |
+
+**Every agent CLI ships these two modes, and neither works.**
+
+Both modes shift the responsibility to **you**. Open permissions? You bear the risk. Lock them down? You become a full-time babysitter — approving every action, reviewing every command, essentially doing QA for the agent. Either way, **agents on bare hosts can never reach their full potential.** The platform should guarantee safety, not make the user choose between risk and manual labor.
+
+A sandbox eliminates this tradeoff entirely. The agent gets an isolated container where it has **full, unrestricted permissions** — install anything, run anything, delete anything — while your host sees none of it. No compromise. Full speed. Full safety. See [Why Not Built-in Agent Sandboxes?](docs/why_not_builtin_sandboxes.md) for a detailed comparison.
 
 ## How agents-sandbox solves this
 
