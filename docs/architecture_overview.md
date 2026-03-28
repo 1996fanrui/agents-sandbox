@@ -218,3 +218,4 @@ The script downloads and caches protoc in `.local/protoc/` (project-local, git-i
 - `docs/sandbox_container_lifecycle.md`
 - `docs/container_dependency_strategy.md`
 - `docs/mount_and_copy_strategy.md`
+- `docs/declarative_yaml_config.md`
