@@ -393,7 +393,7 @@ func TestOptionalServicesLaunchInParallelWithPrimaryPath(t *testing.T) {
 	started := make(chan string, len(services))
 	release := make(chan struct{})
 
-	starts := startOptionalServicesAsync(context.Background(), "parallel-optional", "network", services, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "parallel-optional", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
 		started <- "create"
 		return nil
 	}, func(_ context.Context, name string) error {
@@ -419,7 +419,7 @@ func TestOptionalServiceStartupCancellationStopsWorkers(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "cancel-optional", "network", services, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "cancel-optional", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -446,7 +446,7 @@ func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "delete-cancel", "network", services, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startOptionalServicesAsync(context.Background(), "delete-cancel", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
