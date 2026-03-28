@@ -13,6 +13,7 @@ import (
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
 	"github.com/1996fanrui/agents-sandbox/internal/platform"
+	"github.com/1996fanrui/agents-sandbox/internal/version"
 )
 
 func TestCLIUsesFixedSocketPath(t *testing.T) {
@@ -77,7 +78,7 @@ func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if stdout.String() != "agbox "+version+"\n" {
+	if stdout.String() != "agbox "+version.Version+"\n" {
 		t.Fatalf("unexpected stdout %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -92,7 +93,7 @@ func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if stdout.String() != version+"\n" {
+	if stdout.String() != version.Version+"\n" {
 		t.Fatalf("unexpected stdout %q", stdout.String())
 	}
 	if stderr.Len() != 0 {

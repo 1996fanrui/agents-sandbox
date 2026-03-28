@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/1996fanrui/agents-sandbox/internal/version"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -42,7 +43,7 @@ func DefaultServiceConfig() ServiceConfig {
 		IdleTTL:                30 * time.Minute,
 		EventRetentionTTL:      168 * time.Hour,
 		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
-		Version:                "0.1.0",
+		Version:                version.Version,
 		DaemonName:             "agboxd",
 		LogLevel:               "info",
 	}
