@@ -13,6 +13,7 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 )
 
 type runtimeBackend interface {
@@ -21,6 +22,15 @@ type runtimeBackend interface {
 	StopSandbox(context.Context, *sandboxRecord) error
 	DeleteSandbox(context.Context, *sandboxRecord) error
 	RunExec(context.Context, *sandboxRecord, *agboxv1.ExecStatus) (runtimeExecResult, error)
+	InspectContainer(ctx context.Context, containerName string) (ContainerInspectResult, error)
+}
+
+// ContainerInspectResult holds the state of a single container queried via Docker inspect.
+type ContainerInspectResult struct {
+	Exists    bool
+	Running   bool
+	ExitCode  int
+	OOMKilled bool
 }
 
 type runtimeCreateResult struct {
@@ -73,7 +83,9 @@ type runtimeServiceContainer struct {
 	Required      bool
 }
 
-type fakeRuntimeBackend struct{}
+type fakeRuntimeBackend struct {
+	inspectResults map[string]ContainerInspectResult
+}
 
 func (fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
 	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
@@ -119,6 +131,15 @@ func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error {
 
 func (fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv1.ExecStatus) (runtimeExecResult, error) {
 	return runtimeExecResult{ExitCode: 0}, nil
+}
+
+func (backend fakeRuntimeBackend) InspectContainer(_ context.Context, containerName string) (ContainerInspectResult, error) {
+	if backend.inspectResults != nil {
+		if result, ok := backend.inspectResults[containerName]; ok {
+			return result, nil
+		}
+	}
+	return ContainerInspectResult{}, nil
 }
 
 type dockerRuntimeBackend struct {
@@ -468,6 +489,25 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 		joined = append(joined, os.RemoveAll(state.ShadowRoot))
 	}
 	return errors.Join(joined...)
+}
+
+func (backend *dockerRuntimeBackend) InspectContainer(ctx context.Context, containerName string) (ContainerInspectResult, error) {
+	resp, err := backend.dockerClient.ContainerInspect(ctx, containerName)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return ContainerInspectResult{}, nil
+		}
+		return ContainerInspectResult{}, fmt.Errorf("inspect container %s: %w", containerName, err)
+	}
+	result := ContainerInspectResult{
+		Exists:  true,
+		Running: resp.State != nil && resp.State.Running,
+	}
+	if resp.State != nil {
+		result.ExitCode = resp.State.ExitCode
+		result.OOMKilled = resp.State.OOMKilled
+	}
+	return result, nil
 }
 
 func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandboxRecord, execRecord *agboxv1.ExecStatus) (runtimeExecResult, error) {

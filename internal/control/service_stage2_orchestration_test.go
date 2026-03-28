@@ -19,12 +19,14 @@ import (
 )
 
 type scriptedRuntimeBackend struct {
-	createResult runtimeCreateResult
-	createErr    error
-	resumeResult runtimeResumeResult
-	resumeErr    error
-	stopErr      error
-	deleteErr    error
+	createResult  runtimeCreateResult
+	createErr     error
+	resumeResult  runtimeResumeResult
+	resumeErr     error
+	stopErr       error
+	deleteErr     error
+	inspectResult ContainerInspectResult
+	inspectErr    error
 }
 
 func (backend *scriptedRuntimeBackend) CreateSandbox(context.Context, *sandboxRecord) (runtimeCreateResult, error) {
@@ -45,6 +47,10 @@ func (backend *scriptedRuntimeBackend) DeleteSandbox(context.Context, *sandboxRe
 
 func (*scriptedRuntimeBackend) RunExec(context.Context, *sandboxRecord, *agboxv1.ExecStatus) (runtimeExecResult, error) {
 	return runtimeExecResult{ExitCode: 0}, nil
+}
+
+func (backend *scriptedRuntimeBackend) InspectContainer(context.Context, string) (ContainerInspectResult, error) {
+	return backend.inspectResult, backend.inspectErr
 }
 
 func assertMessageFieldNames(t *testing.T, descriptor protoreflect.MessageDescriptor, want []string) {

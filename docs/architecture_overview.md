@@ -17,7 +17,7 @@ flowchart LR
     Service --> Persistence[Persistent ids.db\nID registry + event store buckets]
     Service --> Runtime[Docker runtime backend]
     Runtime --> Docker[Docker daemon\nvia Engine API SDK]
-    Service --> Memory[In-memory sandbox and exec state\nplus recovered-only projections]
+    Service --> Memory[In-memory sandbox and exec state\nwith full restart recovery]
     Runtime --> StateRoot[Optional runtime state root\nfor copies and shadow copies]
     Runtime --> Artifacts[Optional exec output artifacts]
 ```
@@ -26,7 +26,7 @@ flowchart LR
 
 - `cmd/agboxd` starts the AgentsSandbox daemon, resolves config, initializes structured JSON logging via Go stdlib `log/slog` (written to stderr for systemd/journald capture), acquires the single-host lock, creates the service plus its runtime closer chain, and serves gRPC over a Unix domain socket.
 - `cmd/agbox` implements the local operator CLI. It resolves the daemon socket, talks to the gRPC API through `sdk/go/rawclient`, and exposes `version`, `ping`, and `sandbox` subcommands. The `sandbox` command currently supports `create`, `list`, `get`, `delete`, and `exec`, including label-based list/delete flows and JSON output for create/list/get.
-- `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, sequence generation, async operation orchestration, recovered-only sandbox reconstruction, and retention cleanup.
+- `internal/control.Service` owns request validation, accepted-state transitions, in-memory sandbox and exec records, event ordering, sequence generation, async operation orchestration, full restart recovery with Docker inspect-based reconciliation, and retention cleanup.
 - `internal/control/id_registry.go` owns the shared bbolt-backed persistence bootstrap that opens `ids.db`, reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts, and shares the database handle with the persistent event store.
 - `internal/control/event_store.go` owns the event-store abstraction plus the persistent bbolt implementation used to replay sandbox history after daemon restart and to retain deleted sandbox streams until cleanup.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
@@ -43,7 +43,7 @@ flowchart LR
 3. During `CreateSandbox` and `CreateExec`, the daemon reserves the final `sandbox_id` or `exec_id` in the persistent historical ID registry before accepting the request. When the caller omits an ID, the daemon generates and reserves a UUID v4 first.
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
 5. The runtime backend performs Docker-side work through a shared Docker Engine API client and reports results back to the service. Required services gate readiness; optional services start in parallel with the primary and report their initial success or failure asynchronously without blocking sandbox readiness.
-6. The service persists ordered events before updating in-memory state, exposes their numeric ordering through event sequences, and reconstructs recovered-only sandbox handles from that history after daemon restart.
+6. The service persists ordered events and sandbox/exec configs before updating in-memory state, exposes their numeric ordering through event sequences, and performs full restart recovery by reconciling persisted state with Docker container inspect results after daemon restart.
 7. The Go and Python high-level SDKs, along with the AgentsSandbox CLI `sandbox exec` command, optionally wait on top of that contract by combining an authoritative baseline read with `SubscribeSandboxEvents`, while `sdk/go/rawclient` keeps the transport contract visible without adding high-level wait semantics.
 
 ## Core Capabilities And Usage Scenarios
@@ -123,7 +123,7 @@ This separation keeps the wire contract stable while letting each language expos
 - The daemon is a single-writer local control plane. It acquires an exclusive host lock at a hardcoded platform path and refuses to start if another daemon already owns that lock.
 - gRPC transport is exposed over a Unix domain socket only, at a hardcoded platform-specific path (not configurable).
 - The current service still keeps sandbox and exec projections in memory, but event history is persisted in `ids.db` and replay survives daemon restart. See [`Daemon State Management`](daemon_state_management.md) for the full state classification, persistence rules, and restart recovery contract.
-- A restarted daemon restores only event-derived sandbox projections. Recovered sandboxes keep replayable history and delete support, but runtime-mutating operations remain blocked until runtime-state recovery exists.
+- A restarted daemon performs full state recovery by loading persisted sandbox/exec configs, replaying events, and reconciling with Docker container inspect results. Restored sandboxes support all operations (exec, stop, resume, delete) without restriction.
 - Caller-visible ID uniqueness is stronger than in-memory lifecycle state: the daemon persists historical `sandbox_id` and `exec_id` reservations in a platform-derived `ids.db` file so old IDs remain unavailable after daemon restart.
 - Runtime stop, delete, and failed-create cleanup do not reuse caller RPC contexts. The service and runtime switch to daemon-owned background contexts so cleanup can finish even if the initiating request has already ended.
 

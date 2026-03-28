@@ -233,7 +233,7 @@ func TestErrorTranslationKnownAndUnknownReason(t *testing.T) {
 	service := &fakeService{
 		getSandboxErr:    newStatusError(t, control.ReasonSandboxNotFound, "sandbox sandbox-missing was not found"),
 		cancelExecErr:    newStatusError(t, control.ReasonExecAlreadyTerminal, "exec exec-123 is already terminal"),
-		deleteSandboxErr: newStatusError(t, control.ReasonSandboxRecoveredOnly, "not mapped here"),
+		deleteSandboxErr: newStatusError(t, "UNKNOWN_REASON_FOR_TEST", "not mapped here"),
 	}
 	client := newRawClient(t, service)
 	t.Cleanup(func() {

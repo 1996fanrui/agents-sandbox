@@ -183,18 +183,6 @@ func (s *Service) requireSandboxLocked(sandboxID string) (*sandboxRecord, error)
 	return record, nil
 }
 
-func requireMutableSandbox(record *sandboxRecord) error {
-	if !record.recoveredOnly {
-		return nil
-	}
-	return newStatusError(
-		codes.FailedPrecondition,
-		ReasonSandboxRecoveredOnly,
-		"sandbox %s only has recovered event history",
-		record.handle.GetSandboxId(),
-	)
-}
-
 func (s *Service) requireExecLocked(execID string) (string, *agboxv1.ExecStatus, error) {
 	sandboxID, ok := s.execs[execID]
 	if !ok {
@@ -251,20 +239,21 @@ func logAsyncEventAppendFailure(logger *slog.Logger, sandboxID string, eventType
 	logger.Error("append event failed", slog.String("sandbox_id", sandboxID), slog.String("event_type", eventType.String()), slog.Any("error", err))
 }
 
-func (s *Service) restorePersistedSandboxes() error {
-	sandboxIDs, err := s.config.eventStore.LoadAllSandboxIDs()
+func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
+	configs, err := s.config.eventStore.LoadAllSandboxConfigs()
 	if err != nil {
-		return fmt.Errorf("load persisted sandbox ids: %w", err)
+		return fmt.Errorf("load all sandbox configs: %w", err)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, sandboxID := range sandboxIDs {
+	for sandboxID, createSpec := range configs {
 		events, err := s.config.eventStore.LoadEvents(sandboxID)
 		if err != nil {
 			return fmt.Errorf("load events for sandbox %s: %w", sandboxID, err)
 		}
 		if len(events) == 0 {
+			s.config.Logger.Warn("sandbox config exists but no events, skipping", slog.String("sandbox_id", sandboxID))
 			continue
 		}
 		maxSequence, err := s.config.eventStore.MaxSequence(sandboxID)
@@ -275,42 +264,231 @@ func (s *Service) restorePersistedSandboxes() error {
 		if err != nil {
 			return fmt.Errorf("load deleted metadata for sandbox %s: %w", sandboxID, err)
 		}
-		record, err := newRecoveredSandboxRecord(events, maxSequence, deletedRecorded)
-		if err != nil {
-			return fmt.Errorf("restore sandbox %s: %w", sandboxID, err)
+
+		// Compute last known sandbox state from events (scan backward for non-UNSPECIFIED SandboxState).
+		persistedState := agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].GetSandboxState() != agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+				persistedState = events[i].GetSandboxState()
+				break
+			}
 		}
+		if persistedState == agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+			s.config.Logger.Warn("sandbox has no recoverable state, skipping", slog.String("sandbox_id", sandboxID))
+			continue
+		}
+
+		// Compute lastTerminalRunFinishedAt from events.
+		var lastTerminalRunFinishedAt time.Time
+		for _, event := range events {
+			if event.GetEventType() == agboxv1.EventType_EXEC_FINISHED ||
+				event.GetEventType() == agboxv1.EventType_EXEC_CANCELLED {
+				eventTime := event.GetOccurredAt().AsTime()
+				if eventTime.After(lastTerminalRunFinishedAt) {
+					lastTerminalRunFinishedAt = eventTime
+				}
+			}
+		}
+
+		// Build the record with nextSequence set before any event append.
+		record := &sandboxRecord{
+			handle: &agboxv1.SandboxHandle{
+				SandboxId:         sandboxID,
+				State:             persistedState,
+				LastEventSequence: events[len(events)-1].GetSequence(),
+				Labels:            cloneStringMap(createSpec.GetLabels()),
+				RequiredServices:  cloneServiceSpecs(createSpec.GetRequiredServices()),
+				OptionalServices:  cloneServiceSpecs(createSpec.GetOptionalServices()),
+			},
+			createSpec:                cloneCreateSpec(createSpec),
+			requiredServices:          cloneServiceSpecs(createSpec.GetRequiredServices()),
+			optionalServices:          cloneServiceSpecs(createSpec.GetOptionalServices()),
+			events:                    events,
+			execs:                     make(map[string]*agboxv1.ExecStatus),
+			execCancel:                make(map[string]context.CancelFunc),
+			nextSequence:              maxSequence,
+			lastTerminalRunFinishedAt: lastTerminalRunFinishedAt,
+			deletedAtRecorded:         deletedRecorded,
+		}
+
+		// Build runtime state for non-terminal sandboxes.
+		if persistedState != agboxv1.SandboxState_SANDBOX_STATE_DELETED &&
+			persistedState != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
+			serviceContainers := make([]runtimeServiceContainer, 0, len(createSpec.GetRequiredServices())+len(createSpec.GetOptionalServices()))
+			for _, svc := range createSpec.GetRequiredServices() {
+				serviceContainers = append(serviceContainers, runtimeServiceContainer{
+					Name:          svc.GetName(),
+					ContainerName: dockerServiceContainerName(sandboxID, svc.GetName()),
+					Required:      true,
+				})
+			}
+			for _, svc := range createSpec.GetOptionalServices() {
+				serviceContainers = append(serviceContainers, runtimeServiceContainer{
+					Name:          svc.GetName(),
+					ContainerName: dockerServiceContainerName(sandboxID, svc.GetName()),
+					Required:      false,
+				})
+			}
+			record.runtimeState = &sandboxRuntimeState{
+				NetworkName:          dockerNetworkName(sandboxID),
+				PrimaryContainerName: dockerPrimaryContainerName(sandboxID),
+				ServiceContainers:    serviceContainers,
+			}
+		}
+
+		// State reconciliation based on Docker inspect.
+		reconciledState := persistedState
+		switch persistedState {
+		case agboxv1.SandboxState_SANDBOX_STATE_READY:
+			primaryName := dockerPrimaryContainerName(sandboxID)
+			inspectResult, inspectErr := s.config.runtimeBackend.InspectContainer(ctx, primaryName)
+			if inspectErr != nil {
+				return fmt.Errorf("inspect primary container for sandbox %s: %w", sandboxID, inspectErr)
+			}
+			if !inspectResult.Exists || !inspectResult.Running {
+				reconciledState = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+				if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+					errorCode:    "CONTAINER_NOT_RUNNING",
+					errorMessage: "primary container not running after daemon restart",
+					sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+				}); err != nil {
+					return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
+				}
+				record.runtimeState = nil
+			}
+		case agboxv1.SandboxState_SANDBOX_STATE_STOPPED:
+			primaryName := dockerPrimaryContainerName(sandboxID)
+			inspectResult, inspectErr := s.config.runtimeBackend.InspectContainer(ctx, primaryName)
+			if inspectErr != nil {
+				return fmt.Errorf("inspect primary container for sandbox %s: %w", sandboxID, inspectErr)
+			}
+			if !inspectResult.Exists {
+				reconciledState = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+				if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+					errorCode:    "CONTAINER_NOT_RUNNING",
+					errorMessage: "primary container missing after daemon restart",
+					sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+				}); err != nil {
+					return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
+				}
+				record.runtimeState = nil
+			}
+			// Container exited but exists is expected for STOPPED.
+		case agboxv1.SandboxState_SANDBOX_STATE_PENDING:
+			reconciledState = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+			if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+				errorCode:    "INTERRUPTED_PENDING",
+				errorMessage: "sandbox was pending when daemon restarted",
+				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+			}); err != nil {
+				return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
+			}
+			record.runtimeState = nil
+		case agboxv1.SandboxState_SANDBOX_STATE_DELETING:
+			reconciledState = agboxv1.SandboxState_SANDBOX_STATE_DELETED
+			if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{
+				reason:       "daemon_restart_cleanup",
+				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_DELETED,
+			}); err != nil {
+				return fmt.Errorf("append SANDBOX_DELETED for sandbox %s: %w", sandboxID, err)
+			}
+			if err := s.config.eventStore.MarkDeleted(sandboxID, time.Now()); err != nil {
+				return fmt.Errorf("mark deleted for sandbox %s: %w", sandboxID, err)
+			}
+			record.deletedAtRecorded = true
+			// Best-effort cleanup of Docker resources left behind by interrupted deletion.
+			if record.runtimeState != nil {
+				if err := s.config.runtimeBackend.DeleteSandbox(ctx, record); err != nil {
+					s.config.Logger.Warn("cleanup Docker resources for deleting sandbox failed",
+						slog.String("sandbox_id", sandboxID), slog.Any("error", err))
+				}
+			}
+			record.runtimeState = nil
+		case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
+			// Already failed, no reconciliation needed.
+			record.runtimeState = nil
+		case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+			// Already deleted, no reconciliation needed.
+			record.runtimeState = nil
+		}
+		record.handle.State = reconciledState
+
+		// Restore exec states.
+		execConfigs, err := s.config.eventStore.LoadExecConfigs(sandboxID)
+		if err != nil {
+			return fmt.Errorf("load exec configs for sandbox %s: %w", sandboxID, err)
+		}
+		for _, execCfg := range execConfigs {
+			execID := execCfg.GetExecId()
+			execState, exitCode, _, errorMsg := resolveExecStateFromEvents(events, execID)
+
+			if execState == agboxv1.ExecState_EXEC_STATE_RUNNING ||
+				execState == agboxv1.ExecState_EXEC_STATE_UNSPECIFIED {
+				// Exec was running or never started (config saved but event not written) when daemon died.
+				if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_FAILED, eventMutation{
+					execID:       execID,
+					errorCode:    "DAEMON_RESTARTED",
+					errorMessage: "exec was running when daemon restarted",
+					execState:    agboxv1.ExecState_EXEC_STATE_FAILED,
+				}); err != nil {
+					return fmt.Errorf("append EXEC_FAILED for exec %s: %w", execID, err)
+				}
+				execState = agboxv1.ExecState_EXEC_STATE_FAILED
+				errorMsg = "exec was running when daemon restarted"
+			}
+			record.execs[execID] = &agboxv1.ExecStatus{
+				ExecId:       execID,
+				SandboxId:    sandboxID,
+				State:        execState,
+				Command:      execCfg.GetCommand(),
+				Cwd:          execCfg.GetCwd(),
+				EnvOverrides: execCfg.GetEnvOverrides(),
+				ExitCode:     exitCode,
+				Error:        errorMsg,
+			}
+			s.execs[execID] = sandboxID
+		}
+
 		s.boxes[sandboxID] = record
-		s.config.Logger.Info("sandbox restored", slog.String("sandbox_id", sandboxID), slog.String("state", record.handle.GetState().String()))
+		s.config.Logger.Info("sandbox restored",
+			slog.String("sandbox_id", sandboxID),
+			slog.String("persisted_state", persistedState.String()),
+			slog.String("reconciled_state", reconciledState.String()),
+		)
+
+		// Schedule idle stop for READY sandboxes with terminal run history.
+		if reconciledState == agboxv1.SandboxState_SANDBOX_STATE_READY && !lastTerminalRunFinishedAt.IsZero() {
+			go s.scheduleIdleStop(sandboxID)
+		}
 	}
 	return nil
 }
 
-func newRecoveredSandboxRecord(events []*agboxv1.SandboxEvent, maxSequence uint64, deletedRecorded bool) (*sandboxRecord, error) {
-	lastEvent := events[len(events)-1]
-	sandboxState := agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED
-	for index := len(events) - 1; index >= 0; index-- {
-		if events[index].GetSandboxState() == agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+// resolveExecStateFromEvents scans events to determine the final state of an exec.
+func resolveExecStateFromEvents(events []*agboxv1.SandboxEvent, execID string) (agboxv1.ExecState, int32, string, string) {
+	state := agboxv1.ExecState_EXEC_STATE_UNSPECIFIED
+	var exitCode int32
+	var errorCode, errorMsg string
+	for _, event := range events {
+		if event.GetExecId() != execID {
 			continue
 		}
-		sandboxState = events[index].GetSandboxState()
-		break
+		switch event.GetEventType() {
+		case agboxv1.EventType_EXEC_STARTED:
+			state = agboxv1.ExecState_EXEC_STATE_RUNNING
+		case agboxv1.EventType_EXEC_FINISHED:
+			state = agboxv1.ExecState_EXEC_STATE_FINISHED
+			exitCode = event.GetExitCode()
+		case agboxv1.EventType_EXEC_FAILED:
+			state = agboxv1.ExecState_EXEC_STATE_FAILED
+			exitCode = event.GetExitCode()
+			errorCode = event.GetErrorCode()
+			errorMsg = event.GetErrorMessage()
+		case agboxv1.EventType_EXEC_CANCELLED:
+			state = agboxv1.ExecState_EXEC_STATE_CANCELLED
+		}
 	}
-	if sandboxState == agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
-		return nil, fmt.Errorf("sandbox %s has no recoverable sandbox state", lastEvent.GetSandboxId())
-	}
-	return &sandboxRecord{
-		handle: &agboxv1.SandboxHandle{
-			SandboxId:         lastEvent.GetSandboxId(),
-			State:             sandboxState,
-			LastEventSequence: lastEvent.GetSequence(),
-		},
-		events:            events,
-		execs:        make(map[string]*agboxv1.ExecStatus),
-		execCancel:   make(map[string]context.CancelFunc),
-		nextSequence: maxSequence,
-		deletedAtRecorded: deletedRecorded,
-		recoveredOnly:     true,
-	}, nil
+	return state, exitCode, errorCode, errorMsg
 }
 
 func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {
