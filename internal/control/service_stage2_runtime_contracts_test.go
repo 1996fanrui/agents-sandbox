@@ -452,6 +452,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"required_services",
 				"optional_services",
 				"labels",
+				"envs",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"image":             1,
@@ -461,6 +462,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"required_services": 5,
 				"optional_services": 6,
 				"labels":            7,
+				"envs":              8,
 			},
 		},
 		{

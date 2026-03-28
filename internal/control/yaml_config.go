@@ -19,6 +19,7 @@ type YAMLConfig struct {
 	RequiredServices map[string]YAMLServiceSpec   `yaml:"required_services"`
 	OptionalServices map[string]YAMLServiceSpec   `yaml:"optional_services"`
 	Labels           map[string]string            `yaml:"labels"`
+	Envs             map[string]string            `yaml:"envs"`
 }
 
 // YAMLMountSpec describes a bind-mount from host to container.
@@ -101,6 +102,21 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) *agboxv1.CreateSpec {
 		}
 	}
 
+	// Convert envs map to sorted KeyValue pairs.
+	if len(cfg.Envs) > 0 {
+		envKeys := make([]string, 0, len(cfg.Envs))
+		for k := range cfg.Envs {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		for _, ek := range envKeys {
+			spec.Envs = append(spec.Envs, &agboxv1.KeyValue{
+				Key:   ek,
+				Value: cfg.Envs[ek],
+			})
+		}
+	}
+
 	return spec
 }
 
@@ -158,6 +174,23 @@ func convertServiceMap(services map[string]YAMLServiceSpec) []*agboxv1.ServiceSp
 	return result
 }
 
+// sortedKeyValues converts a map to a sorted slice of KeyValue pairs.
+func sortedKeyValues(m map[string]string) []*agboxv1.KeyValue {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	result := make([]*agboxv1.KeyValue, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, &agboxv1.KeyValue{Key: k, Value: m[k]})
+	}
+	return result
+}
+
 // mergeCreateSpecs merges two CreateSpecs: base provides defaults, override
 // takes precedence. Scalar strings overwrite when non-empty; repeated fields
 // replace entirely when non-nil (len > 0); map fields merge at key level.
@@ -204,6 +237,15 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		for k, v := range override.GetLabels() {
 			result.Labels[k] = v
 		}
+	}
+
+	// Envs: key-level merge (same semantics as labels).
+	if len(override.GetEnvs()) > 0 {
+		merged := keyValuesToMap(result.GetEnvs())
+		for _, kv := range override.GetEnvs() {
+			merged[kv.GetKey()] = kv.GetValue()
+		}
+		result.Envs = sortedKeyValues(merged)
 	}
 
 	return result

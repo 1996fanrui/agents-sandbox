@@ -251,13 +251,17 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		})
 	}
 
+	primaryEnv := primaryContainerEnvironment(mounts)
+	for _, kv := range record.createSpec.GetEnvs() {
+		primaryEnv[kv.GetKey()] = kv.GetValue()
+	}
 	if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
 		NetworkName: state.NetworkName,
 		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default", userLabels),
 		Mounts:      mounts,
-		Environment: primaryContainerEnvironment(mounts),
+		Environment: primaryEnv,
 		Workdir:     "/workspace",
 		Command: []string{
 			"sh",
@@ -480,11 +484,17 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	if backend.config.ArtifactOutputRoot != "" {
 		logDir = execLogContainerDir
 	}
+	// Merge sandbox-level envs with exec-level overrides.
+	// Exec overrides take precedence over sandbox envs.
+	execEnv := keyValuesToMap(record.createSpec.GetEnvs())
+	for k, v := range keyValuesToMap(execRecord.GetEnvOverrides()) {
+		execEnv[k] = v
+	}
 	exitCode, err := backend.dockerExec(ctx, dockerExecSpec{
 		ContainerName: record.runtimeState.PrimaryContainerName,
 		Command:       execRecord.GetCommand(),
 		Workdir:       execRecord.GetCwd(),
-		Environment:   keyValuesToMap(execRecord.GetEnvOverrides()),
+		Environment:   execEnv,
 		User:          "agbox",
 		LogDir:        logDir,
 		ExecID:        execRecord.GetExecId(),

@@ -107,6 +107,7 @@ message CreateSpec {
   repeated ServiceSpec required_services = 5;
   repeated ServiceSpec optional_services = 6;
   map<string, string> labels = 7;
+  repeated KeyValue envs = 8;
 }
 
 message SandboxHandle {

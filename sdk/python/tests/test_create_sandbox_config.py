@@ -96,6 +96,19 @@ def test_create_sandbox_config_reads_file(monkeypatch: pytest.MonkeyPatch) -> No
         Path(config_path).unlink()
 
 
+def test_create_sandbox_request_with_envs() -> None:
+    """envs are included in the proto request."""
+    request = CreateSandboxRequest(
+        create_spec=CreateSandboxSpec(
+            image="test:latest",
+            envs={"APP_ENV": "prod", "DB_HOST": "localhost"},
+        ),
+    )
+    proto = to_proto_create_sandbox_request(request)
+    env_map = {kv.key: kv.value for kv in proto.create_spec.envs}
+    assert env_map == {"APP_ENV": "prod", "DB_HOST": "localhost"}
+
+
 def test_create_sandbox_neither_config_nor_image_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """ValueError when neither config nor image is provided."""
     monkeypatch.setattr(
