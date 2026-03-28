@@ -9,7 +9,7 @@ on:
         type: string
   push:
     tags:
-      - "v*"
+      - "image-coding-v*"
 
 permissions:
   contents: read
