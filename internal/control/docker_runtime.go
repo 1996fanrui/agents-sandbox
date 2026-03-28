@@ -12,6 +12,8 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
+	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 )
@@ -23,6 +25,16 @@ type runtimeBackend interface {
 	DeleteSandbox(context.Context, *sandboxRecord) error
 	RunExec(context.Context, *sandboxRecord, *agboxv1.ExecStatus) (runtimeExecResult, error)
 	InspectContainer(ctx context.Context, containerName string) (ContainerInspectResult, error)
+	WatchContainerEvents(ctx context.Context) (<-chan ContainerEvent, <-chan error)
+}
+
+// ContainerEvent represents a Docker container lifecycle event relevant to sandbox state management.
+type ContainerEvent struct {
+	SandboxID     string
+	ContainerName string
+	Action        string // "die" or "oom"
+	IsService     bool
+	ServiceName   string
 }
 
 // ContainerInspectResult holds the state of a single container queried via Docker inspect.
@@ -85,6 +97,8 @@ type runtimeServiceContainer struct {
 
 type fakeRuntimeBackend struct {
 	inspectResults map[string]ContainerInspectResult
+	eventCh        chan ContainerEvent
+	errCh          chan error
 }
 
 func (fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
@@ -140,6 +154,13 @@ func (backend fakeRuntimeBackend) InspectContainer(_ context.Context, containerN
 		}
 	}
 	return ContainerInspectResult{}, nil
+}
+
+func (backend fakeRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
+	if backend.eventCh != nil {
+		return backend.eventCh, backend.errCh
+	}
+	return make(chan ContainerEvent), make(chan error)
 }
 
 type dockerRuntimeBackend struct {
@@ -508,6 +529,40 @@ func (backend *dockerRuntimeBackend) InspectContainer(ctx context.Context, conta
 		result.OOMKilled = resp.State.OOMKilled
 	}
 	return result, nil
+}
+
+func (backend *dockerRuntimeBackend) WatchContainerEvents(ctx context.Context) (<-chan ContainerEvent, <-chan error) {
+	filterArgs := filters.NewArgs(
+		filters.Arg("type", string(events.ContainerEventType)),
+		filters.Arg("event", "die"),
+		filters.Arg("event", "oom"),
+		filters.Arg("label", runtimedocker.LabelSandboxID),
+	)
+	dockerEvents, dockerErrors := backend.dockerClient.Events(ctx, events.ListOptions{Filters: filterArgs})
+
+	eventCh := make(chan ContainerEvent)
+	go func() {
+		defer close(eventCh)
+		for event := range dockerEvents {
+			sandboxID := event.Actor.Attributes[runtimedocker.LabelSandboxID]
+			if sandboxID == "" {
+				continue
+			}
+			containerName := event.Actor.Attributes["name"]
+			serviceName := event.Actor.Attributes[runtimedocker.LabelServiceName]
+			component := event.Actor.Attributes[runtimedocker.LabelComponent]
+
+			ce := ContainerEvent{
+				SandboxID:     sandboxID,
+				ContainerName: containerName,
+				Action:        string(event.Action),
+				IsService:     component == "service",
+				ServiceName:   serviceName,
+			}
+			eventCh <- ce
+		}
+	}()
+	return eventCh, dockerErrors
 }
 
 func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandboxRecord, execRecord *agboxv1.ExecStatus) (runtimeExecResult, error) {

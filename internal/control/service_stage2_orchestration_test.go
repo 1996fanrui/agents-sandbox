@@ -27,6 +27,8 @@ type scriptedRuntimeBackend struct {
 	deleteErr     error
 	inspectResult ContainerInspectResult
 	inspectErr    error
+	watchEventCh  chan ContainerEvent
+	watchErrCh    chan error
 }
 
 func (backend *scriptedRuntimeBackend) CreateSandbox(context.Context, *sandboxRecord) (runtimeCreateResult, error) {
@@ -51,6 +53,13 @@ func (*scriptedRuntimeBackend) RunExec(context.Context, *sandboxRecord, *agboxv1
 
 func (backend *scriptedRuntimeBackend) InspectContainer(context.Context, string) (ContainerInspectResult, error) {
 	return backend.inspectResult, backend.inspectErr
+}
+
+func (backend *scriptedRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
+	if backend.watchEventCh != nil {
+		return backend.watchEventCh, backend.watchErrCh
+	}
+	return make(chan ContainerEvent), make(chan error)
 }
 
 func assertMessageFieldNames(t *testing.T, descriptor protoreflect.MessageDescriptor, want []string) {

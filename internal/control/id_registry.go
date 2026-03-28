@@ -231,6 +231,8 @@ func NewServiceWithPersistentIDStore(ctx context.Context, config ServiceConfig, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	watcher := newDockerEventWatcher(service, config.Logger)
+	go watcher.run(ctx)
 	go service.cleanupLoop(ctx)
 	return service, joinServiceClosers(runtimeCloser, db), nil
 }
