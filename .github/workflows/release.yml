@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Parse version from the release tag and derive Go ldflags + PEP 440 version.
+  # ---------------------------------------------------------------------------
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      go_version: ${{ steps.parse.outputs.go_version }}
+      py_version: ${{ steps.parse.outputs.py_version }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
+    steps:
+      - name: Parse release tag
+        id: parse
+        shell: bash
+        run: |
+          set -e
+          tag="${GITHUB_REF_NAME}"
+          # Strip leading 'v'
+          go_version="${tag#v}"
+
+          # Convert SemVer pre-release to PEP 440:
+          #   0.1.1-alpha.1 → 0.1.1a1
+          #   0.1.1-beta.2  → 0.1.1b2
+          #   0.1.1         → 0.1.1
+          py_version="${go_version}"
+          py_version="$(echo "${py_version}" | sed -E 's/-alpha\.?/a/')"
+          py_version="$(echo "${py_version}" | sed -E 's/-beta\.?/b/')"
+          py_version="$(echo "${py_version}" | sed -E 's/-rc\.?/rc/')"
+
+          is_prerelease="${{ github.event.release.prerelease }}"
+
+          echo "go_version=${go_version}" >> "${GITHUB_OUTPUT}"
+          echo "py_version=${py_version}" >> "${GITHUB_OUTPUT}"
+          echo "is_prerelease=${is_prerelease}" >> "${GITHUB_OUTPUT}"
+
+          echo "Go version: ${go_version}"
+          echo "PyPI version: ${py_version}"
+          echo "Pre-release: ${is_prerelease}"
+
+  # ---------------------------------------------------------------------------
+  # Build Go binaries for all supported platforms and attach to the release.
+  # ---------------------------------------------------------------------------
+  go-binaries:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.resolve-version.outputs.go_version }}
+        run: |
+          set -e
+          ldflags="-X github.com/1996fanrui/agents-sandbox/internal/version.Version=${VERSION}"
+          suffix="${GOOS}_${GOARCH}"
+
+          go build -ldflags "${ldflags}" -o "agboxd_${suffix}" ./cmd/agboxd
+          go build -ldflags "${ldflags}" -o "agbox_${suffix}" ./cmd/agbox
+
+      - name: Upload artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          suffix="${{ matrix.goos }}_${{ matrix.goarch }}"
+          gh release upload "${GITHUB_REF_NAME}" \
+            "agboxd_${suffix}" \
+            "agbox_${suffix}" \
+            --clobber
+
+  # ---------------------------------------------------------------------------
+  # Publish Python SDK to PyPI with PEP 440 version.
+  # ---------------------------------------------------------------------------
+  python-sdk:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set SDK version and build
+        working-directory: sdk/python
+        env:
+          PY_VERSION: ${{ needs.resolve-version.outputs.py_version }}
+        run: |
+          set -e
+          sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" pyproject.toml
+          echo "Building SDK version ${PY_VERSION}"
+          cat pyproject.toml | head -8
+          uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist/
