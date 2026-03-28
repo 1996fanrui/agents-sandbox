@@ -382,3 +382,191 @@ func TestSandboxOwnerRemoved(t *testing.T) {
 	}
 	assertErrorReason(t, err, ReasonSandboxIDAlreadyExists)
 }
+
+func TestSandboxConfigPersistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId: "config-persist",
+		CreateSpec: &agboxv1.CreateSpec{
+			Image:  "ghcr.io/agents-sandbox/coding-runtime:test",
+			Labels: map[string]string{"env": "test"},
+			Envs:   []*agboxv1.KeyValue{{Key: "FOO", Value: "bar"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	// Verify config can be loaded from the store
+	loaded, err := first.service.config.eventStore.LoadSandboxConfig("config-persist")
+	if err != nil {
+		t.Fatalf("LoadSandboxConfig failed: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected sandbox config to be persisted")
+	}
+	if loaded.GetImage() != "ghcr.io/agents-sandbox/coding-runtime:test" {
+		t.Fatalf("unexpected image: got %s", loaded.GetImage())
+	}
+	if loaded.GetLabels()["env"] != "test" {
+		t.Fatalf("unexpected labels: got %v", loaded.GetLabels())
+	}
+	if len(loaded.GetEnvs()) != 1 || loaded.GetEnvs()[0].GetKey() != "FOO" {
+		t.Fatalf("unexpected envs: got %v", loaded.GetEnvs())
+	}
+	first.close()
+
+	// Restart and verify config survives
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		PollInterval: 2 * time.Millisecond,
+	}, dbPath)
+	loaded2, err := second.service.config.eventStore.LoadSandboxConfig("config-persist")
+	if err != nil {
+		t.Fatalf("LoadSandboxConfig after restart failed: %v", err)
+	}
+	if loaded2 == nil {
+		t.Fatal("expected sandbox config to survive restart")
+	}
+	if loaded2.GetImage() != "ghcr.io/agents-sandbox/coding-runtime:test" {
+		t.Fatalf("unexpected image after restart: got %s", loaded2.GetImage())
+	}
+
+	// Verify LoadAllSandboxConfigs
+	allConfigs, err := second.service.config.eventStore.LoadAllSandboxConfigs()
+	if err != nil {
+		t.Fatalf("LoadAllSandboxConfigs failed: %v", err)
+	}
+	if len(allConfigs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(allConfigs))
+	}
+	if _, ok := allConfigs["config-persist"]; !ok {
+		t.Fatal("expected config-persist in LoadAllSandboxConfigs result")
+	}
+}
+
+func TestExecConfigPersistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("exec-config-persist", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	execResp, err := first.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId:    createResp.GetSandboxId(),
+		ExecId:       "exec-1",
+		Command:      []string{"echo", "hello"},
+		Cwd:          "/tmp",
+		EnvOverrides: []*agboxv1.KeyValue{{Key: "BAR", Value: "baz"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+
+	// Verify exec config can be loaded
+	configs, err := first.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	if err != nil {
+		t.Fatalf("LoadExecConfigs failed: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 exec config, got %d", len(configs))
+	}
+	if configs[0].GetExecId() != execResp.GetExecId() {
+		t.Fatalf("unexpected exec id: got %s want %s", configs[0].GetExecId(), execResp.GetExecId())
+	}
+	if configs[0].GetCwd() != "/tmp" {
+		t.Fatalf("unexpected cwd: got %s", configs[0].GetCwd())
+	}
+	if len(configs[0].GetCommand()) != 2 || configs[0].GetCommand()[0] != "echo" {
+		t.Fatalf("unexpected command: got %v", configs[0].GetCommand())
+	}
+	first.close()
+
+	// Restart and verify exec config survives
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		PollInterval: 2 * time.Millisecond,
+	}, dbPath)
+	configs2, err := second.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	if err != nil {
+		t.Fatalf("LoadExecConfigs after restart failed: %v", err)
+	}
+	if len(configs2) != 1 {
+		t.Fatalf("expected 1 exec config after restart, got %d", len(configs2))
+	}
+	if configs2[0].GetExecId() != execResp.GetExecId() {
+		t.Fatalf("unexpected exec id after restart: got %s", configs2[0].GetExecId())
+	}
+}
+
+func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay:   5 * time.Millisecond,
+		PollInterval:      2 * time.Millisecond,
+		EventRetentionTTL: time.Millisecond,
+	}, dbPath)
+	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-config", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	if _, err := harness.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
+		SandboxId: createResp.GetSandboxId(),
+		ExecId:    "cleanup-exec",
+		Command:   []string{"echo"},
+	}); err != nil {
+		t.Fatalf("CreateExec failed: %v", err)
+	}
+	waitForExecState(t, harness.client, "cleanup-exec", agboxv1.ExecState_EXEC_STATE_FINISHED)
+
+	// Delete and force cleanup
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+		t.Fatalf("DeleteSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+
+	// Backdate deleted_at to force cleanup
+	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("MarkDeleted failed: %v", err)
+	}
+	if err := harness.service.cleanupExpiredEvents(); err != nil {
+		t.Fatalf("cleanupExpiredEvents failed: %v", err)
+	}
+
+	// Verify sandbox config is gone
+	loaded, err := harness.service.config.eventStore.LoadSandboxConfig(createResp.GetSandboxId())
+	if err != nil {
+		t.Fatalf("LoadSandboxConfig failed: %v", err)
+	}
+	if loaded != nil {
+		t.Fatal("expected sandbox config to be removed after cleanup")
+	}
+
+	// Verify exec configs are gone
+	configs, err := harness.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	if err != nil {
+		t.Fatalf("LoadExecConfigs failed: %v", err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected exec configs to be removed after cleanup, got %d", len(configs))
+	}
+}

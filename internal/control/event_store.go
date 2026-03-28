@@ -20,12 +20,20 @@ type eventStore interface {
 	DeletedAt(string) (time.Time, bool, error)
 	MarkDeleted(string, time.Time) error
 	Cleanup(time.Duration) ([]string, error)
+	SaveSandboxConfig(sandboxID string, spec *agboxv1.CreateSpec) error
+	LoadSandboxConfig(sandboxID string) (*agboxv1.CreateSpec, error)
+	LoadAllSandboxConfigs() (map[string]*agboxv1.CreateSpec, error)
+	DeleteSandboxConfig(sandboxID string) error
+	SaveExecConfig(sandboxID string, req *agboxv1.CreateExecRequest) error
+	LoadExecConfigs(sandboxID string) ([]*agboxv1.CreateExecRequest, error)
 }
 
 type memoryEventStore struct {
-	mu        sync.Mutex
-	events    map[string][]*agboxv1.SandboxEvent
-	deletedAt map[string]time.Time
+	mu             sync.Mutex
+	events         map[string][]*agboxv1.SandboxEvent
+	deletedAt      map[string]time.Time
+	sandboxConfigs map[string]*agboxv1.CreateSpec
+	execConfigs    map[string]map[string]*agboxv1.CreateExecRequest // sandboxID -> execID -> req
 }
 
 type persistentEventStore struct {
@@ -33,13 +41,17 @@ type persistentEventStore struct {
 }
 
 var eventMetaBucket = []byte("sandbox-deleted-at")
+var sandboxConfigBucket = []byte("sandbox-config")
 
 const eventsBucketPrefix = "events:"
+const execConfigBucketPrefix = "exec-config:"
 
 func newMemoryEventStore() *memoryEventStore {
 	return &memoryEventStore{
-		events:    make(map[string][]*agboxv1.SandboxEvent),
-		deletedAt: make(map[string]time.Time),
+		events:         make(map[string][]*agboxv1.SandboxEvent),
+		deletedAt:      make(map[string]time.Time),
+		sandboxConfigs: make(map[string]*agboxv1.CreateSpec),
+		execConfigs:    make(map[string]map[string]*agboxv1.CreateExecRequest),
 	}
 }
 
@@ -67,9 +79,16 @@ func (store *memoryEventStore) LoadAllSandboxIDs() ([]string, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	ids := make([]string, 0, len(store.events))
+	idSet := make(map[string]bool)
+	for sandboxID := range store.sandboxConfigs {
+		idSet[sandboxID] = true
+	}
 	for sandboxID := range store.events {
-		ids = append(ids, sandboxID)
+		idSet[sandboxID] = true
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	return ids, nil
@@ -114,10 +133,63 @@ func (store *memoryEventStore) Cleanup(retentionTTL time.Duration) ([]string, er
 		}
 		delete(store.deletedAt, sandboxID)
 		delete(store.events, sandboxID)
+		delete(store.sandboxConfigs, sandboxID)
+		delete(store.execConfigs, sandboxID)
 		removed = append(removed, sandboxID)
 	}
 	slices.Sort(removed)
 	return removed, nil
+}
+
+func (store *memoryEventStore) SaveSandboxConfig(sandboxID string, spec *agboxv1.CreateSpec) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.sandboxConfigs[sandboxID] = spec
+	return nil
+}
+
+func (store *memoryEventStore) LoadSandboxConfig(sandboxID string) (*agboxv1.CreateSpec, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.sandboxConfigs[sandboxID], nil
+}
+
+func (store *memoryEventStore) LoadAllSandboxConfigs() (map[string]*agboxv1.CreateSpec, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	result := make(map[string]*agboxv1.CreateSpec, len(store.sandboxConfigs))
+	for id, spec := range store.sandboxConfigs {
+		result[id] = spec
+	}
+	return result, nil
+}
+
+func (store *memoryEventStore) DeleteSandboxConfig(sandboxID string) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	delete(store.sandboxConfigs, sandboxID)
+	return nil
+}
+
+func (store *memoryEventStore) SaveExecConfig(sandboxID string, req *agboxv1.CreateExecRequest) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.execConfigs[sandboxID] == nil {
+		store.execConfigs[sandboxID] = make(map[string]*agboxv1.CreateExecRequest)
+	}
+	store.execConfigs[sandboxID][req.GetExecId()] = req
+	return nil
+}
+
+func (store *memoryEventStore) LoadExecConfigs(sandboxID string) ([]*agboxv1.CreateExecRequest, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	execMap := store.execConfigs[sandboxID]
+	result := make([]*agboxv1.CreateExecRequest, 0, len(execMap))
+	for _, req := range execMap {
+		result = append(result, req)
+	}
+	return result, nil
 }
 
 func newPersistentEventStore(db *bbolt.DB) *persistentEventStore {
@@ -163,12 +235,31 @@ func (store *persistentEventStore) LoadEvents(sandboxID string) ([]*agboxv1.Sand
 func (store *persistentEventStore) LoadAllSandboxIDs() ([]string, error) {
 	var sandboxIDs []string
 	err := store.db.View(func(tx *bbolt.Tx) error {
+		// Use sandbox-config bucket as the authoritative source
+		configBucket := tx.Bucket(sandboxConfigBucket)
+		if configBucket != nil {
+			if err := configBucket.ForEach(func(key, _ []byte) error {
+				sandboxIDs = append(sandboxIDs, string(key))
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		// Also scan event buckets for any sandbox that has events but no config
+		// (should not happen since config is written before events, but handle gracefully)
+		configSet := make(map[string]bool, len(sandboxIDs))
+		for _, id := range sandboxIDs {
+			configSet[id] = true
+		}
 		return tx.ForEach(func(bucketName []byte, _ *bbolt.Bucket) error {
 			name := string(bucketName)
 			if !isEventsBucketName(name) {
 				return nil
 			}
-			sandboxIDs = append(sandboxIDs, name[len(eventsBucketPrefix):])
+			id := name[len(eventsBucketPrefix):]
+			if !configSet[id] {
+				sandboxIDs = append(sandboxIDs, id)
+			}
 			return nil
 		})
 	})
@@ -257,6 +348,16 @@ func (store *persistentEventStore) Cleanup(retentionTTL time.Duration) ([]string
 			if err := tx.DeleteBucket(eventsBucketName(sandboxID)); err != nil && err != bbolt.ErrBucketNotFound {
 				return fmt.Errorf("delete events bucket for %s: %w", sandboxID, err)
 			}
+			// Clean up sandbox config entry.
+			if configBucket := tx.Bucket(sandboxConfigBucket); configBucket != nil {
+				if err := configBucket.Delete([]byte(sandboxID)); err != nil {
+					return fmt.Errorf("delete sandbox config for %s: %w", sandboxID, err)
+				}
+			}
+			// Clean up exec config bucket
+			if err := tx.DeleteBucket(execConfigBucketName(sandboxID)); err != nil && err != bbolt.ErrBucketNotFound {
+				return fmt.Errorf("delete exec config bucket for %s: %w", sandboxID, err)
+			}
 			removed = append(removed, sandboxID)
 		}
 		for _, sandboxID := range removed {
@@ -273,12 +374,121 @@ func (store *persistentEventStore) Cleanup(retentionTTL time.Duration) ([]string
 	return removed, nil
 }
 
+func (store *persistentEventStore) SaveSandboxConfig(sandboxID string, spec *agboxv1.CreateSpec) error {
+	payload, err := proto.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal sandbox config: %w", err)
+	}
+	return store.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(sandboxConfigBucket)
+		if bucket == nil {
+			return fmt.Errorf("bucket %q is missing", sandboxConfigBucket)
+		}
+		return bucket.Put([]byte(sandboxID), payload)
+	})
+}
+
+func (store *persistentEventStore) LoadSandboxConfig(sandboxID string) (*agboxv1.CreateSpec, error) {
+	var spec *agboxv1.CreateSpec
+	err := store.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(sandboxConfigBucket)
+		if bucket == nil {
+			return fmt.Errorf("bucket %q is missing", sandboxConfigBucket)
+		}
+		value := bucket.Get([]byte(sandboxID))
+		if value == nil {
+			return nil
+		}
+		spec = &agboxv1.CreateSpec{}
+		if err := proto.Unmarshal(value, spec); err != nil {
+			return fmt.Errorf("unmarshal sandbox config for %s: %w", sandboxID, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return spec, nil
+}
+
+func (store *persistentEventStore) LoadAllSandboxConfigs() (map[string]*agboxv1.CreateSpec, error) {
+	result := make(map[string]*agboxv1.CreateSpec)
+	err := store.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(sandboxConfigBucket)
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(key, value []byte) error {
+			spec := &agboxv1.CreateSpec{}
+			if err := proto.Unmarshal(value, spec); err != nil {
+				return fmt.Errorf("unmarshal sandbox config for %s: %w", string(key), err)
+			}
+			result[string(key)] = spec
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (store *persistentEventStore) DeleteSandboxConfig(sandboxID string) error {
+	return store.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(sandboxConfigBucket)
+		if bucket == nil {
+			return fmt.Errorf("bucket %q is missing", sandboxConfigBucket)
+		}
+		return bucket.Delete([]byte(sandboxID))
+	})
+}
+
+func (store *persistentEventStore) SaveExecConfig(sandboxID string, req *agboxv1.CreateExecRequest) error {
+	payload, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal exec config: %w", err)
+	}
+	return store.db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(execConfigBucketName(sandboxID))
+		if err != nil {
+			return fmt.Errorf("create exec config bucket for %s: %w", sandboxID, err)
+		}
+		return bucket.Put([]byte(req.GetExecId()), payload)
+	})
+}
+
+func (store *persistentEventStore) LoadExecConfigs(sandboxID string) ([]*agboxv1.CreateExecRequest, error) {
+	var configs []*agboxv1.CreateExecRequest
+	err := store.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(execConfigBucketName(sandboxID))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(_, value []byte) error {
+			req := &agboxv1.CreateExecRequest{}
+			if err := proto.Unmarshal(value, req); err != nil {
+				return fmt.Errorf("unmarshal exec config for %s: %w", sandboxID, err)
+			}
+			configs = append(configs, req)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return configs, nil
+}
+
 func eventsBucketName(sandboxID string) []byte {
 	return []byte(eventsBucketPrefix + sandboxID)
 }
 
 func isEventsBucketName(bucketName string) bool {
 	return len(bucketName) > len(eventsBucketPrefix) && bucketName[:len(eventsBucketPrefix)] == eventsBucketPrefix
+}
+
+func execConfigBucketName(sandboxID string) []byte {
+	return []byte(execConfigBucketPrefix + sandboxID)
 }
 
 func encodeUint64(value uint64) []byte {
