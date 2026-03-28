@@ -54,6 +54,12 @@ var builtInToolingCapabilities = map[string]ToolingCapability{
 		ContainerTarget: "/home/agbox/.cache/uv",
 		Mode:            CapabilityModeReadWrite,
 	},
+	"uv-python": {
+		ID:              "uv-python",
+		DefaultHostPath: "~/.local/share/uv",
+		ContainerTarget: "/home/agbox/.local/share/uv",
+		Mode:            CapabilityModeReadWrite,
+	},
 	"npm": {
 		ID:              "npm",
 		DefaultHostPath: "~/.npm",

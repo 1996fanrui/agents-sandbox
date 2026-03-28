@@ -9,7 +9,6 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
-	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 )
 
 func (backend *dockerRuntimeBackend) materializeGenericMounts(
@@ -155,34 +154,14 @@ func (backend *dockerRuntimeBackend) materializeBuiltinResourcePath(
 	writable bool,
 	state *sandboxRuntimeState,
 ) (string, bool, error) {
-	info, err := os.Stat(sourcePath)
-	if err != nil {
+	// Builtin resources are always bind-mounted as-is, including any symlinks.
+	// Shadow-copy logic is intentionally skipped: these are trusted host directories
+	// (tool configs, caches) that may contain symlinks to arbitrary host paths,
+	// and the container is expected to see them exactly as they appear on the host.
+	if _, err := os.Stat(sourcePath); err != nil {
 		return "", false, err
 	}
-	actualSource := sourcePath
-	readOnly := !writable
-	if info.IsDir() {
-		resolution, err := runtimedocker.ResolveProjectionMode(sourcePath, []string{sourcePath}, writable)
-		if err != nil {
-			return "", false, err
-		}
-		if resolution.Mode == runtimedocker.ProjectionModeShadowCopy {
-			if backend.config.StateRoot == "" {
-				return "", false, errors.New("runtime.state_root is required for builtin resource shadow copies")
-			}
-			if state.ShadowRoot == "" {
-				state.ShadowRoot = filepath.Join(backend.config.StateRoot, "sandboxes", sandboxID, "shadow")
-			}
-			actualSource = filepath.Join(state.ShadowRoot, "builtin", sanitizeRuntimeName(capability.ID))
-			if err := os.RemoveAll(actualSource); err != nil {
-				return "", false, err
-			}
-			if err := copyTreeAllowExternalSymlinks(sourcePath, actualSource); err != nil {
-				return "", false, err
-			}
-		}
-	}
-	return actualSource, readOnly, nil
+	return sourcePath, !writable, nil
 }
 
 func resolveCapabilitySource(capability profile.ToolingCapability) (string, error) {
