@@ -55,7 +55,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
     return service_pb2.CreateSandboxRequest(
         sandbox_id="" if request.sandbox_id is None else request.sandbox_id,
         create_spec=service_pb2.CreateSpec(
-            image=request.create_spec.image,
+            image="" if request.create_spec.image is None else request.create_spec.image,
             mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
             copies=[to_proto_copy(item) for item in request.create_spec.copies],
             builtin_resources=list(request.create_spec.builtin_resources),
@@ -63,6 +63,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
             optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
             labels=dict(request.create_spec.labels),
         ),
+        config_yaml=request.config_yaml,
     )
 
 

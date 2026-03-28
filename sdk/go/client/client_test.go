@@ -158,7 +158,7 @@ func TestSandboxLifecycle(t *testing.T) {
 		}
 
 		client := newTestClient(base, func(time.Duration) (rpcClient, error) { return streamClient, nil })
-		handle, err := client.CreateSandbox(context.Background(), "python:3.12-slim", WithSandboxID("sandbox-1"))
+		handle, err := client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"), WithSandboxID("sandbox-1"))
 		if err != nil {
 			t.Fatalf("CreateSandbox(wait=true) failed: %v", err)
 		}
@@ -167,7 +167,7 @@ func TestSandboxLifecycle(t *testing.T) {
 		}
 
 		getCalls = 0
-		handle, err = client.CreateSandbox(context.Background(), "python:3.12-slim", WithSandboxID("sandbox-1"), WithWait(false))
+		handle, err = client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"), WithSandboxID("sandbox-1"), WithWait(false))
 		if err != nil {
 			t.Fatalf("CreateSandbox(wait=false) failed: %v", err)
 		}
@@ -648,7 +648,7 @@ func TestWaitErrorSemantics(t *testing.T) {
 		}
 
 		client := newTestClient(base, nil)
-		_, err := client.CreateSandbox(context.Background(), "python:3.12-slim")
+		_, err := client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"))
 		var clientErr *rawclient.SandboxClientError
 		if !errors.As(err, &clientErr) {
 			t.Fatalf("expected SandboxClientError, got %T", err)
@@ -680,7 +680,7 @@ func TestWaitErrorSemantics(t *testing.T) {
 		}
 
 		client := newTestClient(base, func(time.Duration) (rpcClient, error) { return streamClient, nil })
-		_, err := client.CreateSandbox(context.Background(), "python:3.12-slim")
+		_, err := client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"))
 		var clientErr *rawclient.SandboxClientError
 		if !errors.As(err, &clientErr) {
 			t.Fatalf("expected SandboxClientError, got %T", err)

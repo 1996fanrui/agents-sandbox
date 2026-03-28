@@ -63,6 +63,8 @@ type CreateSandboxOption interface {
 }
 
 type createSandboxOptions struct {
+	image            *string
+	configPath       *string
 	sandboxID        *string
 	mounts           []MountSpec
 	copies           []CopySpec
@@ -154,6 +156,38 @@ func defaultSubscribeOptions() subscribeOptions {
 	return subscribeOptions{
 		fromSequence: 0,
 	}
+}
+
+type imageOption string
+
+// WithImage sets the sandbox container image.
+func WithImage(image string) imageOption {
+	return imageOption(image)
+}
+
+func (o imageOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	if value == "" {
+		return fmt.Errorf("image must not be empty")
+	}
+	opts.image = &value
+	return nil
+}
+
+type configOption string
+
+// WithConfig sets the path to a YAML config file for sandbox creation.
+func WithConfig(path string) configOption {
+	return configOption(path)
+}
+
+func (o configOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	if value == "" {
+		return fmt.Errorf("config path must not be empty")
+	}
+	opts.configPath = &value
+	return nil
 }
 
 type waitOption bool

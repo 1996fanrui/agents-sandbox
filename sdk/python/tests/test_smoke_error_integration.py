@@ -47,7 +47,7 @@ def test_sdk_maps_error_info_reasons_to_public_exceptions(
                 async for _event in client.subscribe_sandbox_events("sandbox-1"):
                     raise AssertionError("event stream should fail before yielding")
             else:
-                await client.create_sandbox("python:3.12-slim", sandbox_id="sandbox-1")
+                await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-1")
 
         with pytest.raises(expected_type):
             asyncio.run(run_test())
