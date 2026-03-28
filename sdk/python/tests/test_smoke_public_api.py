@@ -276,7 +276,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
     create_signature = inspect.signature(AgentsSandboxClient.create_sandbox)
     assert list(create_signature.parameters) == [
         "self",
-        "config",
+        "config_yaml",
         "image",
         "sandbox_id",
         "mounts",

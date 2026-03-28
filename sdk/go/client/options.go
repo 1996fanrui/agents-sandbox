@@ -64,7 +64,7 @@ type CreateSandboxOption interface {
 
 type createSandboxOptions struct {
 	image            *string
-	configPath       *string
+	configYAML       []byte
 	sandboxID        *string
 	mounts           []MountSpec
 	copies           []CopySpec
@@ -80,7 +80,7 @@ func defaultCreateSandboxOptions() createSandboxOptions {
 	return createSandboxOptions{
 		labels: map[string]string{},
 		envs:   map[string]string{},
-		wait:        true,
+		wait:   true,
 	}
 }
 
@@ -176,19 +176,18 @@ func (o imageOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	return nil
 }
 
-type configOption string
+type configYAMLOption []byte
 
-// WithConfig sets the path to a YAML config file for sandbox creation.
-func WithConfig(path string) configOption {
-	return configOption(path)
+// WithConfigYAML sets raw YAML content for sandbox creation.
+func WithConfigYAML(configYAML []byte) configYAMLOption {
+	return configYAMLOption(append([]byte(nil), configYAML...))
 }
 
-func (o configOption) applyCreateSandbox(opts *createSandboxOptions) error {
-	value := string(o)
-	if value == "" {
-		return fmt.Errorf("config path must not be empty")
+func (o configYAMLOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	if len(o) == 0 {
+		return fmt.Errorf("config_yaml must not be empty")
 	}
-	opts.configPath = &value
+	opts.configYAML = append([]byte(nil), o...)
 	return nil
 }
 

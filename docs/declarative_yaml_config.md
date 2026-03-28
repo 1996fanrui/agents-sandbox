@@ -1,6 +1,6 @@
 # Declarative YAML Configuration
 
-AgentsSandbox supports declarative YAML configuration files for sandbox creation. Instead of assembling all parameters in code, define the sandbox environment in an `agents-sandbox.yaml` file.
+AgentsSandbox supports declarative YAML configuration for sandbox creation. Instead of assembling all parameters in code, define the sandbox environment as YAML content and send it through the SDK.
 
 ## YAML Schema
 
@@ -10,7 +10,7 @@ The YAML schema is a 1:1 mapping of the proto `CreateSpec` message. Every field 
 image: coding-runtime:latest
 
 copies:
-  - source: .
+  - source: /absolute/path/to/project
     target: /workspace
     exclude_patterns: [".venv", "__pycache__", "node_modules"]
 
@@ -110,12 +110,18 @@ Services use a map format where the YAML key becomes `ServiceSpec.name`:
 ### Python SDK
 
 ```python
+yaml_config = """
+image: ghcr.io/agents-sandbox/coding-runtime:latest
+builtin_resources:
+  - .claude
+"""
+
 # YAML only
-sandbox = await client.create_sandbox(config="agents-sandbox.yaml")
+sandbox = await client.create_sandbox(config_yaml=yaml_config)
 
 # YAML with parameter overrides
 sandbox = await client.create_sandbox(
-    config="agents-sandbox.yaml",
+    config_yaml=yaml_config,
     image="custom:latest",
     labels={"team": "my-team"},
     envs={"APP_ENV": "staging"},
@@ -128,12 +134,18 @@ sandbox = await client.create_sandbox(image="python:3.12")
 ### Go SDK
 
 ```go
+configYAML := []byte(`
+image: ghcr.io/agents-sandbox/coding-runtime:latest
+builtin_resources:
+  - .claude
+`)
+
 // YAML only
-sandbox, err := client.CreateSandbox(ctx, sdkclient.WithConfig("agents-sandbox.yaml"))
+sandbox, err := client.CreateSandbox(ctx, sdkclient.WithConfigYAML(configYAML))
 
 // YAML with parameter overrides
 sandbox, err := client.CreateSandbox(ctx,
-    sdkclient.WithConfig("agents-sandbox.yaml"),
+    sdkclient.WithConfigYAML(configYAML),
     sdkclient.WithImage("custom:latest"),
     sdkclient.WithLabels(map[string]string{"team": "my-team"}),
     sdkclient.WithEnvs(map[string]string{"APP_ENV": "staging"}),
@@ -163,7 +175,7 @@ Sandbox-level `envs` are applied to the primary container at creation time and a
 
 ## Architecture
 
-YAML parsing is implemented in the daemon, not in SDKs. SDKs read the YAML file as raw bytes and send them to the daemon via the `config_yaml` field in `CreateSandboxRequest`. This avoids duplicating parsing logic across Python, Go, and future SDKs.
+YAML parsing is implemented in the daemon, not in SDKs. SDKs send raw YAML bytes to the daemon via the `config_yaml` field in `CreateSandboxRequest`. Callers may load YAML from a file, template it in memory, or generate it dynamically before the SDK call. This avoids duplicating parsing logic across Python, Go, and future SDKs.
 
 The daemon uses strict YAML parsing that rejects unknown fields, ensuring the YAML schema stays aligned with the proto `CreateSpec` definition.
 

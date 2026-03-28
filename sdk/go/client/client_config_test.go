@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -14,10 +13,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 
 	t.Run("config_only", func(t *testing.T) {
 		t.Parallel()
-		tmpFile := t.TempDir() + "/test.yaml"
-		if err := os.WriteFile(tmpFile, []byte("image: test:latest\n"), 0644); err != nil {
-			t.Fatalf("write temp file: %v", err)
-		}
+		configYAML := []byte("image: test:latest\n")
 
 		base := &fakeRPCClient{}
 		base.createSandboxFn = func(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
@@ -40,7 +36,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 		}
 
 		client := newTestClient(base, nil)
-		_, err := client.CreateSandbox(context.Background(), WithConfig(tmpFile), WithWait(false))
+		_, err := client.CreateSandbox(context.Background(), WithConfigYAML(configYAML), WithWait(false))
 		if err != nil {
 			t.Fatalf("CreateSandbox failed: %v", err)
 		}
@@ -48,10 +44,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 
 	t.Run("config_and_image", func(t *testing.T) {
 		t.Parallel()
-		tmpFile := t.TempDir() + "/test.yaml"
-		if err := os.WriteFile(tmpFile, []byte("builtin_resources:\n  - .claude\n"), 0644); err != nil {
-			t.Fatalf("write temp file: %v", err)
-		}
+		configYAML := []byte("builtin_resources:\n  - .claude\n")
 
 		base := &fakeRPCClient{}
 		base.createSandboxFn = func(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
@@ -74,7 +67,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 		}
 
 		client := newTestClient(base, nil)
-		_, err := client.CreateSandbox(context.Background(), WithConfig(tmpFile), WithImage("override:latest"), WithWait(false))
+		_, err := client.CreateSandbox(context.Background(), WithConfigYAML(configYAML), WithImage("override:latest"), WithWait(false))
 		if err != nil {
 			t.Fatalf("CreateSandbox failed: %v", err)
 		}
@@ -92,12 +85,12 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("config_file_not_found", func(t *testing.T) {
+	t.Run("empty_config_yaml", func(t *testing.T) {
 		t.Parallel()
 		client := newTestClient(&fakeRPCClient{}, nil)
-		_, err := client.CreateSandbox(context.Background(), WithConfig("/nonexistent/path.yaml"))
+		_, err := client.CreateSandbox(context.Background(), WithConfigYAML(nil))
 		if err == nil {
-			t.Fatal("expected error for nonexistent config file")
+			t.Fatal("expected error for empty config_yaml")
 		}
 	})
 }
