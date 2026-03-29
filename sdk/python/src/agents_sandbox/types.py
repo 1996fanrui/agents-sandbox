@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .models import ExecState, SandboxEventType, SandboxState
 
@@ -18,18 +18,18 @@ class PingInfo:
 @dataclass(frozen=True, slots=True)
 class HealthcheckConfig:
     test: tuple[str, ...]
-    interval: str | None = None
-    timeout: str | None = None
+    interval: timedelta | None = None
+    timeout: timedelta | None = None
     retries: int | None = None
-    start_period: str | None = None
-    start_interval: str | None = None
+    start_period: timedelta | None = None
+    start_interval: timedelta | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ServiceSpec:
     name: str
     image: str
-    environment: Mapping[str, str] = field(default_factory=dict)
+    envs: Mapping[str, str] = field(default_factory=dict)
     healthcheck: HealthcheckConfig | None = None
     post_start_on_primary: tuple[str, ...] = ()
 
@@ -49,6 +49,30 @@ class CopySpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SandboxPhaseDetails:
+    phase: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecEventDetails:
+    exec_id: str = ""
+    exit_code: int | None = None
+    exec_state: ExecState | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceEventDetails:
+    service_name: str = ""
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxEvent:
     event_id: str
     sequence: int
@@ -57,15 +81,10 @@ class SandboxEvent:
     occurred_at: datetime
     replay: bool = False
     snapshot: bool = False
-    phase: str | None = None
-    service_name: str | None = None
-    error_code: str | None = None
-    error_message: str | None = None
-    reason: str | None = None
-    exec_id: str | None = None
-    exit_code: int | None = None
     sandbox_state: SandboxState | None = None
-    exec_state: ExecState | None = None
+    sandbox_phase: SandboxPhaseDetails | None = None
+    exec: ExecEventDetails | None = None
+    service: ServiceEventDetails | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +95,8 @@ class SandboxHandle:
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
+    created_at: datetime | None = None
+    image: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))
@@ -93,7 +114,7 @@ class ExecHandle:
     sandbox_id: str
     state: ExecState
     command: tuple[str, ...]
-    cwd: str | None
+    cwd: str
     env_overrides: Mapping[str, str]
     exit_code: int | None = None
     error: str | None = None
@@ -105,11 +126,14 @@ class ExecHandle:
 __all__ = [
     "CopySpec",
     "DeleteSandboxesResult",
+    "ExecEventDetails",
     "ExecHandle",
     "HealthcheckConfig",
     "MountSpec",
     "PingInfo",
     "SandboxEvent",
     "SandboxHandle",
+    "SandboxPhaseDetails",
+    "ServiceEventDetails",
     "ServiceSpec",
 ]

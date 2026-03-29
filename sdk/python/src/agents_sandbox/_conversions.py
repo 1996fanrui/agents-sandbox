@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, timedelta
+
+from google.protobuf.duration_pb2 import Duration
 
 from ._generated import service_pb2
 from .models import ExecState, SandboxEventType, SandboxState
 from ._request_types import CreateExecRequest, CreateSandboxRequest
 from .types import (
     CopySpec,
+    ExecEventDetails,
     ExecHandle,
     HealthcheckConfig,
     MountSpec,
     PingInfo,
     SandboxEvent,
     SandboxHandle,
+    SandboxPhaseDetails,
+    ServiceEventDetails,
     ServiceSpec,
 )
 
@@ -23,25 +28,49 @@ def to_ping_info(response: service_pb2.PingResponse) -> PingInfo:
     return PingInfo(version=response.version, daemon=response.daemon)
 
 
+def _duration_to_timedelta(d: Duration | None) -> timedelta | None:
+    if d is None or (d.seconds == 0 and d.nanos == 0):
+        return None
+    return timedelta(seconds=d.seconds, microseconds=d.nanos // 1000)
+
+
+def _timedelta_to_duration(td: timedelta | None) -> Duration | None:
+    if td is None:
+        return None
+    total_seconds = int(td.total_seconds())
+    nanos = int((td.total_seconds() - total_seconds) * 1_000_000_000)
+    return Duration(seconds=total_seconds, nanos=nanos)
+
+
 def to_proto_healthcheck(config: HealthcheckConfig) -> service_pb2.HealthcheckConfig:
-    return service_pb2.HealthcheckConfig(
+    hc = service_pb2.HealthcheckConfig(
         test=list(config.test),
-        interval="" if config.interval is None else config.interval,
-        timeout="" if config.timeout is None else config.timeout,
         retries=0 if config.retries is None else config.retries,
-        start_period="" if config.start_period is None else config.start_period,
-        start_interval="" if config.start_interval is None else config.start_interval,
     )
+    if config.interval is not None:
+        d = _timedelta_to_duration(config.interval)
+        if d is not None:
+            hc.interval.CopyFrom(d)
+    if config.timeout is not None:
+        d = _timedelta_to_duration(config.timeout)
+        if d is not None:
+            hc.timeout.CopyFrom(d)
+    if config.start_period is not None:
+        d = _timedelta_to_duration(config.start_period)
+        if d is not None:
+            hc.start_period.CopyFrom(d)
+    if config.start_interval is not None:
+        d = _timedelta_to_duration(config.start_interval)
+        if d is not None:
+            hc.start_interval.CopyFrom(d)
+    return hc
 
 
 def to_proto_service(spec: ServiceSpec) -> service_pb2.ServiceSpec:
     return service_pb2.ServiceSpec(
         name=spec.name,
         image=spec.image,
-        environment=[
-            service_pb2.KeyValue(key=key, value=value)
-            for key, value in spec.environment.items()
-        ],
+        envs=dict(spec.envs),
         healthcheck=(
             None
             if spec.healthcheck is None
@@ -62,10 +91,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
             required_services=[to_proto_service(item) for item in request.create_spec.required_services],
             optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
             labels=dict(request.create_spec.labels),
-            envs=[
-                service_pb2.KeyValue(key=key, value=value)
-                for key, value in request.create_spec.envs.items()
-            ],
+            envs=dict(request.create_spec.envs),
         ),
         config_yaml=request.config_yaml,
     )
@@ -93,10 +119,7 @@ def to_proto_create_exec_request(request: CreateExecRequest) -> service_pb2.Crea
         command=list(request.command),
         exec_id="" if request.exec_id is None else request.exec_id,
         cwd="" if request.cwd is None else request.cwd,
-        env_overrides=[
-            service_pb2.KeyValue(key=key, value=value)
-            for key, value in request.env_overrides.items()
-        ],
+        env_overrides=dict(request.env_overrides),
     )
 
 
@@ -105,11 +128,11 @@ def to_healthcheck(config: service_pb2.HealthcheckConfig | None) -> HealthcheckC
         return None
     return HealthcheckConfig(
         test=tuple(config.test),
-        interval=config.interval or None,
-        timeout=config.timeout or None,
+        interval=_duration_to_timedelta(config.interval if config.HasField("interval") else None),
+        timeout=_duration_to_timedelta(config.timeout if config.HasField("timeout") else None),
         retries=config.retries if config.retries != 0 else None,
-        start_period=config.start_period or None,
-        start_interval=config.start_interval or None,
+        start_period=_duration_to_timedelta(config.start_period if config.HasField("start_period") else None),
+        start_interval=_duration_to_timedelta(config.start_interval if config.HasField("start_interval") else None),
     )
 
 
@@ -117,7 +140,7 @@ def to_service(spec: service_pb2.ServiceSpec) -> ServiceSpec:
     return ServiceSpec(
         name=spec.name,
         image=spec.image,
-        environment={item.key: item.value for item in spec.environment},
+        envs=dict(spec.envs),
         healthcheck=to_healthcheck(spec.healthcheck if spec.HasField("healthcheck") else None),
         post_start_on_primary=tuple(spec.post_start_on_primary),
     )
@@ -126,6 +149,9 @@ def to_service(spec: service_pb2.ServiceSpec) -> ServiceSpec:
 def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
     if handle.last_event_sequence < 0:
         raise ValueError(f"Sequence must be non-negative: {handle.last_event_sequence}")
+    created_at = None
+    if handle.HasField("created_at"):
+        created_at = handle.created_at.ToDatetime(tzinfo=UTC)
     return SandboxHandle(
         sandbox_id=handle.sandbox_id,
         state=map_sandbox_state(handle.state),
@@ -133,6 +159,8 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         required_services=tuple(to_service(item) for item in handle.required_services),
         optional_services=tuple(to_service(item) for item in handle.optional_services),
         labels=dict(handle.labels),
+        created_at=created_at,
+        image=handle.image,
     )
 
 
@@ -144,8 +172,8 @@ def to_exec_handle(exec_status: service_pb2.ExecStatus) -> ExecHandle:
         sandbox_id=exec_status.sandbox_id,
         state=state,
         command=tuple(exec_status.command),
-        cwd=exec_status.cwd or None,
-        env_overrides={item.key: item.value for item in exec_status.env_overrides},
+        cwd=exec_status.cwd,
+        env_overrides=dict(exec_status.env_overrides),
         exit_code=exit_code,
         error=exec_status.error or None,
         last_event_sequence=int(exec_status.last_event_sequence),
@@ -166,17 +194,49 @@ def to_exec_snapshot(response: object) -> tuple[ExecHandle, int]:
 def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
     if not event.HasField("occurred_at"):
         raise ValueError(f"Sandbox event {event.event_id or '<unknown>'} is missing occurred_at")
-    exit_code: int | None = None
-    if event.event_type == service_pb2.EXEC_FINISHED or event.exit_code != 0:
-        exit_code = event.exit_code
     sandbox_state = (
         None
         if event.sandbox_state == service_pb2.SANDBOX_STATE_UNSPECIFIED
         else map_sandbox_state(event.sandbox_state)
     )
-    exec_state = (
-        None if event.exec_state == service_pb2.EXEC_STATE_UNSPECIFIED else map_exec_state(event.exec_state)
-    )
+
+    sandbox_phase = None
+    exec_details = None
+    service_details = None
+
+    details_field = event.WhichOneof("details")
+    if details_field == "sandbox_phase":
+        p = event.sandbox_phase
+        sandbox_phase = SandboxPhaseDetails(
+            phase=p.phase or None,
+            error_code=p.error_code or None,
+            error_message=p.error_message or None,
+            reason=p.reason or None,
+        )
+    elif details_field == "exec":
+        e = event.exec
+        exit_code: int | None = None
+        if event.event_type == service_pb2.EXEC_FINISHED or e.exit_code != 0:
+            exit_code = e.exit_code
+        exec_state = (
+            None if e.exec_state == service_pb2.EXEC_STATE_UNSPECIFIED
+            else map_exec_state(e.exec_state)
+        )
+        exec_details = ExecEventDetails(
+            exec_id=e.exec_id,
+            exit_code=exit_code,
+            exec_state=exec_state,
+            error_code=e.error_code or None,
+            error_message=e.error_message or None,
+        )
+    elif details_field == "service":
+        s = event.service
+        service_details = ServiceEventDetails(
+            service_name=s.service_name,
+            error_code=s.error_code or None,
+            error_message=s.error_message or None,
+        )
+
     return SandboxEvent(
         event_id=event.event_id,
         sequence=int(event.sequence),
@@ -185,15 +245,10 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
         occurred_at=event.occurred_at.ToDatetime(tzinfo=UTC),
         replay=event.replay,
         snapshot=event.snapshot,
-        phase=event.phase or None,
-        service_name=event.service_name or None,
-        error_code=event.error_code or None,
-        error_message=event.error_message or None,
-        reason=event.reason or None,
-        exec_id=event.exec_id or None,
-        exit_code=exit_code,
         sandbox_state=sandbox_state,
-        exec_state=exec_state,
+        sandbox_phase=sandbox_phase,
+        exec=exec_details,
+        service=service_details,
     )
 
 

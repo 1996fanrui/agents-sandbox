@@ -11,18 +11,6 @@ from grpc_status import rpc_status
 from . import errors
 from ._generated import service_pb2, service_pb2_grpc
 
-_REASON_TO_ERROR = dict(
-    SANDBOX_CONFLICT=errors.SandboxConflictError,
-    SANDBOX_ID_ALREADY_EXISTS=errors.SandboxConflictError,
-    EXEC_ID_ALREADY_EXISTS=errors.SandboxConflictError,
-    SANDBOX_NOT_FOUND=errors.SandboxNotFoundError,
-    SANDBOX_NOT_READY=errors.SandboxNotReadyError,
-    SANDBOX_INVALID_STATE=errors.SandboxInvalidStateError,
-    EXEC_NOT_FOUND=errors.ExecNotFoundError,
-    EXEC_ALREADY_TERMINAL=errors.ExecAlreadyTerminalError,
-    SANDBOX_EVENT_SEQUENCE_EXPIRED=errors.SandboxSequenceExpiredError,
-)
-
 
 class SandboxGrpcClient:
     """Thin synchronous wrapper around the generated gRPC stub."""
@@ -115,8 +103,11 @@ class SandboxGrpcClient:
     def get_exec(self, exec_id: str) -> service_pb2.GetExecResponse:
         return self._call(self._stub.GetExec, service_pb2.GetExecRequest(exec_id=exec_id))
 
-    def list_active_execs(self, sandbox_id: str = "") -> service_pb2.ListActiveExecsResponse:
-        return self._call(self._stub.ListActiveExecs, service_pb2.ListActiveExecsRequest(sandbox_id=sandbox_id))
+    def list_active_execs(self, sandbox_id: str | None = None) -> service_pb2.ListActiveExecsResponse:
+        req = service_pb2.ListActiveExecsRequest()
+        if sandbox_id is not None:
+            req.sandbox_id = sandbox_id
+        return self._call(self._stub.ListActiveExecs, req)
 
     def _call(self, rpc, request):
         try:
@@ -127,6 +118,7 @@ class SandboxGrpcClient:
 
 def _translate_rpc_error(exc: grpc.RpcError) -> Exception:
     reason = ""
+    metadata: dict[str, str] = {}
     parsed_status = rpc_status.from_call(exc)
     if parsed_status is not None:
         for detail in parsed_status.details:
@@ -134,6 +126,30 @@ def _translate_rpc_error(exc: grpc.RpcError) -> Exception:
             if detail.Is(error_info.DESCRIPTOR):
                 detail.Unpack(error_info)
                 reason = error_info.reason
+                metadata = dict(error_info.metadata)
                 break
-    error_type = _REASON_TO_ERROR.get(reason, errors.SandboxClientError)
-    return error_type(exc.details() or reason or "RPC failed")
+
+    sandbox_id = metadata.get("sandbox_id")
+    exec_id = metadata.get("exec_id")
+
+    match reason:
+        case "SANDBOX_CONFLICT" | "SANDBOX_ID_ALREADY_EXISTS" | "EXEC_ID_ALREADY_EXISTS":
+            return errors.SandboxConflictError(sandbox_id)
+        case "SANDBOX_NOT_FOUND":
+            return errors.SandboxNotFoundError(sandbox_id)
+        case "SANDBOX_NOT_READY":
+            return errors.SandboxNotReadyError(sandbox_id)
+        case "SANDBOX_INVALID_STATE":
+            return errors.SandboxInvalidStateError(exc.details() or reason or "RPC failed")
+        case "EXEC_NOT_FOUND":
+            return errors.ExecNotFoundError(exec_id)
+        case "EXEC_ALREADY_TERMINAL":
+            return errors.ExecAlreadyTerminalError(exec_id)
+        case "EXEC_NOT_RUNNING":
+            return errors.ExecNotRunningError(exec_id)
+        case "SANDBOX_EVENT_SEQUENCE_EXPIRED":
+            from_seq_str = metadata.get("from_sequence")
+            from_seq = int(from_seq_str) if from_seq_str else None
+            return errors.SandboxSequenceExpiredError(sandbox_id, from_seq)
+        case _:
+            return errors.SandboxClientError(exc.details() or reason or "RPC failed")

@@ -60,12 +60,10 @@ def test_create_exec_cwd_env_overrides_and_exec_id_serialize_to_proto(
     default_request = _FakeRawSandboxClient.create_exec_requests[1]
     assert explicit_request.exec_id == "exec-explicit"
     assert explicit_request.cwd == "/work"
-    assert explicit_request.env_overrides == [
-        service_pb2.KeyValue(key="HELLO", value="world")
-    ]
+    assert dict(explicit_request.env_overrides) == {"HELLO": "world"}
     assert default_request.exec_id == ""
     assert default_request.cwd == "/workspace"
-    assert list(default_request.env_overrides) == []
+    assert dict(default_request.env_overrides) == {}
 
 
 def test_run_waits_and_returns_exec_handle(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,18 +147,19 @@ def test_agents_sandbox_client_wait_true_ignores_replayed_old_events(
 
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             assert request.create_spec.image == "python:3.12-slim"
+            # CreateSandboxResponse now carries the full SandboxHandle.
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
+                sandbox=service_pb2.SandboxHandle(
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
+                    last_event_sequence=5,
+                )
             )
 
         def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
             self._get_sandbox_calls += 1
-            state = service_pb2.SANDBOX_STATE_PENDING
-            sequence = 5
-            if self._get_sandbox_calls > 1:
-                state = service_pb2.SANDBOX_STATE_READY
-                sequence = 6
+            state = service_pb2.SANDBOX_STATE_READY
+            sequence = 6
             return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
                     sandbox_id=sandbox_id,
@@ -226,15 +225,10 @@ def test_agents_sandbox_client_wait_true_short_circuits_when_baseline_is_termina
 
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             del request
+            # Return READY state directly so wait=True short-circuits without subscribing.
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
+                    sandbox_id="sandbox-1",
                     state=service_pb2.SANDBOX_STATE_READY,
                     last_event_sequence=9,
                 )

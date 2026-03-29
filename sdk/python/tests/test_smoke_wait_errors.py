@@ -157,7 +157,7 @@ def test_create_exec_wait_true_surfaces_typed_stream_errors(
             include_current_snapshot: bool = False,
         ) -> Iterator[service_pb2.SandboxEvent]:
             del sandbox_id, from_sequence, include_current_snapshot
-            raise agents_sandbox.SandboxSequenceExpiredError("sequence expired")
+            raise agents_sandbox.SandboxSequenceExpiredError(message="sequence expired")
             yield service_pb2.SandboxEvent()
 
     monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)

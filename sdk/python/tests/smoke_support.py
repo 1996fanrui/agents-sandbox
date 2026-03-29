@@ -12,6 +12,7 @@ import time
 
 import grpc
 from google.protobuf.any_pb2 import Any
+from google.protobuf.duration_pb2 import Duration
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.rpc import code_pb2, error_details_pb2, status_pb2
 from grpc_status import rpc_status
@@ -66,10 +67,9 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
             ServiceSpec(
                 name="postgres",
                 image="postgres:16",
-                environment={"POSTGRES_DB": "agents"},
+                envs={"POSTGRES_DB": "agents"},
                 healthcheck=HealthcheckConfig(
                     test=("CMD-SHELL", "pg_isready -U postgres"),
-                    interval="5s",
                     retries=5,
                 ),
                 post_start_on_primary=("python", "-c", "print('seeded')"),
@@ -109,7 +109,10 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
         "exec_last_event_sequence": exec_handle.last_event_sequence,
         "deleted_count": delete_result.deleted_count,
         "event_types": [event.event_type for event in events],
-        "service_names": [event.service_name for event in events],
+        "service_names": [
+            event.service.service_name if event.service else None
+            for event in events
+        ],
     }
 
 
@@ -222,12 +225,17 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
         del context
         self.create_requests.append(request)
         return service_pb2.CreateSandboxResponse(
-            sandbox_id="sandbox-1",
-            initial_state=service_pb2.SANDBOX_STATE_PENDING,
+            sandbox=service_pb2.SandboxHandle(
+                sandbox_id="sandbox-1",
+                state=service_pb2.SANDBOX_STATE_PENDING,
+                last_event_sequence=1,
+            )
         )
 
     def GetSandbox(self, request, context):  # noqa: N802
         del context
+        interval = Duration()
+        interval.FromTimedelta(__import__("datetime").timedelta(seconds=5))
         return service_pb2.GetSandboxResponse(
             sandbox=service_pb2.SandboxHandle(
                 sandbox_id=request.sandbox_id,
@@ -236,10 +244,10 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                     service_pb2.ServiceSpec(
                         name="postgres",
                         image="postgres:16",
-                        environment=[service_pb2.KeyValue(key="POSTGRES_DB", value="agents")],
+                        envs={"POSTGRES_DB": "agents"},
                         healthcheck=service_pb2.HealthcheckConfig(
                             test=["CMD-SHELL", "pg_isready -U postgres"],
-                            interval="5s",
+                            interval=interval,
                             retries=5,
                         ),
                         post_start_on_primary=["python", "-c", "print('seeded')"],
@@ -383,7 +391,7 @@ def _event_pb(
     exec_id: str = "",
     exit_code: int = 0,
 ) -> service_pb2.SandboxEvent:
-    return service_pb2.SandboxEvent(
+    event = service_pb2.SandboxEvent(
         event_id=f"event-{sequence}",
         sequence=sequence,
         sandbox_id=sandbox_id,
@@ -391,12 +399,19 @@ def _event_pb(
         occurred_at=_timestamp(),
         replay=replay,
         snapshot=snapshot,
-        service_name=service_name,
-        exec_id=exec_id,
-        exit_code=exit_code,
         sandbox_state=sandbox_state,
-        exec_state=exec_state,
     )
+    if exec_id:
+        event.exec.CopyFrom(service_pb2.ExecEventDetails(
+            exec_id=exec_id,
+            exit_code=exit_code,
+            exec_state=exec_state,
+        ))
+    elif service_name:
+        event.service.CopyFrom(service_pb2.ServiceEventDetails(
+            service_name=service_name,
+        ))
+    return event
 
 
 def _rich_status(reason: str) -> grpc.Status:
