@@ -11,7 +11,7 @@ flowchart LR
     PySDK[Python SDK\nAgentsSandboxClient] --> RPC[gRPC over Unix socket]
     GoClient[Go SDK\nsdk/go/client] --> GoRaw[Go raw client\nsdk/go/rawclient]
     GoRaw --> RPC
-    CLI[AgentsSandbox CLI\nversion/ping\nsandbox create|list|get|delete|exec] --> RPC
+    CLI[AgentsSandbox CLI\nversion/ping\nsandbox create&#124;list&#124;get&#124;delete&#124;exec] --> RPC
     RPC --> Daemon[AgentsSandbox daemon]
     Daemon --> Service[control.Service]
     Service --> Persistence[Persistent ids.db\nID registry + event store buckets]
