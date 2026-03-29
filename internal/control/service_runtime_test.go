@@ -27,10 +27,10 @@ func TestExecStatusCarriesExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "hello"},
 	})
 	if err != nil {

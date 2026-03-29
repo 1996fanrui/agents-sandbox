@@ -386,6 +386,49 @@ func sandboxIDs(handles []*agboxv1.SandboxHandle) []string {
 	return ids
 }
 
+// eventExecID extracts the exec_id from a SandboxEvent's exec details.
+func eventExecID(event *agboxv1.SandboxEvent) string {
+	if exec, ok := event.GetDetails().(*agboxv1.SandboxEvent_Exec); ok && exec != nil {
+		return exec.Exec.GetExecId()
+	}
+	return ""
+}
+
+// eventExitCode extracts the exit_code from a SandboxEvent's exec details.
+func eventExitCode(event *agboxv1.SandboxEvent) int32 {
+	if exec, ok := event.GetDetails().(*agboxv1.SandboxEvent_Exec); ok && exec != nil {
+		return exec.Exec.GetExitCode()
+	}
+	return 0
+}
+
+// eventReason extracts the reason from a SandboxEvent's sandbox_phase details.
+func eventReason(event *agboxv1.SandboxEvent) string {
+	if phase, ok := event.GetDetails().(*agboxv1.SandboxEvent_SandboxPhase); ok && phase != nil {
+		return phase.SandboxPhase.GetReason()
+	}
+	return ""
+}
+
+// eventErrorCode extracts the error_code from a SandboxEvent's details (exec or phase).
+func eventErrorCode(event *agboxv1.SandboxEvent) string {
+	if exec, ok := event.GetDetails().(*agboxv1.SandboxEvent_Exec); ok && exec != nil {
+		return exec.Exec.GetErrorCode()
+	}
+	if phase, ok := event.GetDetails().(*agboxv1.SandboxEvent_SandboxPhase); ok && phase != nil {
+		return phase.SandboxPhase.GetErrorCode()
+	}
+	return ""
+}
+
+// eventServiceName extracts the service_name from a SandboxEvent's service details.
+func eventServiceName(event *agboxv1.SandboxEvent) string {
+	if svc, ok := event.GetDetails().(*agboxv1.SandboxEvent_Service); ok && svc != nil {
+		return svc.Service.GetServiceName()
+	}
+	return ""
+}
+
 func assertErrorReason(t *testing.T, err error, want string) {
 	t.Helper()
 

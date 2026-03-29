@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
@@ -121,19 +120,7 @@ func validateHealthcheck(serviceName string, healthcheck *agboxv1.HealthcheckCon
 	if (command == "CMD" || command == "CMD-SHELL") && len(healthcheck.GetTest()) < 2 {
 		return fmt.Errorf("service %q healthcheck.test for %s must include a command", serviceName, command)
 	}
-	for _, raw := range []string{
-		healthcheck.GetInterval(),
-		healthcheck.GetTimeout(),
-		healthcheck.GetStartPeriod(),
-		healthcheck.GetStartInterval(),
-	} {
-		if raw == "" {
-			continue
-		}
-		if _, err := time.ParseDuration(raw); err != nil {
-			return fmt.Errorf("service %q healthcheck duration %q is invalid: %w", serviceName, raw, err)
-		}
-	}
+	// Duration fields use google.protobuf.Duration which is inherently valid when set.
 	return nil
 }
 

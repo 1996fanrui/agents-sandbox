@@ -30,9 +30,9 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "persistent-exec",
 		Command:   []string{"echo"},
 	}); err != nil {
@@ -101,9 +101,9 @@ func TestPersistentIDRegistrySurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox(second) failed: %v", err)
 	}
-	waitForSandboxState(t, client2, secondSandbox.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client2, secondSandbox.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	_, err = client2.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: secondSandbox.GetSandboxId(),
+		SandboxId: secondSandbox.GetSandbox().GetSandboxId(),
 		ExecId:    "persistent-exec",
 		Command:   []string{"echo"},
 	})
@@ -148,14 +148,14 @@ func TestEventPersistenceAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		PollInterval: 2 * time.Millisecond,
 	}, dbPath)
 	stream, err := second.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -199,14 +199,14 @@ func TestDeletedSandboxEventsRetained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 
 	stream, err := harness.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -245,20 +245,20 @@ func TestExpiredEventsCleanedUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 
-	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
+	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandbox().GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("MarkDeleted failed: %v", err)
 	}
 	if err := harness.service.cleanupExpiredEvents(); err != nil {
 		t.Fatalf("cleanupExpiredEvents failed: %v", err)
 	}
 
-	_, err = harness.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	_, err = harness.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err == nil {
 		t.Fatal("expected sandbox to be removed after cleanup")
 	}
@@ -329,7 +329,7 @@ func TestSandboxOwnerRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox(second) failed: %v", err)
 	}
-	if first.GetSandboxId() == second.GetSandboxId() {
+	if first.GetSandbox().GetSandboxId() == second.GetSandbox().GetSandboxId() {
 		t.Fatal("expected distinct sandbox ids")
 	}
 
@@ -357,13 +357,13 @@ func TestSandboxConfigPersistence(t *testing.T) {
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:  "ghcr.io/agents-sandbox/coding-runtime:test",
 			Labels: map[string]string{"env": "test"},
-			Envs:   []*agboxv1.KeyValue{{Key: "FOO", Value: "bar"}},
+			Envs:   map[string]string{"FOO": "bar"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Verify config can be loaded from the store
 	loaded, err := first.service.config.eventStore.LoadSandboxConfig("config-persist")
@@ -379,7 +379,7 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	if loaded.GetLabels()["env"] != "test" {
 		t.Fatalf("unexpected labels: got %v", loaded.GetLabels())
 	}
-	if len(loaded.GetEnvs()) != 1 || loaded.GetEnvs()[0].GetKey() != "FOO" {
+	if len(loaded.GetEnvs()) != 1 || loaded.GetEnvs()["FOO"] != "bar" {
 		t.Fatalf("unexpected envs: got %v", loaded.GetEnvs())
 	}
 	first.close()
@@ -425,21 +425,21 @@ func TestExecConfigPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := first.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		ExecId:       "exec-1",
 		Command:      []string{"echo", "hello"},
 		Cwd:          "/tmp",
-		EnvOverrides: []*agboxv1.KeyValue{{Key: "BAR", Value: "baz"}},
+		EnvOverrides: map[string]string{"BAR": "baz"},
 	})
 	if err != nil {
 		t.Fatalf("CreateExec failed: %v", err)
 	}
 
 	// Verify exec config can be loaded
-	configs, err := first.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	configs, err := first.service.config.eventStore.LoadExecConfigs(createResp.GetSandbox().GetSandboxId())
 	if err != nil {
 		t.Fatalf("LoadExecConfigs failed: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestExecConfigPersistence(t *testing.T) {
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		PollInterval: 2 * time.Millisecond,
 	}, dbPath)
-	configs2, err := second.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	configs2, err := second.service.config.eventStore.LoadExecConfigs(createResp.GetSandbox().GetSandboxId())
 	if err != nil {
 		t.Fatalf("LoadExecConfigs after restart failed: %v", err)
 	}
@@ -487,10 +487,10 @@ func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	if _, err := harness.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "cleanup-exec",
 		Command:   []string{"echo"},
 	}); err != nil {
@@ -499,13 +499,13 @@ func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
 	waitForExecState(t, harness.client, "cleanup-exec", agboxv1.ExecState_EXEC_STATE_FINISHED)
 
 	// Delete and force cleanup
-	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	if _, err := harness.client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 
 	// Backdate deleted_at to force cleanup
-	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
+	if err := harness.service.config.eventStore.MarkDeleted(createResp.GetSandbox().GetSandboxId(), time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("MarkDeleted failed: %v", err)
 	}
 	if err := harness.service.cleanupExpiredEvents(); err != nil {
@@ -513,7 +513,7 @@ func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
 	}
 
 	// Verify sandbox config is gone
-	loaded, err := harness.service.config.eventStore.LoadSandboxConfig(createResp.GetSandboxId())
+	loaded, err := harness.service.config.eventStore.LoadSandboxConfig(createResp.GetSandbox().GetSandboxId())
 	if err != nil {
 		t.Fatalf("LoadSandboxConfig failed: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
 	}
 
 	// Verify exec configs are gone
-	configs, err := harness.service.config.eventStore.LoadExecConfigs(createResp.GetSandboxId())
+	configs, err := harness.service.config.eventStore.LoadExecConfigs(createResp.GetSandbox().GetSandboxId())
 	if err != nil {
 		t.Fatalf("LoadExecConfigs failed: %v", err)
 	}

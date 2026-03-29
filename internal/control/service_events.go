@@ -156,16 +156,40 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 		OccurredAt:   timestamppb.Now(),
 		Replay:       false,
 		Snapshot:     false,
-		Phase:        mutation.phase,
-		ErrorCode:    mutation.errorCode,
-		ErrorMessage: mutation.errorMessage,
-		Reason:       mutation.reason,
-		ExecId:       mutation.execID,
-		ExitCode:     mutation.exitCode,
 		SandboxState: mutation.sandboxState,
-		ExecState:    mutation.execState,
-		ServiceName:  mutation.serviceName,
 	}
+
+	// Populate the oneof details field based on which mutation fields are set.
+	switch {
+	case mutation.execID != "":
+		event.Details = &agboxv1.SandboxEvent_Exec{
+			Exec: &agboxv1.ExecEventDetails{
+				ExecId:       mutation.execID,
+				ExitCode:     mutation.exitCode,
+				ExecState:    mutation.execState,
+				ErrorCode:    mutation.errorCode,
+				ErrorMessage: mutation.errorMessage,
+			},
+		}
+	case mutation.serviceName != "":
+		event.Details = &agboxv1.SandboxEvent_Service{
+			Service: &agboxv1.ServiceEventDetails{
+				ServiceName:  mutation.serviceName,
+				ErrorCode:    mutation.errorCode,
+				ErrorMessage: mutation.errorMessage,
+			},
+		}
+	case mutation.phase != "" || mutation.errorCode != "" || mutation.errorMessage != "" || mutation.reason != "":
+		event.Details = &agboxv1.SandboxEvent_SandboxPhase{
+			SandboxPhase: &agboxv1.SandboxPhaseDetails{
+				Phase:        mutation.phase,
+				ErrorCode:    mutation.errorCode,
+				ErrorMessage: mutation.errorMessage,
+				Reason:       mutation.reason,
+			},
+		}
+	}
+
 	if err := s.config.eventStore.Append(record.handle.GetSandboxId(), event); err != nil {
 		return err
 	}
@@ -178,7 +202,7 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 func (s *Service) requireSandboxLocked(sandboxID string) (*sandboxRecord, error) {
 	record, ok := s.boxes[sandboxID]
 	if !ok {
-		return nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", sandboxID)
+		return nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": sandboxID}, "sandbox %s was not found", sandboxID)
 	}
 	return record, nil
 }
@@ -186,15 +210,15 @@ func (s *Service) requireSandboxLocked(sandboxID string) (*sandboxRecord, error)
 func (s *Service) requireExecLocked(execID string) (string, *agboxv1.ExecStatus, error) {
 	sandboxID, ok := s.execs[execID]
 	if !ok {
-		return "", nil, newStatusError(codes.NotFound, ReasonExecNotFound, "exec %s was not found", execID)
+		return "", nil, newStatusError(codes.NotFound, ReasonExecNotFound, map[string]string{"exec_id": execID}, "exec %s was not found", execID)
 	}
 	record, ok := s.boxes[sandboxID]
 	if !ok {
-		return "", nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", sandboxID)
+		return "", nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": sandboxID}, "sandbox %s was not found", sandboxID)
 	}
 	execRecord, ok := record.execs[execID]
 	if !ok {
-		return "", nil, newStatusError(codes.NotFound, ReasonExecNotFound, "exec %s was not found", execID)
+		return "", nil, newStatusError(codes.NotFound, ReasonExecNotFound, map[string]string{"exec_id": execID}, "exec %s was not found", execID)
 	}
 	return sandboxID, execRecord, nil
 }
@@ -225,6 +249,7 @@ func validateSequenceNotExpired(record *sandboxRecord, afterSequence uint64) err
 	return newStatusError(
 		codes.OutOfRange,
 		ReasonSandboxEventSequenceExpired,
+		map[string]string{"sandbox_id": record.handle.GetSandboxId(), "from_sequence": fmt.Sprintf("%d", afterSequence)},
 		"sandbox %s event sequence %d is outside retained history",
 		record.handle.GetSandboxId(),
 		afterSequence,
@@ -290,6 +315,12 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			}
 		}
 
+		// Extract created_at from the first event (SANDBOX_ACCEPTED).
+		var createdAt *timestamppb.Timestamp
+		if len(events) > 0 {
+			createdAt = events[0].GetOccurredAt()
+		}
+
 		// Build the record with nextSequence set before any event append.
 		record := &sandboxRecord{
 			handle: &agboxv1.SandboxHandle{
@@ -299,6 +330,8 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 				Labels:            cloneStringMap(createSpec.GetLabels()),
 				RequiredServices:  cloneServiceSpecs(createSpec.GetRequiredServices()),
 				OptionalServices:  cloneServiceSpecs(createSpec.GetOptionalServices()),
+				CreatedAt:         createdAt,
+				Image:             createSpec.GetImage(),
 			},
 			createSpec:                cloneCreateSpec(createSpec),
 			requiredServices:          cloneServiceSpecs(createSpec.GetRequiredServices()),
@@ -470,7 +503,8 @@ func resolveExecStateFromEvents(events []*agboxv1.SandboxEvent, execID string) (
 	var exitCode int32
 	var errorCode, errorMsg string
 	for _, event := range events {
-		if event.GetExecId() != execID {
+		execDetails, ok := event.GetDetails().(*agboxv1.SandboxEvent_Exec)
+		if !ok || execDetails == nil || execDetails.Exec.GetExecId() != execID {
 			continue
 		}
 		switch event.GetEventType() {
@@ -478,12 +512,12 @@ func resolveExecStateFromEvents(events []*agboxv1.SandboxEvent, execID string) (
 			state = agboxv1.ExecState_EXEC_STATE_RUNNING
 		case agboxv1.EventType_EXEC_FINISHED:
 			state = agboxv1.ExecState_EXEC_STATE_FINISHED
-			exitCode = event.GetExitCode()
+			exitCode = execDetails.Exec.GetExitCode()
 		case agboxv1.EventType_EXEC_FAILED:
 			state = agboxv1.ExecState_EXEC_STATE_FAILED
-			exitCode = event.GetExitCode()
-			errorCode = event.GetErrorCode()
-			errorMsg = event.GetErrorMessage()
+			exitCode = execDetails.Exec.GetExitCode()
+			errorCode = execDetails.Exec.GetErrorCode()
+			errorMsg = execDetails.Exec.GetErrorMessage()
 		case agboxv1.EventType_EXEC_CANCELLED:
 			state = agboxv1.ExecState_EXEC_STATE_CANCELLED
 		}
@@ -511,9 +545,13 @@ func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {
 			OccurredAt:   timestamppb.Now(),
 			Replay:       true,
 			Snapshot:     true,
-			ExecId:       execRecord.GetExecId(),
-			ExecState:    execRecord.GetState(),
 			SandboxState: record.handle.GetState(),
+			Details: &agboxv1.SandboxEvent_Exec{
+				Exec: &agboxv1.ExecEventDetails{
+					ExecId:    execRecord.GetExecId(),
+					ExecState: execRecord.GetState(),
+				},
+			},
 		})
 	}
 	return result

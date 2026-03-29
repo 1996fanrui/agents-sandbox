@@ -30,7 +30,7 @@ func TestRestoredSandboxFullOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
 	// Phase 2: Restart with inspect returning container running.
@@ -44,7 +44,7 @@ func TestRestoredSandboxFullOperations(t *testing.T) {
 	}, dbPath)
 
 	// Verify sandbox is READY (not recoveredOnly).
-	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRestoredSandboxFullOperations(t *testing.T) {
 
 	// Verify CreateExec works on restored sandbox.
 	_, err = second.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "restored-exec",
 		Command:   []string{"echo", "hello"},
 	})
@@ -64,11 +64,11 @@ func TestRestoredSandboxFullOperations(t *testing.T) {
 	waitForExecState(t, second.client, "restored-exec", agboxv1.ExecState_EXEC_STATE_FINISHED)
 
 	// Verify StopSandbox works on restored sandbox.
-	_, err = second.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	_, err = second.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("StopSandbox on restored sandbox failed: %v", err)
 	}
-	waitForSandboxState(t, second.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
+	waitForSandboxState(t, second.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
 }
 
 func TestRestoreReadySandboxContainerRunning(t *testing.T) {
@@ -84,7 +84,7 @@ func TestRestoreReadySandboxContainerRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
@@ -94,7 +94,7 @@ func TestRestoreReadySandboxContainerRunning(t *testing.T) {
 		},
 	}, dbPath)
 
-	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRestoreReadySandboxContainerExited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
 	// Container exited or missing → should become FAILED.
@@ -127,7 +127,7 @@ func TestRestoreReadySandboxContainerExited(t *testing.T) {
 		},
 	}, dbPath)
 
-	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -149,12 +149,12 @@ func TestRestoreStoppedSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	_, err = first.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	_, err = first.client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("StopSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
 	first.close()
 
 	// Container exited but exists is expected for STOPPED.
@@ -166,7 +166,7 @@ func TestRestoreStoppedSandbox(t *testing.T) {
 		},
 	}, dbPath)
 
-	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -175,11 +175,11 @@ func TestRestoreStoppedSandbox(t *testing.T) {
 	}
 
 	// Verify ResumeSandbox works.
-	_, err = second.client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	_, err = second.client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("ResumeSandbox on restored stopped sandbox failed: %v", err)
 	}
-	waitForSandboxState(t, second.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, second.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 }
 
 func TestRestoreExecState(t *testing.T) {
@@ -195,11 +195,11 @@ func TestRestoreExecState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Create an exec that finishes.
 	_, err = first.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "finished-exec",
 		Command:   []string{"echo", "hello"},
 	})
@@ -241,11 +241,11 @@ func TestRestoreIdleTTLReschedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Create and finish an exec to set lastTerminalRunFinishedAt.
 	_, err = first.client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "ttl-exec",
 		Command:   []string{"echo"},
 	})
@@ -267,7 +267,7 @@ func TestRestoreIdleTTLReschedule(t *testing.T) {
 	}, dbPath)
 
 	// The sandbox should eventually be stopped by idle TTL.
-	waitForSandboxState(t, second.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
+	waitForSandboxState(t, second.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
 }
 
 func TestDockerEventPrimaryContainerDie(t *testing.T) {
@@ -293,20 +293,20 @@ func TestDockerEventPrimaryContainerDie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Inject a "die" event for the primary container.
 	eventCh <- ContainerEvent{
-		SandboxID:     createResp.GetSandboxId(),
-		ContainerName: "fake-primary-" + createResp.GetSandboxId(),
+		SandboxID:     createResp.GetSandbox().GetSandboxId(),
+		ContainerName: "fake-primary-" + createResp.GetSandbox().GetSandboxId(),
 		Action:        "die",
 	}
 
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 
 	// Verify SANDBOX_FAILED event is present with correct error code.
 	stream, err := harness.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -323,8 +323,8 @@ func TestDockerEventPrimaryContainerDie(t *testing.T) {
 	var found bool
 	for _, e := range events {
 		if e.GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
-			if e.GetErrorCode() != "CONTAINER_DIED" {
-				t.Fatalf("expected error_code CONTAINER_DIED, got %s", e.GetErrorCode())
+			if eventErrorCode(e) != "CONTAINER_DIED" {
+				t.Fatalf("expected error_code CONTAINER_DIED, got %s", eventErrorCode(e))
 			}
 			found = true
 		}
@@ -357,20 +357,20 @@ func TestDockerEventOOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Inject an "oom" event for the primary container.
 	eventCh <- ContainerEvent{
-		SandboxID:     createResp.GetSandboxId(),
-		ContainerName: "fake-primary-" + createResp.GetSandboxId(),
+		SandboxID:     createResp.GetSandbox().GetSandboxId(),
+		ContainerName: "fake-primary-" + createResp.GetSandbox().GetSandboxId(),
 		Action:        "oom",
 	}
 
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 
 	// Verify SANDBOX_FAILED event with OOM error code.
 	stream, err := harness.client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -387,8 +387,8 @@ func TestDockerEventOOM(t *testing.T) {
 	var found bool
 	for _, e := range events {
 		if e.GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
-			if e.GetErrorCode() != "CONTAINER_OOM" {
-				t.Fatalf("expected error_code CONTAINER_OOM, got %s", e.GetErrorCode())
+			if eventErrorCode(e) != "CONTAINER_OOM" {
+				t.Fatalf("expected error_code CONTAINER_OOM, got %s", eventErrorCode(e))
 			}
 			found = true
 		}
@@ -423,15 +423,15 @@ func TestDockerEventReconnectReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	// Simulate container exited and event stream disconnected.
-	primaryName := "fake-primary-" + createResp.GetSandboxId()
+	primaryName := "fake-primary-" + createResp.GetSandbox().GetSandboxId()
 	inspectResults[primaryName] = ContainerInspectResult{Exists: true, Running: false}
 	errCh <- errors.New("connection lost")
 
 	// The watcher will reconnect and reconcileAll will detect the exited container.
-	waitForSandboxState(t, harness.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
+	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 }
 
 // TestEndToEndRestartRecoveryWithMockDocker verifies the full restart recovery
@@ -468,7 +468,7 @@ func TestEndToEndRestartRecoveryWithMockDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Phase 1: CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, first.client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
 	// ---- Phase 2: Restart with container still running ----

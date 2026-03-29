@@ -24,7 +24,7 @@ func TestCreateSandboxRequiresExplicitImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox(valid) failed: %v", err)
 	}
-	if createResp.GetSandboxId() == "" {
+	if createResp.GetSandbox().GetSandboxId() == "" {
 		t.Fatal("expected sandbox_id for valid request")
 	}
 
@@ -65,7 +65,7 @@ func TestCreateSandboxUsesRequestedImageForRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	if runtime.lastCreateImage != "example.com/custom/runtime:1.2.3" {
 		t.Fatalf("unexpected runtime image: got %q", runtime.lastCreateImage)
 	}
@@ -103,7 +103,7 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinToolsToRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	if got := runtime.lastCreateSpec.GetMounts(); len(got) != 1 || got[0].GetTarget() != "/work/mount" {
 		t.Fatalf("unexpected mounts passed to runtime: %#v", got)
@@ -133,7 +133,7 @@ func TestCreateSandboxWithLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	request.CreateSpec.Labels["owner"] = "mutated"
 	request.CreateSpec.Labels["new"] = "value"
@@ -141,7 +141,7 @@ func TestCreateSandboxWithLabels(t *testing.T) {
 		t.Fatalf("runtime labels were not cloned: %#v", runtime.lastCreateSpec.GetLabels())
 	}
 
-	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestCreateSandboxWithLabels(t *testing.T) {
 	}
 
 	getResp.Sandbox.Labels["owner"] = "changed"
-	verifyResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	verifyResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox verify failed: %v", err)
 	}
@@ -171,9 +171,9 @@ func TestCreateSandboxWithoutLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -201,9 +201,9 @@ func TestCreateSandboxLabelsNoValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	getResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -631,7 +631,7 @@ func TestCreateSandboxWithYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateSandbox with YAML failed: %v", err)
 		}
-		waitForSandboxState(t, client, resp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+		waitForSandboxState(t, client, resp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 		if runtime.lastCreateImage != "yaml-provided:latest" {
 			t.Fatalf("expected yaml-provided:latest, got %q", runtime.lastCreateImage)
 		}
@@ -657,7 +657,7 @@ func TestCreateSandboxWithYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateSandbox with YAML+spec failed: %v", err)
 		}
-		waitForSandboxState(t, client, resp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+		waitForSandboxState(t, client, resp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 		if runtime.lastCreateImage != "override:v2" {
 			t.Fatalf("expected override:v2, got %q", runtime.lastCreateImage)

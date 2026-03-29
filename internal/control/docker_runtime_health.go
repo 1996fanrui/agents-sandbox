@@ -8,6 +8,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/docker/docker/api/types/container"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func (backend *dockerRuntimeBackend) dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
@@ -69,26 +70,14 @@ func requiredServiceHealthWaitUpperBound(healthcheck *agboxv1.HealthcheckConfig)
 		defaultRetries       = uint32(3)
 		maxUpperBound        = 5 * time.Minute
 	)
-	startPeriod, err := parseHealthDuration(healthcheck.GetStartPeriod(), 0)
-	if err != nil {
-		return 0, err
-	}
-	interval, err := parseHealthDuration(healthcheck.GetInterval(), defaultInterval)
-	if err != nil {
-		return 0, err
-	}
-	timeout, err := parseHealthDuration(healthcheck.GetTimeout(), defaultTimeout)
-	if err != nil {
-		return 0, err
-	}
+	startPeriod := protoOrDefault(healthcheck.GetStartPeriod(), 0)
+	interval := protoOrDefault(healthcheck.GetInterval(), defaultInterval)
+	timeout := protoOrDefault(healthcheck.GetTimeout(), defaultTimeout)
 	startIntervalDefault := time.Duration(0)
 	if startPeriod > 0 {
 		startIntervalDefault = defaultStartInterval
 	}
-	startInterval, err := parseHealthDuration(healthcheck.GetStartInterval(), startIntervalDefault)
-	if err != nil {
-		return 0, err
-	}
+	startInterval := protoOrDefault(healthcheck.GetStartInterval(), startIntervalDefault)
 	retries := healthcheck.GetRetries()
 	if retries == 0 {
 		retries = defaultRetries
@@ -102,11 +91,16 @@ func requiredServiceHealthWaitUpperBound(healthcheck *agboxv1.HealthcheckConfig)
 	return minDuration(theoreticalUpperBound, maxUpperBound), nil
 }
 
-func parseHealthDuration(raw string, defaultValue time.Duration) (time.Duration, error) {
-	if strings.TrimSpace(raw) == "" {
-		return defaultValue, nil
+// protoOrDefault returns the Duration value or the default when nil or zero.
+func protoOrDefault(d *durationpb.Duration, defaultValue time.Duration) time.Duration {
+	if d == nil {
+		return defaultValue
 	}
-	return time.ParseDuration(raw)
+	v := d.AsDuration()
+	if v == 0 {
+		return defaultValue
+	}
+	return v
 }
 
 func latestHealthLogTimestamp(items []*container.HealthcheckResult) time.Time {
@@ -147,33 +141,17 @@ func toContainerHealthConfig(healthcheck *agboxv1.HealthcheckConfig) (*container
 	config := &container.HealthConfig{
 		Test: append([]string(nil), healthcheck.GetTest()...),
 	}
-	if healthcheck.GetInterval() != "" {
-		interval, err := time.ParseDuration(healthcheck.GetInterval())
-		if err != nil {
-			return nil, fmt.Errorf("parse healthcheck interval: %w", err)
-		}
-		config.Interval = interval
+	if healthcheck.GetInterval() != nil {
+		config.Interval = healthcheck.GetInterval().AsDuration()
 	}
-	if healthcheck.GetTimeout() != "" {
-		timeout, err := time.ParseDuration(healthcheck.GetTimeout())
-		if err != nil {
-			return nil, fmt.Errorf("parse healthcheck timeout: %w", err)
-		}
-		config.Timeout = timeout
+	if healthcheck.GetTimeout() != nil {
+		config.Timeout = healthcheck.GetTimeout().AsDuration()
 	}
-	if healthcheck.GetStartPeriod() != "" {
-		startPeriod, err := time.ParseDuration(healthcheck.GetStartPeriod())
-		if err != nil {
-			return nil, fmt.Errorf("parse healthcheck start period: %w", err)
-		}
-		config.StartPeriod = startPeriod
+	if healthcheck.GetStartPeriod() != nil {
+		config.StartPeriod = healthcheck.GetStartPeriod().AsDuration()
 	}
-	if healthcheck.GetStartInterval() != "" {
-		startInterval, err := time.ParseDuration(healthcheck.GetStartInterval())
-		if err != nil {
-			return nil, fmt.Errorf("parse healthcheck start interval: %w", err)
-		}
-		config.StartInterval = startInterval
+	if healthcheck.GetStartInterval() != nil {
+		config.StartInterval = healthcheck.GetStartInterval().AsDuration()
 	}
 	if healthcheck.GetRetries() > 0 {
 		config.Retries = int(healthcheck.GetRetries())
