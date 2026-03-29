@@ -311,7 +311,7 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
     legacy_socket_token = "LEGACY_SOCKET_ENV"
     public_docs = {
         "README.md": (repo_root / "README.md").read_text(),
-        "docs/sdk_async_usage.md": (repo_root / "docs" / "sdk_async_usage.md").read_text(),
+        "docs/sdk_python_usage.md": (repo_root / "docs" / "sdk_python_usage.md").read_text(),
         "examples/codex-cli/README.md": (repo_root / "examples" / "codex-cli" / "README.md").read_text(),
     }
 
@@ -331,17 +331,17 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
         assert legacy_socket_token not in content, f"{relative_path} should not mention {legacy_socket_token}"
 
     assert "AgentsSandboxClient()" in public_docs["README.md"]
-    assert "AgentsSandboxClient()" in public_docs["docs/sdk_async_usage.md"]
+    assert "AgentsSandboxClient()" in public_docs["docs/sdk_python_usage.md"]
     assert "AgentsSandboxClient()" in public_docs["examples/codex-cli/README.md"]
-    assert "ServiceSpec" in public_docs["docs/sdk_async_usage.md"]
-    assert "HealthcheckConfig" in public_docs["docs/sdk_async_usage.md"]
-    assert "required_services" in public_docs["docs/sdk_async_usage.md"]
-    assert "optional_services" in public_docs["docs/sdk_async_usage.md"]
-    assert "sandbox_id=" in public_docs["docs/sdk_async_usage.md"]
-    assert "exec_id=" in public_docs["docs/sdk_async_usage.md"]
-    assert "from_sequence=0" in public_docs["docs/sdk_async_usage.md"]
-    assert "last_event_sequence" in public_docs["docs/sdk_async_usage.md"]
-    assert "sequence" in public_docs["docs/sdk_async_usage.md"]
+    assert "ServiceSpec" in public_docs["docs/sdk_python_usage.md"]
+    assert "HealthcheckConfig" in public_docs["docs/sdk_python_usage.md"]
+    assert "required_services" in public_docs["docs/sdk_python_usage.md"]
+    assert "optional_services" in public_docs["docs/sdk_python_usage.md"]
+    assert "sandbox_id=" in public_docs["docs/sdk_python_usage.md"]
+    assert "exec_id=" in public_docs["docs/sdk_python_usage.md"]
+    assert "from_sequence=0" in public_docs["docs/sdk_python_usage.md"]
+    assert "last_event_sequence" in public_docs["docs/sdk_python_usage.md"]
+    assert "sequence" in public_docs["docs/sdk_python_usage.md"]
 
 
 def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> None:

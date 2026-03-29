@@ -10,16 +10,14 @@ Every piece of daemon state must belong to exactly one category below. If a fiel
 
 | Category | Source of Truth | Persistence | Restart Recovery |
 |----------|----------------|-------------|-----------------|
-| A — bbolt-Persisted | bbolt (`ids.db`) | Write bbolt before accepting operation | Load from bbolt |
+| A — bbolt-Persisted | bbolt (`ids.db`) | Write before accepting operation | Load from bbolt |
 | B — Docker Runtime | Docker Engine API | Never persist | Query Docker via inspect |
 | C — Derived / Rebuilt | Computed from A + B | No separate storage | Recompute on startup |
 | D — Filesystem Artifacts | Host filesystem | Written during operation | Files already on disk |
 
-## State Categories
+## Category A — bbolt-Persisted State
 
-### Category A — bbolt-Persisted State
-
-Daemon-originated intent and history. Docker does not know about it; if lost, it is gone forever. Write to bbolt **before** accepting the operation or updating in-memory cache. On restart, load from bbolt.
+Daemon-originated intent and history. Write to bbolt **before** accepting the operation or updating in-memory cache.
 
 | State | bbolt Bucket | Key | Value |
 |-------|-------------|-----|-------|
@@ -30,39 +28,37 @@ Daemon-originated intent and history. Docker does not know about it; if lost, it
 | Sandbox config | `sandbox-config` | sandbox_id | `proto.Marshal(CreateSpec)` |
 | Exec config | `exec-config:{sandbox_id}` | exec_id | `proto.Marshal(CreateExecRequest)` |
 
-`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. It contains all sandbox configuration: image, mounts, copies, builtin_tools, required_services, optional_services, and labels.
+`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging.
 
-### Category B — Docker Runtime State
+## Category B — Docker Runtime State
 
-Actual condition of Docker containers, networks, and execs. Never write to bbolt (goes stale the moment the daemon stops observing). On restart, query Docker to rebuild.
+Actual condition of Docker containers and networks. Never written to bbolt; obtained via `docker inspect` on restart.
 
 | State | How to Obtain |
 |-------|--------------|
-| Container running/exited/OOM status | `docker inspect {container_name}` (container names from Category C) |
+| Container running/exited/OOM status | `docker inspect {container_name}` |
 | Container exit code | `docker inspect {container_name}` |
 | Service health status | `docker inspect {container_name}` → `.State.Health` |
 | Network exists | `docker network inspect {network_name}` |
 
-### Category C — Derived / Rebuilt State
+## Category C — Derived / Rebuilt State
 
-Not persisted. Recomputed on startup from Category A and B. Includes both pure computations (container names) and runtime handles (cancel contexts, channels).
+Recomputed on startup from Category A and B.
 
 | State | Rebuilt From |
 |-------|-------------|
 | Network name | `agbox-net-{sanitize(sandbox_id)}` |
 | Primary container name | `agbox-primary-{sanitize(sandbox_id)}` |
-| Service container name | `agbox-svc-{sanitize(sandbox_id)}-{sanitize(service_name)}` (service names from `sandbox-config`) |
+| Service container name | `agbox-svc-{sanitize(sandbox_id)}-{sanitize(service_name)}` |
 | Exec ID → Sandbox ID mapping | Enumerate `exec-config:{sandbox_id}` buckets |
 | `deletedAtRecorded` flag | Presence check in `sandbox-deleted-at` |
-| `lastTerminalRunFinishedAt` | Latest `EXEC_FINISHED` / `EXEC_CANCELLED` event timestamp in `events:{sandbox_id}` |
+| `lastTerminalRunFinishedAt` | Latest terminal exec event timestamp |
 | `nextSequence` | `MaxSequence()` over `events:{sandbox_id}` |
-| `context.CancelFunc` per exec | Create new cancel context for execs that Docker reports as still running |
-| `optionalServiceStarts` channels | Re-inspect optional service containers; record final status directly |
-| `sandboxRuntimeState` | Container names (deterministic) + runtime status from Docker |
+| `context.CancelFunc` per exec | New cancel context for running execs |
+| `optionalServiceStarts` channels | Re-inspect optional service containers |
+| `sandboxRuntimeState` | Container names + runtime status from Docker |
 
-### Category D — Host Filesystem Artifacts
-
-Large or streaming output written directly to the host filesystem, outside bbolt. Survives daemon restart by design.
+## Category D — Host Filesystem Artifacts
 
 | Artifact | Host Path | Container Path |
 |----------|-----------|----------------|
@@ -78,55 +74,41 @@ flowchart TD
     Start[Daemon startup] --> OpenDB[Open bbolt ids.db]
     OpenDB --> LoadIDs[Load all sandbox IDs from sandbox-config]
     LoadIDs --> ForEach[For each sandbox]
-
-    ForEach --> LoadA[Load Category A: CreateSpec + exec configs + events]
-    LoadA --> DeriveC[Derive Category C: container names, sequences, timestamps]
-    DeriveC --> QueryB[Query Category B: docker inspect each container]
-    QueryB --> Reconcile{Reconcile persisted state vs Docker}
-
+    ForEach --> LoadA[Load Category A state]
+    LoadA --> DeriveC[Derive Category C state]
+    DeriveC --> QueryB[Query Category B via docker inspect]
+    QueryB --> Reconcile{Reconcile}
     Reconcile -->|READY + running| RestoreReady[Restore as READY]
-    Reconcile -->|READY + exited| ToFailed[Transition to FAILED]
+    Reconcile -->|READY + exited| ToFailed[FAILED]
     Reconcile -->|STOPPED + exited| RestoreStopped[Restore as STOPPED]
-    Reconcile -->|PENDING + missing| ToFailed2[Transition to FAILED]
-    Reconcile -->|DELETED / DELETING| Cleanup[Clean up Docker resources, finalize deletion]
-    Reconcile -->|FAILED| RestoreFailed[Restore as FAILED, allow delete only]
-
-    RestoreReady --> RebuildHandles[Rebuild runtime handles, re-schedule idle TTL]
-    RebuildHandles --> Next[Next sandbox]
+    Reconcile -->|PENDING + missing| ToFailed2[FAILED]
+    Reconcile -->|DELETED / DELETING| Cleanup[Cleanup and finalize]
+    Reconcile -->|FAILED| RestoreFailed[Restore as FAILED]
+    RestoreReady --> Next[Next sandbox]
     ToFailed --> Next
     RestoreStopped --> Next
     ToFailed2 --> Next
     Cleanup --> Next
     RestoreFailed --> Next
-    Next --> ForEach
-
-    Next -->|All done| EventLoop[Subscribe Docker events for real-time container state changes]
-    EventLoop -->|Connection lost| FullReconcile[Full reconcile via docker inspect, then re-subscribe]
+    Next -->|All done| EventLoop[Subscribe Docker events]
+    EventLoop -->|Connection lost| FullReconcile[Full reconcile then re-subscribe]
     FullReconcile --> EventLoop
 ```
 
-## bbolt Value Type Constraint
+After all sandboxes are recovered, the daemon subscribes to Docker events for real-time container state changes. On connection loss, it performs a full reconcile via docker inspect then re-subscribes.
 
-bbolt values only allow two types:
+## bbolt Value Type Constraint
 
 | Type | Encoding | Version Compatibility |
 |------|----------|----------------------|
-| Fixed-width integer | Big-endian `uint64` / `int64` (8 bytes) | Immutable — no compatibility concern |
-| Protobuf message | `proto.Marshal(msg)` | Handled by proto3 forward/backward compatibility rules |
+| Fixed-width integer | Big-endian `uint64`/`int64` (8 bytes) | Immutable |
+| Protobuf message | `proto.Marshal(msg)` | proto3 forward/backward compatible |
 
-No strings, JSON, YAML, or custom binary formats in bbolt values. bbolt keys follow the same rule: either a fixed-width integer (sequence numbers) or a UTF-8 string identifier (sandbox_id, exec_id).
-
-This constraint delegates all schema evolution to protobuf: adding fields, deprecating fields, and default values are all governed by proto3 semantics. The daemon code never needs custom migration logic.
+No strings, JSON, YAML, or custom binary formats in bbolt values. Keys follow the same rule: either fixed-width integer (sequence numbers) or UTF-8 string identifier. This delegates all schema evolution to protobuf.
 
 ## Version Compatibility
 
-1. **New proto fields**: old daemons ignore unknown fields (proto3 forward-compatible). New daemons handle absent fields with zero-value defaults.
-2. **New bbolt buckets**: new daemons create on first access. Old daemons never see it. No migration needed.
-3. **Changing message semantics**: introduce a new `EventType` or new proto message rather than reusing old types with different meanings.
-4. **Removing persisted state**: stop writing, keep reading logic for at least one release cycle to drain old data.
-
-## Changelog
-
-| Date | Change | Compatibility Notes |
-|------|--------|-------------------|
-| 2026-03-28 | Initial document | N/A |
+1. **New proto fields**: proto3 forward-compatible; new daemons handle absent fields with zero-value defaults.
+2. **New bbolt buckets**: created on first access; no migration needed.
+3. **Changing message semantics**: introduce new `EventType` or proto message.
+4. **Removing persisted state**: stop writing, keep reading logic for at least one release cycle.

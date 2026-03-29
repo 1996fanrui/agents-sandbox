@@ -2,178 +2,80 @@
 
 All slow operations must follow the same contract shape:
 
-- protocol layer: accept the request, expose authoritative state, expose ordered events
-- SDK layer: provide `wait` semantics on top of the protocol
+- **Protocol layer**: accept the request, expose authoritative state, expose ordered events
+- **SDK layer**: provide `wait` semantics on top of the protocol
 
-This rule applies to create and to all other slow lifecycle operations, for example:
+This rule applies to all slow lifecycle operations: create, stop, delete, and resume sandbox.
 
-- create sandbox
-- stop sandbox
-- delete sandbox
-- resume sandbox
+## Accepted-vs-Completed Contract
 
-Current concrete requirement:
+Slow operations return after acceptance, not after completion. The service then exposes authoritative state through `GetSandbox`/`GetExec` and ordered events through `SubscribeSandboxEvents`. All slow public SDK methods use an explicit `wait` parameter: `create_sandbox(wait=True)` is the default high-level SDK behavior; `wait=False` preserves caller-visible async behavior. Do not pretend that an accepted command is already complete.
 
-- all slow public SDK methods use an explicit `wait` parameter
-- `create_sandbox(wait=True)` is the default high-level SDK behavior
-- `wait=False` preserves caller-visible async behavior
+## Atomic Snapshot-to-Stream Handoff
 
-## Core Split
+If a resource supports both an authoritative snapshot read and incremental waiting via ordered events, the protocol must eliminate the handoff race at the source.
 
-- Protocol: acceptance, state, ordered events
-- SDK: convenience waiting
+Allowed designs:
+- the snapshot response carries a daemon-issued event sequence from the same event stream
+- the protocol exposes an equivalent atomic subscribe-plus-snapshot primitive
 
-Do not pretend that an accepted command is already complete.
+Prohibited: reading resource state from one RPC, then borrowing a sequence anchor from a different resource or later RPC to start subscription. That pattern creates an unfixable race window.
 
-## Create
-
-Protocol side:
-
-- `CreateSandbox` accepts and returns `sandbox_id`
-- `GetSandbox` returns the latest authoritative snapshot
-- `SubscribeSandboxEvents` returns ordered lifecycle events
-
-SDK side:
-
-- `create_sandbox(wait=True)` may return only when `READY`
-- `create_sandbox(wait=False)` keeps caller-visible async behavior
-
-## Replay Guarantee
-
-For one `sandbox_id`:
-
-- the literal `from_sequence=0` must replay the full ordered event history since creation
-
-This means the daemon must retain sandbox event history for the supported replay lifetime.
+For exec waits specifically: `GetExec().exec.last_event_sequence` returns a daemon-issued sandbox event sequence valid for `SubscribeSandboxEvents`, letting SDK wait paths subscribe without a handoff race and without fallback polling.
 
 ## Ordering
 
-The source of truth is the daemon-issued event sequence.
-
-Do not rely on:
-
-- local receive order
-- transport timing
-- "response arrived before event"
+The source of truth is the daemon-issued event sequence. Do not rely on local receive order, transport timing, or "response arrived before event."
 
 ## SDK Rules
 
-Replay solves "do not miss events".
-The SDK still must:
-
-- sandbox wait paths build a baseline with `GetSandbox`
-- exec wait paths build a baseline with `GetExec`
+SDK wait implementations must:
+- build sandbox wait baselines with `GetSandbox`; exec wait baselines with `GetExec`
 - deduplicate replayed or stale events
 - wait using protocol ordering, not local timing
 - re-read authoritative state before declaring success
 
-## Atomic Snapshot-to-Stream Handoff
+## Event Subscription
 
-Do not ask the SDK to "guess" a safe handoff point between a snapshot RPC and
-an event subscription.
+`SubscribeSandboxEvents` is the sole wait notification mechanism. Periodic polling tickers (e.g., 250ms `GetExec` loops) are prohibited as a fallback alongside event subscription. If subscription is unreliable, the fix belongs in the subscription/stream layer, not a polling workaround.
 
-If a resource supports:
+Within one SDK wait or observer flow, if the SDK already has a sandbox event subscription for the same `sandbox_id` and ordering scope, it should reuse that subscription instead of opening a duplicate one. Separate callers may still need separate subscriptions when their sequence anchor or cancellation boundaries differ.
 
-- an authoritative snapshot read, and
-- incremental waiting via ordered events
-
-then the protocol must eliminate the handoff race at the source.
-
-Allowed designs:
-
-- the snapshot response carries a daemon-issued event sequence from the same event stream
-- the protocol exposes an equivalent atomic subscribe-plus-snapshot primitive
-
-Prohibited design:
-
-- read resource state from one RPC, then borrow a sequence anchor from a different
-  resource or a later RPC in order to start subscription
-
-That pattern creates an unfixable race window between "state observed" and
-"subscription start". The fix belongs in the protocol contract, not in SDK-side
-compensation logic.
-
-## Event Subscription as Sole Wait Mechanism
-
-SDK wait implementations (e.g. `waitForSandboxState`, `waitForExecTerminal`) must use
-`SubscribeSandboxEvents` as the sole notification mechanism. Periodic polling tickers
-(e.g. 250ms `GetExec` loops) are prohibited as a fallback alongside event subscription.
-
-Rationale: if event subscription is reliable, the ticker is redundant overhead. If it is
-unreliable, the correct fix is in the subscription/stream layer, not a polling workaround
-that silently masks the failure.
-
-Within one SDK wait or observer flow, if the SDK already has a sandbox event
-subscription for the same `sandbox_id` and ordering scope, it should reuse that
-subscription instead of opening a duplicate one. Separate callers may still
-need separate subscriptions when their sequence anchor, lifetime, or
-cancellation boundaries differ.
+Subscription is required as a protocol capability. The SDK must use it internally and should expose it as an advanced public API, while `wait=True` remains the default path for ordinary lifecycle usage.
 
 ## gRPC Stream Resilience
 
-When a gRPC event stream disconnects (network interruption, server restart, etc.),
-the SDK must handle it by either:
+When a gRPC event stream disconnects, the SDK must either:
 
 1. **Auto-retry**: re-establish the stream from the last known sequence and resume, or
 2. **Explicit failure**: surface the error to the caller so it can reconnect or abort.
 
-Silently falling back to polling on stream failure is prohibited. The stream is the
-authoritative notification channel; its failure must be visible, not papered over.
-
-## Exec Wait Implication
-
-If exec waits are driven by sandbox events, the authoritative exec snapshot used by
-the wait path must be atomically joinable to that sandbox event stream.
-
-That means at least one of the following must be true:
-
-- `GetExec().exec.last_event_sequence` returns a daemon-issued sandbox event sequence that is valid for
-  `SubscribeSandboxEvents`
-- the protocol exposes an atomic primitive that returns the exec snapshot and
-  starts or seeds the matching event subscription in one step
-
-Without that contract, an SDK cannot remove races by implementation detail alone.
-
-## Subscription Exposure
-
-- Subscription is required as a protocol capability
-- The SDK must be able to use it internally
-- The SDK should expose subscription as an advanced public API, while `wait=True` remains the default path for ordinary lifecycle usage
+Silently falling back to polling on stream failure is prohibited.
 
 ## Image Contract
 
-- sandbox image selection is a request-time input
-- the daemon must not supply a hidden default primary image
-- quickstart and example image strings are documentation values only, not protocol fallbacks
+Sandbox image selection is a request-time input. The daemon must not supply a hidden default primary image. Quickstart image strings are documentation values only, not protocol fallbacks.
 
 ## SandboxEvent Envelope Model
 
 `SandboxEvent` uses an envelope + oneof model. Each event carries:
-
 - top-level fields: `event_id`, `sequence`, `sandbox_id`, `event_type`, `timestamp`
-- a `oneof details` discriminator with exactly one of:
-  - `SandboxPhaseDetails sandbox_phase` — sandbox lifecycle phase transitions (phase, error_code, error_message, reason); the sandbox state after the transition is carried on the top-level `sandbox_state` field of `SandboxEvent`
-  - `ExecEventDetails exec` — exec state changes (exec_id, exec_state, exit_code, error_code, error_message)
-  - `ServiceEventDetails service` — service container transitions (service_name, error_code, error_message)
+- a `oneof details` discriminator with one of: `SandboxPhaseDetails` (lifecycle transitions, errors, reason), `ExecEventDetails` (exec state, exit code, errors), or `ServiceEventDetails` (service name, errors)
 
-SDKs must dispatch on the active `details` field, not on `event_type` alone, to access structured event data.
+The top-level `sandbox_state` reflects the sandbox state when the event was emitted. SDKs must dispatch on the active `details` field, not on `event_type` alone.
 
 ## Error Model
 
-All gRPC errors emitted by the daemon carry a `google.rpc.ErrorInfo` detail with:
-
+All gRPC errors carry a `google.rpc.ErrorInfo` detail with:
 - `domain`: always `"agents-sandbox"`
-- `reason`: a machine-readable string constant (e.g. `SANDBOX_NOT_FOUND`, `EXEC_NOT_RUNNING`)
-- `metadata`: a `map<string, string>` carrying structured fields such as `sandbox_id` or `exec_id`
+- `reason`: machine-readable string constant (e.g., `SANDBOX_NOT_FOUND`, `EXEC_NOT_RUNNING`)
+- `metadata`: `map<string, string>` with structured fields such as `sandbox_id` or `exec_id`
 
-SDKs translate `domain` + `reason` into typed exceptions rather than parsing the human-readable status message. This keeps error handling stable across message wording changes.
+SDKs translate `domain` + `reason` into typed exceptions rather than parsing human-readable status messages.
 
 ## Public API Version Strategy
 
-The agents-sandbox public APIs are currently in pre-GA/preview status. Breaking changes may occur without a major version bump during this phase.
-
-Once APIs reach GA:
-
-- **Proto**: the current `agbox.v1` package serves as the baseline. Future breaking changes will use a new major namespace (e.g., `agbox.v2`).
-- **Go SDK**: breaking changes after `v1.0.0` will use Go module major version paths (e.g., `sdk/go/v2`).
-- **Python SDK**: breaking changes will be signaled via semver major version bumps.
+APIs are currently pre-GA/preview with possible breaking changes. Post-GA:
+- **Proto**: `agbox.v1` baseline; breaking changes use new major namespace (e.g., `agbox.v2`).
+- **Go SDK**: breaking changes after `v1.0.0` use major version paths (e.g., `sdk/go/v2`).
+- **Python SDK**: semver major version bumps.
