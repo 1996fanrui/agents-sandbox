@@ -10,11 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
@@ -73,7 +70,7 @@ func TestRPCMethods(t *testing.T) {
 	service := &fakeService{
 		pingResp: &agboxv1.PingResponse{},
 		createSandboxResp: &agboxv1.CreateSandboxResponse{
-			SandboxId: "sbx",
+			Sandbox: &agboxv1.SandboxHandle{SandboxId: "sbx"},
 		},
 		getSandboxResp: &agboxv1.GetSandboxResponse{
 			Sandbox: &agboxv1.SandboxHandle{
@@ -273,10 +270,14 @@ func TestErrorTranslationKnownAndUnknownReason(t *testing.T) {
 	}
 
 	sequenceErr := translateRPCError(
-		newStatusError(
+		newStatusErrorWithMetadata(
 			t,
 			control.ReasonSandboxEventSequenceExpired,
 			"sandbox sandbox-alpha event sequence 42 is outside retained history",
+			map[string]string{
+				"sandbox_id":    "sandbox-alpha",
+				"from_sequence": "42",
+			},
 		),
 	)
 	var expired *SandboxSequenceExpiredError
@@ -291,6 +292,27 @@ func TestErrorTranslationKnownAndUnknownReason(t *testing.T) {
 	}
 	if expired.OldestSequence != nil {
 		t.Fatalf("unexpected oldest sequence: %#v", expired.OldestSequence)
+	}
+
+	// Verify sequence expired with oldest_sequence populated from metadata.
+	sequenceErrFull := translateRPCError(
+		newStatusErrorWithMetadata(
+			t,
+			control.ReasonSandboxEventSequenceExpired,
+			"sandbox sandbox-beta event sequence 10 is outside retained history; oldest retained sequence is 50",
+			map[string]string{
+				"sandbox_id":      "sandbox-beta",
+				"from_sequence":   "10",
+				"oldest_sequence": "50",
+			},
+		),
+	)
+	var expiredFull *SandboxSequenceExpiredError
+	if !errors.As(sequenceErrFull, &expiredFull) {
+		t.Fatalf("expected SandboxSequenceExpiredError, got %T", sequenceErrFull)
+	}
+	if expiredFull.OldestSequence == nil || *expiredFull.OldestSequence != 50 {
+		t.Fatalf("unexpected oldest sequence: %#v", expiredFull.OldestSequence)
 	}
 
 	_, err = client.DeleteSandbox(context.Background(), "sandbox-alpha")
@@ -491,14 +513,7 @@ func newRawClient(t *testing.T, service *fakeService) *RawClient {
 
 func newStatusError(t *testing.T, reason string, message string) error {
 	t.Helper()
-	st := status.New(codes.Unknown, message)
-	withDetails, err := st.WithDetails(&errdetails.ErrorInfo{
-		Reason: reason,
-	})
-	if err != nil {
-		t.Fatalf("status.WithDetails failed: %v", err)
-	}
-	return withDetails.Err()
+	return newStatusErrorWithMetadata(t, reason, message, nil)
 }
 
 type subscribeStreamStub struct {

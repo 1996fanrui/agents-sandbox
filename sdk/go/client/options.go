@@ -88,6 +88,19 @@ type ListSandboxesOption interface {
 	applyListSandboxes(*listSandboxesOptions)
 }
 
+// ListActiveExecsOption configures ListActiveExecs filtering.
+type ListActiveExecsOption interface {
+	applyListActiveExecs(*listActiveExecsOptions)
+}
+
+type listActiveExecsOptions struct {
+	sandboxID *string
+}
+
+func defaultListActiveExecsOptions() listActiveExecsOptions {
+	return listActiveExecsOptions{}
+}
+
 type listSandboxesOptions struct {
 	includeDeleted bool
 	labelSelector  map[string]string
@@ -228,6 +241,11 @@ func (o sandboxIDOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	return nil
 }
 
+func (o sandboxIDOption) applyListActiveExecs(opts *listActiveExecsOptions) {
+	value := string(o)
+	opts.sandboxID = &value
+}
+
 type mountsOption []MountSpec
 
 // WithMounts sets the sandbox mounts.
@@ -254,9 +272,9 @@ func (o copiesOption) applyCreateSandbox(opts *createSandboxOptions) error {
 
 type builtinToolsOption []string
 
-// WithBuiltinTools sets the built-in resources.
-func WithBuiltinTools(resources ...string) builtinToolsOption {
-	return builtinToolsOption(slicesClone(resources))
+// WithBuiltinTools sets the built-in tools for sandbox creation.
+func WithBuiltinTools(tools ...string) builtinToolsOption {
+	return builtinToolsOption(slicesClone(tools))
 }
 
 func (o builtinToolsOption) applyCreateSandbox(opts *createSandboxOptions) error {

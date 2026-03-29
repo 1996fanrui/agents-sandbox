@@ -141,21 +141,21 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 			RequiredServices: toProtoServices(options.requiredServices),
 			OptionalServices: toProtoServices(options.optionalServices),
 			Labels:           cloneStringMap(options.labels),
-			Envs:             mapToKeyValues(options.envs),
+			Envs:             cloneStringMap(options.envs),
 		},
 	}
 	response, err := c.rpcClient.CreateSandbox(ctx, request)
 	if err != nil {
 		return SandboxHandle{}, err
 	}
-	current, err := c.GetSandbox(ctx, response.GetSandboxId())
+	current, err := toSandboxHandle(response.GetSandbox())
 	if err != nil {
 		return SandboxHandle{}, err
 	}
 	if !options.wait {
 		return current, nil
 	}
-	return c.waitForSandboxState(ctx, response.GetSandboxId(), current, SandboxStateReady, "create_sandbox")
+	return c.waitForSandboxState(ctx, current.SandboxID, current, SandboxStateReady, "create_sandbox")
 }
 
 // GetSandbox fetches a sandbox handle.
@@ -308,7 +308,7 @@ func (c *Client) CreateExec(ctx context.Context, sandboxID string, command []str
 		Command:      slicesClone(command),
 		ExecId:       valueOrEmpty(options.execID),
 		Cwd:          options.cwd,
-		EnvOverrides: mapToKeyValues(options.envOverrides),
+		EnvOverrides: cloneStringMap(options.envOverrides),
 	})
 	if err != nil {
 		return ExecHandle{}, err
@@ -389,8 +389,16 @@ func (c *Client) getExecSnapshot(ctx context.Context, execID string) (execSnapsh
 	return toExecSnapshot(response)
 }
 
-// ListActiveExecs lists active execs for a sandbox, or all sandboxes when sandboxID is empty.
-func (c *Client) ListActiveExecs(ctx context.Context, sandboxID string) ([]ExecHandle, error) {
+// ListActiveExecs lists active execs with optional filtering.
+func (c *Client) ListActiveExecs(ctx context.Context, opts ...ListActiveExecsOption) ([]ExecHandle, error) {
+	options := defaultListActiveExecsOptions()
+	for _, opt := range opts {
+		opt.applyListActiveExecs(&options)
+	}
+	sandboxID := ""
+	if options.sandboxID != nil {
+		sandboxID = *options.sandboxID
+	}
 	response, err := c.rpcClient.ListActiveExecs(ctx, sandboxID)
 	if err != nil {
 		return nil, err
