@@ -84,7 +84,7 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
         mounts=(
             MountSpec(source="/workspace", target="/workspace", writable=True),
         ),
-        builtin_resources=(".claude",),
+        builtin_tools=("claude",),
         labels={"team": "sdk", "purpose": "smoke"},
         wait=False,
     )

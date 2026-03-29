@@ -19,8 +19,8 @@ copies:
     exclude_patterns:
       - "*.log"
       - ".git"
-builtin_resources:
-  - ".claude"
+builtin_tools:
+  - "claude"
 required_services:
   db:
     image: postgres:16
@@ -63,8 +63,8 @@ envs:
 	if len(cfg.Copies) != 1 || cfg.Copies[0].Source != "/host/project" || len(cfg.Copies[0].ExcludePatterns) != 2 {
 		t.Fatalf("unexpected copies: %#v", cfg.Copies)
 	}
-	if len(cfg.BuiltinResources) != 1 || cfg.BuiltinResources[0] != ".claude" {
-		t.Fatalf("unexpected builtin_resources: %v", cfg.BuiltinResources)
+	if len(cfg.BuiltinTools) != 1 || cfg.BuiltinTools[0] != "claude" {
+		t.Fatalf("unexpected builtin_tools: %v", cfg.BuiltinTools)
 	}
 	if len(cfg.RequiredServices) != 1 {
 		t.Fatalf("expected 1 required service, got %d", len(cfg.RequiredServices))
@@ -111,7 +111,7 @@ env: prod
 func TestYAMLConfigToCreateSpec(t *testing.T) {
 	cfg := &YAMLConfig{
 		Image:            "test:latest",
-		BuiltinResources: []string{".claude"},
+		BuiltinTools: []string{"claude"},
 		Mounts: []YAMLMountSpec{
 			{Source: "/src", Target: "/dst", Writable: true},
 		},
@@ -151,8 +151,8 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 	if spec.GetImage() != "test:latest" {
 		t.Fatalf("unexpected image: %s", spec.GetImage())
 	}
-	if len(spec.GetBuiltinResources()) != 1 || spec.GetBuiltinResources()[0] != ".claude" {
-		t.Fatalf("unexpected builtin_resources: %v", spec.GetBuiltinResources())
+	if len(spec.GetBuiltinTools()) != 1 || spec.GetBuiltinTools()[0] != "claude" {
+		t.Fatalf("unexpected builtin_tools: %v", spec.GetBuiltinTools())
 	}
 	if len(spec.GetMounts()) != 1 || spec.GetMounts()[0].GetSource() != "/src" {
 		t.Fatalf("unexpected mounts: %v", spec.GetMounts())

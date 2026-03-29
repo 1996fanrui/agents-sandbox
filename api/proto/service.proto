@@ -103,7 +103,7 @@ message CreateSpec {
   string image = 1;
   repeated MountSpec mounts = 2;
   repeated CopySpec copies = 3;
-  repeated string builtin_resources = 4;
+  repeated string builtin_tools = 4;
   repeated ServiceSpec required_services = 5;
   repeated ServiceSpec optional_services = 6;
   map<string, string> labels = 7;

@@ -648,7 +648,7 @@ type CreateSpec struct {
 	Image            string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
 	Mounts           []*MountSpec           `protobuf:"bytes,2,rep,name=mounts,proto3" json:"mounts,omitempty"`
 	Copies           []*CopySpec            `protobuf:"bytes,3,rep,name=copies,proto3" json:"copies,omitempty"`
-	BuiltinResources []string               `protobuf:"bytes,4,rep,name=builtin_resources,json=builtinResources,proto3" json:"builtin_resources,omitempty"`
+	BuiltinTools     []string               `protobuf:"bytes,4,rep,name=builtin_tools,json=builtinTools,proto3" json:"builtin_tools,omitempty"`
 	RequiredServices []*ServiceSpec         `protobuf:"bytes,5,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
 	OptionalServices []*ServiceSpec         `protobuf:"bytes,6,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
 	Labels           map[string]string      `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -708,9 +708,9 @@ func (x *CreateSpec) GetCopies() []*CopySpec {
 	return nil
 }
 
-func (x *CreateSpec) GetBuiltinResources() []string {
+func (x *CreateSpec) GetBuiltinTools() []string {
 	if x != nil {
-		return x.BuiltinResources
+		return x.BuiltinTools
 	}
 	return nil
 }
@@ -2115,13 +2115,13 @@ const file_service_proto_rawDesc = "" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x124\n" +
 	"\venvironment\x18\x03 \x03(\v2\x12.agbox.v1.KeyValueR\venvironment\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
-	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xcd\x03\n" +
+	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\"\xc5\x03\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
 	"\x06mounts\x18\x02 \x03(\v2\x13.agbox.v1.MountSpecR\x06mounts\x12*\n" +
-	"\x06copies\x18\x03 \x03(\v2\x12.agbox.v1.CopySpecR\x06copies\x12+\n" +
-	"\x11builtin_resources\x18\x04 \x03(\tR\x10builtinResources\x12B\n" +
+	"\x06copies\x18\x03 \x03(\v2\x12.agbox.v1.CopySpecR\x06copies\x12#\n" +
+	"\rbuiltin_tools\x18\x04 \x03(\tR\fbuiltinTools\x12B\n" +
 	"\x11required_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
 	"\x11optional_services\x18\x06 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x128\n" +
 	"\x06labels\x18\a \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x12&\n" +

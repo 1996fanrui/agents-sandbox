@@ -12,7 +12,7 @@ If a change adds, removes, renames, or changes the default of a config key, upda
 - Secrets stay outside the repository and outside generated documentation.
 - Daemon runtime paths are fixed platform paths, not operator-tunable config.
 
-Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_resources`), and service declarations belong to the RPC contract, not to `config.toml`.
+Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_tools`), and service declarations belong to the RPC contract, not to `config.toml`.
 
 The AgentsSandbox daemon always derives its runtime paths internally and then auto-loads the platform-default `config.toml` if it exists. There is no CLI flag, environment variable, or config key that overrides the socket path, lock path, config path, or ID store path.
 
@@ -34,7 +34,7 @@ The host lock always lives next to the socket so the lock protects the exact run
 | `runtime.idle_ttl` | duration string | `"30m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
 | `runtime.event_retention_ttl` | duration string | `"168h"` | Daemon config only | How long deleted sandbox event history remains queryable before cleanup removes it |
 | `runtime.log_level` | string | `"info"` | Daemon config only | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-resource shadow-copy state |
+| `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-tool shadow-copy state |
 | `artifacts.exec_output_root` | string | Platform default: Linux: `$XDG_DATA_HOME/agents-sandbox/exec-logs`; macOS: `~/Library/Application Support/agents-sandbox/exec-logs` | Daemon config only | Root directory for exec log files; bind-mounted into the primary container at `/var/log/agents-sandbox/` so exec output is written directly to the host |
 | `artifacts.exec_output_template` | string | `"{sandbox_id}/{exec_id}"` | Daemon config only | Relative path prefix expanded against `artifacts.exec_output_root`; supported fields are `sandbox_id` and `exec_id`; daemon appends `.stdout.log` and `.stderr.log` suffixes |
 
@@ -47,7 +47,7 @@ The northbound API may override only a narrow subset of behavior:
 | Primary sandbox image | Yes | Every sandbox request must provide its own runtime image; this is not a daemon config default |
 | Generic mounts | Yes | Each sandbox may bind explicit host paths to explicit container targets |
 | Generic copies | Yes | Each sandbox may copy explicit host files or trees into explicit container targets |
-| Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `.claude`, `.codex`, `uv`, or `ssh-agent` |
+| Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `claude`, `codex`, `git`, `uv`, `npm`, or `apt` |
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `required_services` | Yes | Each sandbox declares the services that must become healthy before the primary is reported ready |

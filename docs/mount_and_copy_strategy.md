@@ -8,7 +8,7 @@ The sandbox supports four distinct concepts:
 
 - `mounts` are the generic host-to-container mount capability, multiple `mounts` entries are supported.
 - `copies` are the generic copy capability, multiple `copies` entries are supported.
-- `builtin_resources` are daemon-provided built-in resources, not substitutes for generic `mounts` or `copies`.
+- `builtin_tools` are daemon-provided built-in resources, not substitutes for generic `mounts` or `copies`.
 - `mount` and `copy` are distinct semantics and must not be implicitly converted into each other.
 
 ## Example
@@ -32,7 +32,7 @@ create_sandbox(
             exclude_patterns=[".git", ".pytest_cache"],
         ),
     ],
-    builtin_resources=[...],
+    builtin_tools=[...],
 )
 ```
 
@@ -73,7 +73,7 @@ Rules:
 
 ## Built-In Resources
 
-`builtin_resources` remain available for daemon-provided built-in resources.
+`builtin_tools` remain available for daemon-provided built-in resources.
 
 These resources are resolved against a container `HOME` contract, not against an arbitrary mount target. In this repository the default runtime home for the coding runtime image asset is `/home/agbox`, so the built-in resource targets below are intentionally aligned with that path.
 
@@ -84,16 +84,14 @@ When an imported runtime image needs host-backed authentication material:
 - Ordinary auth relies on `HOST_UID` and `HOST_GID` to keep ownership correct and on `HOME` alignment so the tools read the expected credential paths.
 - The corresponding image asset is maintained under `images/coding-runtime/`; the minimal foundation image asset lives under `images/base-runtime/`.
 
-| Key | Host Source | Container Target | Access |
-| --- | --- | --- | --- |
-| `.claude` | `~/.claude` | `/home/agbox/.claude` | read-write |
-| `.codex` | `~/.codex` | `/home/agbox/.codex` | read-write |
-| `.agents` | `~/.agents` | `/home/agbox/.agents` | read-write |
-| `gh-auth` | `~/.config/gh` | `/home/agbox/.config/gh` | read-only |
-| `ssh-agent` | host `SSH_AUTH_SOCK` socket | `/ssh-agent` | socket forwarding |
-| `uv` | `~/.cache/uv` | `/home/agbox/.cache/uv` | read-write |
-| `npm` | `~/.npm` | `/home/agbox/.npm` | read-write |
-| `apt` | `~/.cache/agents-sandbox-apt` | `/var/cache/apt/archives` | read-write |
+| Tool | Resolved Mounts (Host Source → Container Target, Access) |
+| --- | --- |
+| `claude` | `~/.claude` → `/home/agbox/.claude` (read-write) |
+| `codex` | `~/.codex` → `/home/agbox/.codex` (read-write)<br>`~/.agents` → `/home/agbox/.agents` (read-write) |
+| `git` | `SSH_AUTH_SOCK` → `/ssh-agent` (socket forwarding)<br>`~/.config/gh` → `/home/agbox/.config/gh` (read-only) |
+| `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (read-write)<br>`~/.local/share/uv` → `/home/agbox/.local/share/uv` (read-write) |
+| `npm` | `~/.npm` → `/home/agbox/.npm` (read-write) |
+| `apt` | `~/.cache/agents-sandbox-apt` → `/var/cache/apt/archives` (read-write) |
 
 Rules:
 
@@ -125,6 +123,6 @@ The supported final model is:
 
 - generic `mounts`
 - generic `copies`
-- built-in `builtin_resources`
+- built-in `builtin_tools`
 
 `mount` remains `mount`, and `copy` remains `copy`.

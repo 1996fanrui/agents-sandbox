@@ -111,7 +111,7 @@ Create-path rules:
 
 - `CreateSandbox` returns immediately after the request is accepted and the daemon has assigned `sandbox_id`.
 - The daemon owns actual materialization; the caller must not infer readiness from the RPC response alone.
-- The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_resources`, invalid service declarations, or unsafe artifact targets.
+- The daemon must fail fast on invalid `mounts`, invalid `copies`, unknown `builtin_tools`, invalid service declarations, or unsafe artifact targets.
 - The daemon must return a specific error code when a caller-provided `sandbox_id` duplicates an existing active sandbox.
 - Required services must each pass their healthcheck before the sandbox reaches `READY`.
 - Optional services only report their initial create/start result in V1; they are not restarted or runtime-monitored after readiness is reached.

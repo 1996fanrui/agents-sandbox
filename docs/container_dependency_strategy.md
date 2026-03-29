@@ -21,23 +21,28 @@ The public northbound surface supports three distinct filesystem ingress classes
 |-------|---------|----------|------------------|
 | `mounts` | Bind explicit host paths into the sandbox | project tree, host config file, shared data directory | Disabled unless the caller explicitly declares each mount |
 | `copies` | Copy explicit host files or trees into the sandbox | source snapshot, seed config, fixture data | Disabled unless the caller explicitly declares each copy |
-| `builtin_resources` | Request daemon-defined resource shortcuts | `.claude`, `.codex`, `.agents`, `gh-auth`, `ssh-agent`, `uv`, `npm`, `apt` | Disabled unless the caller explicitly requests each resource |
+| `builtin_tools` | Request daemon-defined resource shortcuts | `claude`, `codex`, `git`, `uv`, `npm`, `apt` | Disabled unless the caller explicitly requests each resource |
 
 
 ## Built-in Tooling Projections
 
 The imported session/auth runtime uses `/home/agbox` as its effective `HOME`, so the default container targets below are aligned with that path.
 
-| Capability ID | Default Host Source | Default Container Target | Mode |
-|---------------|---------------------|--------------------------|------|
-| `.claude` | `~/.claude` | `/home/agbox/.claude` | read-write |
-| `.codex` | `~/.codex` | `/home/agbox/.codex` | read-write |
-| `.agents` | `~/.agents` | `/home/agbox/.agents` | read-write |
-| `gh-auth` | `~/.config/gh` | `/home/agbox/.config/gh` | read-only |
-| `ssh-agent` | `SSH_AUTH_SOCK` from the host environment | `/ssh-agent` | socket forwarding |
-| `uv` | `~/.cache/uv` | `/home/agbox/.cache/uv` | read-write |
-| `npm` | `~/.npm` | `/home/agbox/.npm` | read-write |
-| `apt` | `~/.cache/agents-sandbox-apt` | `/var/cache/apt/archives` | read-write |
+Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to one or more named mounts; multiple tools may share a mount and the daemon deduplicates by mount ID before materializing.
+
+| Tool | Resolved Mounts (Host Source → Container Target, Mode) |
+|------|--------------------------------------------------------|
+| `claude` | `~/.claude` → `/home/agbox/.claude` (read-write) |
+| `codex` | `~/.codex` → `/home/agbox/.codex` (read-write)<br>`~/.agents` → `/home/agbox/.agents` (read-write) |
+| `git` | `SSH_AUTH_SOCK` → `/ssh-agent` (socket forwarding)<br>`~/.config/gh` → `/home/agbox/.config/gh` (read-only) |
+| `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (read-write)<br>`~/.local/share/uv` → `/home/agbox/.local/share/uv` (read-write) |
+| `npm` | `~/.npm` → `/home/agbox/.npm` (read-write) |
+| `apt` | `~/.cache/agents-sandbox-apt` → `/var/cache/apt/archives` (read-write) |
+
+Notes:
+- `codex` mounts both `~/.codex` and `~/.agents`; `~/.agents` is the shared agents state directory and may also be referenced by other tools in the future.
+- `git` bundles SSH agent forwarding (`ssh-agent`) and GitHub CLI auth (`gh-auth`); requesting `git` is equivalent to requesting both.
+- `uv` mounts both the package cache (`~/.cache/uv`) and the data directory (`~/.local/share/uv`) which holds uv-managed Python interpreters and globally installed tools.
 
 These are daemon-defined capabilities. Requests may select from this set but may not replace them with arbitrary host paths.
 
@@ -65,7 +70,7 @@ The runtime applies different rules to different ingress modes.
 
 ### Built-in resources
 
-`builtin_resources` resolve to daemon-defined host paths and targets:
+`builtin_tools` resolve to daemon-defined host paths and targets:
 
 - regular directories use bind mounts when safe
 - directory trees that contain escaping symlinks fall back to daemon-owned shadow copies when supported

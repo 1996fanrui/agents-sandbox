@@ -56,8 +56,8 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 	if err := validateServiceSpecs(spec.GetOptionalServices(), false, seenServiceNames); err != nil {
 		return err
 	}
-	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinResources()))
-	for _, builtin := range spec.GetBuiltinResources() {
+	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinTools()))
+	for _, builtin := range spec.GetBuiltinTools() {
 		if builtin == "" {
 			return errors.New("builtin resource id must not be empty")
 		}

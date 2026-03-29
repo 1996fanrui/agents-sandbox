@@ -103,7 +103,7 @@ func (backend *dockerRuntimeBackend) materializeGenericCopies(
 	return mounts, nil
 }
 
-func (backend *dockerRuntimeBackend) materializeBuiltinResources(
+func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	sandboxID string,
 	resources []string,
 	state *sandboxRuntimeState,
@@ -111,35 +111,51 @@ func (backend *dockerRuntimeBackend) materializeBuiltinResources(
 	if len(resources) == 0 {
 		return nil, nil
 	}
-	mounts := make([]dockerMount, 0, len(resources))
+	// Collect unique mount IDs across all requested tools, preserving first-seen order.
+	seen := make(map[profile.MountID]struct{})
+	var mountIDs []profile.MountID
 	for _, resource := range resources {
 		capability, ok := profile.CapabilityByID(resource)
 		if !ok {
 			return nil, fmt.Errorf("unknown builtin resource %q", resource)
 		}
-		sourcePath, err := resolveCapabilitySource(capability)
+		for _, mountID := range capability.MountIDs {
+			if _, exists := seen[mountID]; !exists {
+				seen[mountID] = struct{}{}
+				mountIDs = append(mountIDs, mountID)
+			}
+		}
+	}
+
+	mounts := make([]dockerMount, 0, len(mountIDs))
+	for _, mountID := range mountIDs {
+		mount, ok := profile.MountByID(mountID)
+		if !ok {
+			return nil, fmt.Errorf("unknown capability mount %q", mountID)
+		}
+		sourcePath, err := resolveCapabilityMountSource(mount)
 		if err != nil {
 			return nil, err
 		}
-		switch capability.Mode {
+		switch mount.Mode {
 		case profile.CapabilityModeSocket:
 			if err := requireSocketPath(sourcePath); err != nil {
 				return nil, err
 			}
 			mounts = append(mounts, dockerMount{
 				Source:   sourcePath,
-				Target:   capability.ContainerTarget,
+				Target:   mount.ContainerTarget,
 				ReadOnly: false,
 			})
 		default:
-			writable := capability.Mode == profile.CapabilityModeReadWrite
-			actualSource, readOnly, err := backend.materializeBuiltinResourcePath(sandboxID, capability, sourcePath, writable, state)
+			writable := mount.Mode == profile.CapabilityModeReadWrite
+			actualSource, readOnly, err := backend.materializeBuiltinToolPath(sourcePath, writable, state)
 			if err != nil {
 				return nil, err
 			}
 			mounts = append(mounts, dockerMount{
 				Source:   actualSource,
-				Target:   capability.ContainerTarget,
+				Target:   mount.ContainerTarget,
 				ReadOnly: readOnly,
 			})
 		}
@@ -147,14 +163,12 @@ func (backend *dockerRuntimeBackend) materializeBuiltinResources(
 	return mounts, nil
 }
 
-func (backend *dockerRuntimeBackend) materializeBuiltinResourcePath(
-	sandboxID string,
-	capability profile.ToolingCapability,
+func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 	sourcePath string,
 	writable bool,
 	state *sandboxRuntimeState,
 ) (string, bool, error) {
-	// Builtin resources are always bind-mounted as-is, including any symlinks.
+	// Builtin tools are always bind-mounted as-is, including any symlinks.
 	// Shadow-copy logic is intentionally skipped: these are trusted host directories
 	// (tool configs, caches) that may contain symlinks to arbitrary host paths,
 	// and the container is expected to see them exactly as they appear on the host.
@@ -164,15 +178,15 @@ func (backend *dockerRuntimeBackend) materializeBuiltinResourcePath(
 	return sourcePath, !writable, nil
 }
 
-func resolveCapabilitySource(capability profile.ToolingCapability) (string, error) {
-	if capability.DefaultHostPath == "SSH_AUTH_SOCK" {
+func resolveCapabilityMountSource(mount profile.CapabilityMount) (string, error) {
+	if mount.ID == profile.MountIDSSHAgent {
 		socketPath := os.Getenv("SSH_AUTH_SOCK")
 		if socketPath == "" {
 			return "", errors.New("SSH_AUTH_SOCK is required for ssh-agent tooling projection")
 		}
 		return filepath.Abs(socketPath)
 	}
-	return expandHomePath(capability.DefaultHostPath)
+	return expandHomePath(mount.DefaultHostPath)
 }
 
 func requireSocketPath(path string) error {

@@ -44,7 +44,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 
 	t.Run("config_and_image", func(t *testing.T) {
 		t.Parallel()
-		configYAML := []byte("builtin_resources:\n  - .claude\n")
+		configYAML := []byte("builtin_tools:\n  - claude\n")
 
 		base := &fakeRPCClient{}
 		base.createSandboxFn = func(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {

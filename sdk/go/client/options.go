@@ -68,7 +68,7 @@ type createSandboxOptions struct {
 	sandboxID        *string
 	mounts           []MountSpec
 	copies           []CopySpec
-	builtinResources []string
+	builtinTools []string
 	requiredServices []ServiceSpec
 	optionalServices []ServiceSpec
 	labels           map[string]string
@@ -252,15 +252,15 @@ func (o copiesOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	return nil
 }
 
-type builtinResourcesOption []string
+type builtinToolsOption []string
 
-// WithBuiltinResources sets the built-in resources.
-func WithBuiltinResources(resources ...string) builtinResourcesOption {
-	return builtinResourcesOption(slicesClone(resources))
+// WithBuiltinTools sets the built-in resources.
+func WithBuiltinTools(resources ...string) builtinToolsOption {
+	return builtinToolsOption(slicesClone(resources))
 }
 
-func (o builtinResourcesOption) applyCreateSandbox(opts *createSandboxOptions) error {
-	opts.builtinResources = slicesClone([]string(o))
+func (o builtinToolsOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	opts.builtinTools = slicesClone([]string(o))
 	return nil
 }
 

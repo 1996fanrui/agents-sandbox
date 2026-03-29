@@ -409,7 +409,7 @@ func TestServiceLifecycleForResumeStopAndDelete(t *testing.T) {
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 }
 
-func TestBuiltinResourcesForwardedToRuntime(t *testing.T) {
+func TestBuiltinToolsForwardedToRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -421,7 +421,7 @@ func TestBuiltinResourcesForwardedToRuntime(t *testing.T) {
 		SandboxId: "builtin-without-legacy",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
-			BuiltinResources: []string{".claude"},
+			BuiltinTools: []string{"claude"},
 		},
 	})
 	if err != nil {
@@ -429,8 +429,8 @@ func TestBuiltinResourcesForwardedToRuntime(t *testing.T) {
 	}
 	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	if runtime.lastCreateSpec == nil || len(runtime.lastCreateSpec.GetBuiltinResources()) != 1 || runtime.lastCreateSpec.GetBuiltinResources()[0] != ".claude" {
-		t.Fatalf("builtin_resources were not forwarded to runtime: %#v", runtime.lastCreateSpec)
+	if runtime.lastCreateSpec == nil || len(runtime.lastCreateSpec.GetBuiltinTools()) != 1 || runtime.lastCreateSpec.GetBuiltinTools()[0] != "claude" {
+		t.Fatalf("builtin_tools were not forwarded to runtime: %#v", runtime.lastCreateSpec)
 	}
 }
 
@@ -448,7 +448,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"image",
 				"mounts",
 				"copies",
-				"builtin_resources",
+				"builtin_tools",
 				"required_services",
 				"optional_services",
 				"labels",
@@ -458,7 +458,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"image":             1,
 				"mounts":            2,
 				"copies":            3,
-				"builtin_resources": 4,
+				"builtin_tools": 4,
 				"required_services": 5,
 				"optional_services": 6,
 				"labels":            7,
@@ -629,9 +629,9 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 	// Builtin resources are mounted directly from the host path without shadow
 	// copies; StateRoot is not required and symlinks are preserved as-is.
 	runtimeState := &sandboxRuntimeState{}
-	mounts, err := backendWithoutState.materializeBuiltinResources("sandbox-builtin", []string{".claude"}, runtimeState)
+	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, runtimeState)
 	if err != nil {
-		t.Fatalf("materializeBuiltinResources failed: %v", err)
+		t.Fatalf("materializeBuiltinTools failed: %v", err)
 	}
 	if len(mounts) != 1 {
 		t.Fatalf("expected one builtin mount, got %d", len(mounts))
