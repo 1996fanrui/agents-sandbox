@@ -31,7 +31,7 @@ The host lock always lives next to the socket so the lock protects the exact run
 
 | Key | Type | Recommended Default | Override Scope | Purpose |
 |-----|------|---------------------|----------------|---------|
-| `runtime.idle_ttl` | duration string | `"10m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
+| `runtime.idle_ttl` | duration string | `"10m"` | Daemon config only | Global idle stop threshold based on `last_terminal_run_finished_at`. Set to `"0"` to disable idle detection globally. |
 | `runtime.cleanup_ttl` | duration string | `"360h"` | Daemon config only | Time after which STOPPED sandboxes have their Docker resources cleaned up and DB records deleted, and DELETED sandbox event history is purged |
 | `runtime.log_level` | string | `"info"` | Daemon config only | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-tool shadow-copy state |
@@ -52,7 +52,7 @@ The northbound API may override only a narrow subset of behavior:
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `required_services` | Yes | Each sandbox declares the services that must become healthy before the primary is reported ready |
 | `optional_services` | Yes | Each sandbox declares the services whose initial startup result is reported without blocking readiness |
-| `runtime.idle_ttl` | No | Idle stop policy stays daemon-owned |
+| `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |
 

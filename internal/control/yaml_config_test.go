@@ -5,6 +5,7 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestYAMLConfigParsing(t *testing.T) {
@@ -216,6 +217,30 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 	if envs["A_VAR"] != "a_val" || envs["Z_VAR"] != "z_val" {
 		t.Fatalf("unexpected env values: %v", envs)
 	}
+
+	// idle_ttl not set in this config, so it should be nil.
+	if spec.GetIdleTtl() != nil {
+		t.Fatalf("expected nil idle_ttl, got %v", spec.GetIdleTtl())
+	}
+}
+
+func TestYAMLConfigToCreateSpecIdleTTL(t *testing.T) {
+	cfg := &YAMLConfig{
+		Image:   "test:latest",
+		IdleTTL: "10m",
+	}
+
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+
+	if spec.GetIdleTtl() == nil {
+		t.Fatal("expected idle_ttl to be set, got nil")
+	}
+	if spec.GetIdleTtl().AsDuration() != 10*time.Minute {
+		t.Fatalf("expected 10m, got %v", spec.GetIdleTtl().AsDuration())
+	}
 }
 
 func TestYAMLConfigServiceTypes(t *testing.T) {
@@ -269,7 +294,8 @@ func TestYAMLInvalidDurationRejected(t *testing.T) {
 
 func TestYAMLAllDurationFieldsParsed(t *testing.T) {
 	cfg := &YAMLConfig{
-		Image: "test:latest",
+		Image:   "test:latest",
+		IdleTTL: "15m",
 		RequiredServices: map[string]YAMLServiceSpec{
 			"db": {
 				Image: "postgres:16",
@@ -287,6 +313,10 @@ func TestYAMLAllDurationFieldsParsed(t *testing.T) {
 	spec, err := yamlConfigToCreateSpec(cfg)
 	if err != nil {
 		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+
+	if spec.GetIdleTtl() == nil || spec.GetIdleTtl().AsDuration() != 15*time.Minute {
+		t.Fatalf("unexpected idle_ttl: %v", spec.GetIdleTtl())
 	}
 
 	hc := spec.GetRequiredServices()[0].GetHealthcheck()
@@ -440,6 +470,26 @@ func TestMergeCreateSpecs(t *testing.T) {
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
 				if result.GetImage() != "base:v1" {
 					t.Fatalf("expected base:v1, got %s", result.GetImage())
+				}
+			},
+		},
+		{
+			name:     "idle_ttl_override",
+			base:     &agboxv1.CreateSpec{IdleTtl: durationpb.New(5 * time.Minute)},
+			override: &agboxv1.CreateSpec{IdleTtl: durationpb.New(10 * time.Minute)},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				if result.GetIdleTtl() == nil || result.GetIdleTtl().AsDuration() != 10*time.Minute {
+					t.Fatalf("expected 10m idle_ttl, got %v", result.GetIdleTtl())
+				}
+			},
+		},
+		{
+			name:     "idle_ttl_no_override",
+			base:     &agboxv1.CreateSpec{IdleTtl: durationpb.New(5 * time.Minute)},
+			override: &agboxv1.CreateSpec{},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				if result.GetIdleTtl() == nil || result.GetIdleTtl().AsDuration() != 5*time.Minute {
+					t.Fatalf("expected base 5m idle_ttl preserved, got %v", result.GetIdleTtl())
 				}
 			},
 		},

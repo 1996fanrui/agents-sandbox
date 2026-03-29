@@ -12,6 +12,9 @@ import (
 )
 
 func validateCreateSpec(spec *agboxv1.CreateSpec) error {
+	if spec.GetIdleTtl() != nil && spec.GetIdleTtl().AsDuration() < 0 {
+		return errors.New("idle_ttl must not be negative")
+	}
 	targets := make(map[string]string)
 	seenServiceNames := make(map[string]struct{}, len(spec.GetRequiredServices())+len(spec.GetOptionalServices()))
 	registerTarget := func(kind string, target string) error {

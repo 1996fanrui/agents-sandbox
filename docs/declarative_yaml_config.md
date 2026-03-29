@@ -63,6 +63,7 @@ optional_services:
 | `optional_services` | `CreateSpec.optional_services` | map of ServiceSpec | Services started concurrently, not blocking READY |
 | `labels` | `CreateSpec.labels` | map of string | Labels attached to the sandbox |
 | `envs` | `CreateSpec.envs` | map of string | Env vars on primary container, inherited by all execs |
+| `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
 
 ### CopySpec Fields
 

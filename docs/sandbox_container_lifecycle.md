@@ -53,7 +53,7 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`. T
 | Delete begins | `SANDBOX_DELETE_REQUESTED` |
 | Delete completes | `SANDBOX_DELETED` |
 
-Idle-stop is detected by the `cleanupLoop` periodic scan, which checks all READY sandboxes against `runtime.idle_ttl`. If no exec history exists for a sandbox, the sandbox creation time is used as the idle reference. Idle-stop emits `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` then `SANDBOX_STOPPED`.
+Idle-stop is detected by the `cleanupLoop` periodic scan, which checks all READY sandboxes against their effective idle TTL. The effective idle TTL is `CreateSpec.idle_ttl` when set, falling back to the global `runtime.idle_ttl`. A per-sandbox value of `0` disables idle stop for that sandbox regardless of the global setting; a non-nil per-sandbox value overrides the global threshold. If no exec history exists for a sandbox, the sandbox creation time is used as the idle reference. Idle-stop emits `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` then `SANDBOX_STOPPED`.
 
 Exec lifecycle events: `EXEC_STARTED` on successful `CreateExec`; terminal states `EXEC_FINISHED`, `EXEC_FAILED`, or `EXEC_CANCELLED`. `GetExec().exec.last_event_sequence` lets clients join the exec snapshot to the sandbox event stream without a race. Internal audit action reasons remain daemon-owned and must not appear in the public RPC or event schema.
 
