@@ -56,16 +56,11 @@ def test_create_sandbox_accepts_config_yaml_string(monkeypatch: pytest.MonkeyPat
 
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             captured_requests.append(request)
+            # CreateSandboxResponse now returns full SandboxHandle.
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
                     last_event_sequence=1,
                 )
             )
@@ -104,15 +99,9 @@ def test_create_sandbox_accepts_config_yaml_bytes(monkeypatch: pytest.MonkeyPatc
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             captured_requests.append(request)
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
                     last_event_sequence=1,
                 )
             )
@@ -134,7 +123,7 @@ def test_create_sandbox_accepts_config_yaml_bytes(monkeypatch: pytest.MonkeyPatc
 
 
 def test_create_sandbox_request_with_envs() -> None:
-    """envs are included in the proto request."""
+    """envs are included in the proto request as a map."""
     request = CreateSandboxRequest(
         create_spec=CreateSandboxSpec(
             image="test:latest",
@@ -142,8 +131,7 @@ def test_create_sandbox_request_with_envs() -> None:
         ),
     )
     proto = to_proto_create_sandbox_request(request)
-    env_map = {kv.key: kv.value for kv in proto.create_spec.envs}
-    assert env_map == {"APP_ENV": "prod", "DB_HOST": "localhost"}
+    assert dict(proto.create_spec.envs) == {"APP_ENV": "prod", "DB_HOST": "localhost"}
 
 
 def test_create_sandbox_neither_config_yaml_nor_image_raises(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -27,7 +27,6 @@ from ._conversions import (
 from .errors import (
     ExecNotRunningError,
     SandboxClientError,
-    SandboxConflictError,
     SandboxInvalidStateError,
 )
 from .models import SandboxState
@@ -102,7 +101,12 @@ class AgentsSandboxClient:
         self._operation_timeout_seconds = operation_timeout_seconds
         self._rpc_client = SandboxGrpcClient(self.socket_path, timeout_seconds=timeout_seconds)
 
+    async def aclose(self) -> None:
+        """Close the underlying gRPC channel asynchronously."""
+        await asyncio.to_thread(self._rpc_client.close)
+
     def close(self) -> None:
+        """Synchronous close for non-async contexts."""
         self._rpc_client.close()
 
     async def __aenter__(self) -> AgentsSandboxClient:
@@ -110,7 +114,7 @@ class AgentsSandboxClient:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         del exc_type, exc, tb
-        self.close()
+        await self.aclose()
 
     async def ping(self) -> PingInfo:
         response = await asyncio.to_thread(self._rpc_client.ping)
@@ -131,6 +135,14 @@ class AgentsSandboxClient:
         envs: Mapping[str, str] | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
+        """Create a sandbox and optionally wait until it becomes ready.
+
+        When both *config_yaml* and individual fields (*image*, *mounts*, etc.)
+        are provided, individual fields take precedence over *config_yaml* values.
+        This allows *config_yaml* to serve as a base template with per-call overrides.
+
+        At least one of *config_yaml* or *image* must be provided.
+        """
         resolved_config_yaml = _normalize_config_yaml(config_yaml)
         if not resolved_config_yaml and image is None:
             raise ValueError("at least one of 'config_yaml' or 'image' must be provided")
@@ -149,20 +161,16 @@ class AgentsSandboxClient:
             ),
             config_yaml=resolved_config_yaml,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._rpc_client.create_sandbox,
-                to_proto_create_sandbox_request(request),
-            )
-        except SandboxConflictError as exc:
-            if request.sandbox_id is None:
-                raise
-            raise SandboxConflictError(f"Sandbox already exists for id {request.sandbox_id}.") from exc
-        current = await self.get_sandbox(response.sandbox_id)
+        response = await asyncio.to_thread(
+            self._rpc_client.create_sandbox,
+            to_proto_create_sandbox_request(request),
+        )
+        # CreateSandboxResponse now returns the full SandboxHandle directly.
+        current = to_sandbox_handle(response.sandbox)
         if not wait:
             return current
         return await self._wait_for_sandbox_state(
-            sandbox_id=response.sandbox_id,
+            sandbox_id=current.sandbox_id,
             baseline=current,
             target_state=SandboxState.READY,
             operation_name="create_sandbox",
@@ -355,11 +363,12 @@ class AgentsSandboxClient:
 
     async def list_active_execs(
         self,
+        *,
         sandbox_id: str | None = None,
     ) -> list[ExecHandle]:
         response = await asyncio.to_thread(
             self._rpc_client.list_active_execs,
-            "" if sandbox_id is None else sandbox_id,
+            sandbox_id,
         )
         return [to_exec_handle(item) for item in response.execs]
 
@@ -472,7 +481,7 @@ class AgentsSandboxClient:
                 async for event in stream:
                     if event.sequence <= baseline_sequence:
                         continue
-                    if event.exec_id != exec_id:
+                    if event.exec is None or event.exec.exec_id != exec_id:
                         continue
                     current, _ = await self._get_exec_snapshot(exec_id)
                     if current.state.is_terminal:

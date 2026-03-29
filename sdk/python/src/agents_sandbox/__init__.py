@@ -20,12 +20,15 @@ from .models import (
 from .types import (
     CopySpec,
     DeleteSandboxesResult,
+    ExecEventDetails,
     ExecHandle,
     HealthcheckConfig,
     MountSpec,
     PingInfo,
     SandboxEvent,
     SandboxHandle,
+    SandboxPhaseDetails,
+    ServiceEventDetails,
     ServiceSpec,
 )
 
@@ -34,6 +37,7 @@ __all__ = [
     "CopySpec",
     "DeleteSandboxesResult",
     "ExecAlreadyTerminalError",
+    "ExecEventDetails",
     "ExecHandle",
     "ExecNotFoundError",
     "ExecNotRunningError",
@@ -49,7 +53,9 @@ __all__ = [
     "SandboxInvalidStateError",
     "SandboxNotFoundError",
     "SandboxNotReadyError",
+    "SandboxPhaseDetails",
     "SandboxState",
     "MountSpec",
+    "ServiceEventDetails",
     "ServiceSpec",
 ]

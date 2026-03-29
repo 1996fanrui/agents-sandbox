@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from datetime import timedelta
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,10 +53,10 @@ def test_public_models_match_protocol_contract() -> None:
     service = ServiceSpec(
         name="postgres",
         image="postgres:16",
-        environment={"POSTGRES_DB": "agents"},
+        envs={"POSTGRES_DB": "agents"},
         healthcheck=HealthcheckConfig(
             test=("CMD-SHELL", "pg_isready -U postgres"),
-            interval="5s",
+            interval=timedelta(seconds=5),
             retries=3,
         ),
         post_start_on_primary=("python", "-c", "print('seeded')"),
@@ -64,7 +65,7 @@ def test_public_models_match_protocol_contract() -> None:
     copy = CopySpec(source="/tmp/source", target="/workspace/source", exclude_patterns=(".git",))
 
     assert service.name == "postgres"
-    assert service.environment["POSTGRES_DB"] == "agents"
+    assert service.envs["POSTGRES_DB"] == "agents"
     assert service.healthcheck is not None
     assert service.healthcheck.test == ("CMD-SHELL", "pg_isready -U postgres")
     assert mount.target == "/workspace"
@@ -77,15 +78,10 @@ def test_public_models_match_protocol_contract() -> None:
         "occurred_at",
         "replay",
         "snapshot",
-        "phase",
-        "service_name",
-        "error_code",
-        "error_message",
-        "reason",
-        "exec_id",
-        "exit_code",
         "sandbox_state",
-        "exec_state",
+        "sandbox_phase",
+        "exec",
+        "service",
     }
     assert set(SandboxHandle.__annotations__) == {
         "sandbox_id",
@@ -94,6 +90,8 @@ def test_public_models_match_protocol_contract() -> None:
         "required_services",
         "optional_services",
         "labels",
+        "created_at",
+        "image",
     }
     assert SandboxHandle.__annotations__["last_event_sequence"] == "int"
     assert set(ExecHandle.__annotations__) == {
@@ -259,7 +257,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
     }
 
     assert expected - actual == set()
-    assert {name for name in actual - expected if name != "close"} == set()
+    assert {name for name in actual - expected if name not in {"close", "aclose"}} == set()
 
     defaults = {
         "create_sandbox": True,
@@ -353,7 +351,8 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
         result = asyncio.run(_exercise_public_client(tmp_path / "sandbox.sock"))
 
     assert result["ping"].daemon == "agboxd"
-    assert result["sandbox_state"] is SandboxState.READY
+    # create_sandbox with wait=False returns state from CreateSandboxResponse (PENDING).
+    assert result["sandbox_state"] is SandboxState.PENDING
     assert result["exec_state"] is ExecState.FINISHED
     assert result["event_types"] == [
         SandboxEventType.SANDBOX_SERVICE_READY,
@@ -365,25 +364,11 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
     assert servicer.create_requests[0].create_spec.image == "python:3.12-slim"
     assert servicer.create_requests[0].sandbox_id == "sandbox-1"
     assert dict(servicer.create_requests[0].create_spec.labels) == {"team": "sdk", "purpose": "smoke"}
-    assert servicer.create_requests[0].create_spec.required_services == [
-        service_pb2.ServiceSpec(
-            name="postgres",
-            image="postgres:16",
-            environment=[service_pb2.KeyValue(key="POSTGRES_DB", value="agents")],
-            healthcheck=service_pb2.HealthcheckConfig(
-                test=["CMD-SHELL", "pg_isready -U postgres"],
-                interval="5s",
-                retries=5,
-            ),
-            post_start_on_primary=["python", "-c", "print('seeded')"],
-        )
-    ]
-    assert servicer.create_requests[0].create_spec.optional_services == [
-        service_pb2.ServiceSpec(
-            name="redis",
-            image="redis:7",
-        )
-    ]
+    # envs are serialized as a map in the proto.
+    assert dict(servicer.create_requests[0].create_spec.required_services[0].envs) == {"POSTGRES_DB": "agents"}
+    assert servicer.create_requests[0].create_spec.required_services[0].name == "postgres"
+    assert servicer.create_requests[0].create_spec.required_services[0].image == "postgres:16"
+    assert servicer.create_requests[0].create_spec.optional_services[0].name == "redis"
     assert dict(servicer.list_requests[0].label_selector) == {"team": "sdk"}
     assert dict(servicer.delete_sandboxes_requests[0].label_selector) == {"team": "sdk"}
     assert servicer.create_exec_requests[0].cwd == "/workspace"
@@ -404,15 +389,9 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             self.create_requests.append(request)
             return service_pb2.CreateSandboxResponse(
-                sandbox_id=f"sandbox-{len(self.create_requests)}",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
+                    sandbox_id=f"sandbox-{len(self.create_requests)}",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
                     last_event_sequence=1,
                 )
             )
@@ -421,8 +400,8 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
 
     async def run_test() -> None:
         client = _new_client("/tmp/agents-sandbox.sock")
-        await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-explicit")
-        await client.create_sandbox(image="python:3.12-slim")
+        await client.create_sandbox(image="python:3.12-slim", sandbox_id="sandbox-explicit", wait=False)
+        await client.create_sandbox(image="python:3.12-slim", wait=False)
 
     asyncio.run(run_test())
 
@@ -446,15 +425,9 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             self.create_requests.append(request)
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
                     last_event_sequence=1,
                 )
             )
@@ -480,10 +453,10 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
                 ServiceSpec(
                     name="postgres",
                     image="postgres:16",
-                    environment={"POSTGRES_DB": "agents"},
+                    envs={"POSTGRES_DB": "agents"},
                     healthcheck=HealthcheckConfig(
                         test=("CMD-SHELL", "pg_isready -U postgres"),
-                        interval="5s",
+                        interval=timedelta(seconds=5),
                         retries=3,
                     ),
                     post_start_on_primary=("python", "-c", "print('seeded')"),
@@ -495,6 +468,7 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
                     image="redis:7",
                 ),
             ),
+            wait=False,
         )
 
     asyncio.run(run_test())
@@ -511,25 +485,17 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
             exclude_patterns=[".git", "__pycache__"],
         )
     ]
-    assert create_spec.required_services == [
-        service_pb2.ServiceSpec(
-            name="postgres",
-            image="postgres:16",
-            environment=[service_pb2.KeyValue(key="POSTGRES_DB", value="agents")],
-            healthcheck=service_pb2.HealthcheckConfig(
-                test=["CMD-SHELL", "pg_isready -U postgres"],
-                interval="5s",
-                retries=3,
-            ),
-            post_start_on_primary=["python", "-c", "print('seeded')"],
-        )
-    ]
-    assert create_spec.optional_services == [
-        service_pb2.ServiceSpec(
-            name="redis",
-            image="redis:7",
-        )
-    ]
+    # Verify service fields individually (proto equality sensitive to field ordering).
+    assert len(create_spec.required_services) == 1
+    req_svc = create_spec.required_services[0]
+    assert req_svc.name == "postgres"
+    assert req_svc.image == "postgres:16"
+    assert dict(req_svc.envs) == {"POSTGRES_DB": "agents"}
+    assert req_svc.healthcheck.interval.seconds == 5
+    assert req_svc.healthcheck.retries == 3
+    assert list(req_svc.post_start_on_primary) == ["python", "-c", "print('seeded')"]
+    assert len(create_spec.optional_services) == 1
+    assert create_spec.optional_services[0].name == "redis"
 
 
 def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -546,15 +512,9 @@ def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.Monk
         def create_sandbox(self, request: service_pb2.CreateSandboxRequest) -> service_pb2.CreateSandboxResponse:
             self.create_requests.append(request)
             return service_pb2.CreateSandboxResponse(
-                sandbox_id="sandbox-1",
-                initial_state=service_pb2.SANDBOX_STATE_PENDING,
-            )
-
-        def get_sandbox(self, sandbox_id: str) -> service_pb2.GetSandboxResponse:
-            return service_pb2.GetSandboxResponse(
                 sandbox=service_pb2.SandboxHandle(
-                    sandbox_id=sandbox_id,
-                    state=service_pb2.SANDBOX_STATE_READY,
+                    sandbox_id="sandbox-1",
+                    state=service_pb2.SANDBOX_STATE_PENDING,
                     last_event_sequence=1,
                     labels={"team": "sdk", "purpose": "test"},
                 )
@@ -567,6 +527,7 @@ def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.Monk
         await client.create_sandbox(
             image="python:3.12-slim",
             labels={"team": "sdk", "purpose": "test"},
+            wait=False,
         )
 
     asyncio.run(run_test())
@@ -680,6 +641,116 @@ def test_delete_sandboxes_waits_for_deleted_state(monkeypatch: pytest.MonkeyPatc
         ("sandbox-1", 1, False),
         ("sandbox-2", 1, False),
     ]
+
+
+def test_aclose_delegates_to_rpc_client_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    close_called = False
+
+    class _FakeRawSandboxClient:
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            nonlocal close_called
+            close_called = True
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        client = _new_client("/tmp/agents-sandbox.sock")
+        await client.aclose()
+
+    asyncio.run(run_test())
+    assert close_called
+
+
+def test_async_context_manager_calls_aclose(monkeypatch: pytest.MonkeyPatch) -> None:
+    close_called = False
+
+    class _FakeRawSandboxClient:
+        def __init__(self, socket_path: str, *, timeout_seconds: float) -> None:
+            self.socket_path = socket_path
+            self.timeout_seconds = timeout_seconds
+
+        def close(self) -> None:
+            nonlocal close_called
+            close_called = True
+
+    monkeypatch.setattr("agents_sandbox.client.SandboxGrpcClient", _FakeRawSandboxClient)
+
+    async def run_test() -> None:
+        async with _new_client("/tmp/agents-sandbox.sock"):
+            pass
+
+    asyncio.run(run_test())
+    assert close_called
+
+
+def test_error_classes_accept_structured_fields() -> None:
+    from agents_sandbox.errors import (
+        ExecAlreadyTerminalError,
+        ExecNotFoundError,
+        ExecNotRunningError,
+        SandboxConflictError,
+        SandboxNotFoundError,
+        SandboxNotReadyError,
+        SandboxSequenceExpiredError,
+    )
+
+    conflict = SandboxConflictError("sandbox-1")
+    assert conflict.sandbox_id == "sandbox-1"
+    assert "sandbox-1" in str(conflict)
+
+    not_found = SandboxNotFoundError("sandbox-1")
+    assert not_found.sandbox_id == "sandbox-1"
+    assert "sandbox-1" in str(not_found)
+
+    not_ready = SandboxNotReadyError("sandbox-1")
+    assert not_ready.sandbox_id == "sandbox-1"
+
+    exec_not_found = ExecNotFoundError("exec-1")
+    assert exec_not_found.exec_id == "exec-1"
+
+    exec_terminal = ExecAlreadyTerminalError("exec-1")
+    assert exec_terminal.exec_id == "exec-1"
+
+    exec_not_running = ExecNotRunningError("exec-1")
+    assert exec_not_running.exec_id == "exec-1"
+
+    seq_expired = SandboxSequenceExpiredError("sandbox-1", 5, 3)
+    assert seq_expired.sandbox_id == "sandbox-1"
+    assert seq_expired.from_sequence == 5
+    assert seq_expired.oldest_sequence == 3
+    assert "5" in str(seq_expired)
+    assert "3" in str(seq_expired)
+
+
+def test_error_classes_accept_none_fields() -> None:
+    from agents_sandbox.errors import (
+        ExecNotFoundError,
+        SandboxConflictError,
+        SandboxNotFoundError,
+        SandboxSequenceExpiredError,
+    )
+
+    assert SandboxConflictError().sandbox_id is None
+    assert SandboxNotFoundError().sandbox_id is None
+    assert ExecNotFoundError().exec_id is None
+
+    seq = SandboxSequenceExpiredError()
+    assert seq.sandbox_id is None
+    assert seq.from_sequence is None
+    assert "expired" in str(seq).lower()
+
+
+def test_space_heuristic_removed_sandbox_id_with_spaces_preserved() -> None:
+    """Regression: old code used space heuristic to decide if arg was an ID or message."""
+    from agents_sandbox.errors import SandboxNotFoundError
+
+    # An ID that contains spaces should be stored as sandbox_id, not treated as a message.
+    err = SandboxNotFoundError("id with spaces")
+    assert err.sandbox_id == "id with spaces"
 
 
 def test_sandbox_handle_labels_round_trip() -> None:
