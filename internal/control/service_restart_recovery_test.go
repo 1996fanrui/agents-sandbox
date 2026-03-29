@@ -227,7 +227,7 @@ func TestRestoreExecState(t *testing.T) {
 	}
 }
 
-func TestRestoreIdleTTLReschedule(t *testing.T) {
+func TestRestoreIdleTTLCleanupLoopScan(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "ids.db")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -235,7 +235,7 @@ func TestRestoreIdleTTLReschedule(t *testing.T) {
 	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
-		IdleTTL:         50 * time.Millisecond,
+		IdleTTL:         time.Hour,
 	}, dbPath)
 	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("idle-ttl-restore", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
@@ -256,11 +256,12 @@ func TestRestoreIdleTTLReschedule(t *testing.T) {
 	first.close()
 
 	// Restart with very short idle TTL. The restored sandbox should have
-	// lastTerminalRunFinishedAt set, triggering idle stop scheduling.
+	// lastTerminalRunFinishedAt set; cleanupLoop's idleScanAndStop will detect it.
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
 		IdleTTL:         50 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
 		runtimeBackend: &scriptedRuntimeBackend{
 			inspectResult: ContainerInspectResult{Exists: true, Running: true},
 		},

@@ -544,7 +544,6 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 		delete(record.execCancel, req.GetExecId())
 	}
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
-	go s.scheduleIdleStop(sandboxID)
 	return &agboxv1.AcceptedResponse{Accepted: true}, nil
 }
 

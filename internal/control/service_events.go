@@ -11,33 +11,45 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const eventRetentionCleanupInterval = 5 * time.Minute
-
-func (s *Service) scheduleIdleStop(sandboxID string) {
+// idleScanAndStop scans all READY sandboxes and stops those that have been idle
+// longer than IdleTTL. Idle reference time: lastTerminalRunFinishedAt if any exec
+// has completed, otherwise createdAt (fixing the never-ran-exec leak).
+func (s *Service) idleScanAndStop() {
 	if s.config.IdleTTL <= 0 {
 		return
 	}
-	time.Sleep(s.config.IdleTTL)
 
 	s.mu.Lock()
-	record, ok := s.boxes[sandboxID]
-	if !ok ||
-		record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY ||
-		record.lastTerminalRunFinishedAt.IsZero() ||
-		time.Since(record.lastTerminalRunFinishedAt) < s.config.IdleTTL ||
-		hasActiveExec(record) {
-		s.mu.Unlock()
-		return
-	}
-	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
-		reason: "idle_ttl",
-	}); err != nil {
-		logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_SANDBOX_STOP_REQUESTED, err)
-		s.mu.Unlock()
-		return
+	var idleSandboxIDs []string
+	for sandboxID, record := range s.boxes {
+		if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+			continue
+		}
+		if hasActiveExec(record) {
+			continue
+		}
+		// Determine idle reference time.
+		idleRef := record.lastTerminalRunFinishedAt
+		if idleRef.IsZero() {
+			idleRef = record.handle.GetCreatedAt().AsTime()
+		}
+		if time.Since(idleRef) < s.config.IdleTTL {
+			continue
+		}
+		if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
+			reason: "idle_ttl",
+		}); err != nil {
+			s.config.Logger.Warn("idle scan: append STOP_REQUESTED failed",
+				slog.String("sandbox_id", sandboxID), slog.Any("error", err))
+			continue
+		}
+		idleSandboxIDs = append(idleSandboxIDs, sandboxID)
 	}
 	s.mu.Unlock()
-	go s.completeSandboxStop(sandboxID, "idle_ttl")
+
+	for _, sandboxID := range idleSandboxIDs {
+		go s.completeSandboxStop(sandboxID, "idle_ttl")
+	}
 }
 
 func (s *Service) cleanupExpiredEvents() error {
@@ -64,7 +76,7 @@ func (s *Service) cleanupExpiredEvents() error {
 }
 
 func (s *Service) cleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(eventRetentionCleanupInterval)
+	ticker := time.NewTicker(s.config.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
@@ -72,6 +84,7 @@ func (s *Service) cleanupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.idleScanAndStop()
 			if err := s.cleanupExpiredEvents(); err != nil {
 				s.config.Logger.Warn("cleanup expired sandbox events failed", slog.Any("error", err))
 			}
@@ -489,10 +502,8 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			slog.String("reconciled_state", reconciledState.String()),
 		)
 
-		// Schedule idle stop for READY sandboxes with terminal run history.
-		if reconciledState == agboxv1.SandboxState_SANDBOX_STATE_READY && !lastTerminalRunFinishedAt.IsZero() {
-			go s.scheduleIdleStop(sandboxID)
-		}
+		// Idle stop for restored READY sandboxes is handled by cleanupLoop's
+		// periodic idleScanAndStop(), no per-sandbox goroutine needed.
 	}
 	return nil
 }
