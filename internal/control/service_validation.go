@@ -138,19 +138,18 @@ func validateHealthcheck(serviceName string, healthcheck *agboxv1.HealthcheckCon
 }
 
 func validateGenericSourcePath(kind string, source string) error {
-	sourcePath, err := filepath.Abs(source)
-	if err != nil {
-		return fmt.Errorf("%s source path is invalid: %w", kind, err)
+	if !filepath.IsAbs(source) {
+		return fmt.Errorf("%s source must be absolute: %s", kind, source)
 	}
-	info, err := os.Lstat(sourcePath)
+	info, err := os.Lstat(source)
 	if err != nil {
 		return fmt.Errorf("%s source path is invalid: %w", kind, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s source must not be a symlink: %s", kind, sourcePath)
+		return fmt.Errorf("%s source must not be a symlink: %s", kind, source)
 	}
 	if !info.Mode().IsRegular() && !info.IsDir() {
-		return fmt.Errorf("%s source must be a file or directory: %s", kind, sourcePath)
+		return fmt.Errorf("%s source must be a file or directory: %s", kind, source)
 	}
 	return nil
 }

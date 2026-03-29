@@ -25,10 +25,7 @@ func (backend *dockerRuntimeBackend) materializeGenericMounts(
 		if !filepath.IsAbs(request.GetTarget()) {
 			return nil, fmt.Errorf("mount target must be absolute: %s", request.GetTarget())
 		}
-		sourcePath, err := filepath.Abs(request.GetSource())
-		if err != nil {
-			return nil, err
-		}
+		sourcePath := request.GetSource()
 		info, err := os.Lstat(sourcePath)
 		if err != nil {
 			return nil, err
@@ -73,10 +70,7 @@ func (backend *dockerRuntimeBackend) materializeGenericCopies(
 		if !filepath.IsAbs(request.GetTarget()) {
 			return nil, fmt.Errorf("copy target must be absolute: %s", request.GetTarget())
 		}
-		sourcePath, err := filepath.Abs(request.GetSource())
-		if err != nil {
-			return nil, err
-		}
+		sourcePath := request.GetSource()
 		sourceInfo, err := os.Lstat(sourcePath)
 		if err != nil {
 			return nil, err
