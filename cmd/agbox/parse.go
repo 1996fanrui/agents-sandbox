@@ -240,6 +240,46 @@ func parseSandboxExecArgs(args []string) (sandboxExecArgs, error) {
 	return sandboxExecArgs{}, usageErrorf("sandbox exec requires -- <command> [args...]")
 }
 
+type agentSessionArgs struct {
+	mount        string
+	builtinTools []string
+}
+
+func parseAgentSessionArgs(args []string, defaultMount string, defaultBuiltinTools []string) (agentSessionArgs, error) {
+	parsed := agentSessionArgs{
+		mount:        defaultMount,
+		builtinTools: defaultBuiltinTools,
+	}
+	// Track whether --builtin-tool was specified at least once so we can
+	// replace the default list rather than append to it.
+	builtinToolsOverridden := false
+
+	for index := 0; index < len(args); {
+		switch args[index] {
+		case "--mount":
+			if index+1 >= len(args) {
+				return agentSessionArgs{}, usageErrorf("--mount requires a path argument")
+			}
+			parsed.mount = args[index+1]
+			index += 2
+		case "--builtin-tool":
+			if index+1 >= len(args) {
+				return agentSessionArgs{}, usageErrorf("--builtin-tool requires a tool name argument")
+			}
+			if !builtinToolsOverridden {
+				parsed.builtinTools = nil
+				builtinToolsOverridden = true
+			}
+			parsed.builtinTools = append(parsed.builtinTools, args[index+1])
+			index += 2
+		default:
+			return agentSessionArgs{}, usageErrorf("unexpected argument %q", args[index])
+		}
+	}
+
+	return parsed, nil
+}
+
 func labelsToPairs(labels map[string]string) []string {
 	if len(labels) == 0 {
 		return nil

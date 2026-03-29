@@ -23,7 +23,7 @@ flowchart LR
 ### Main components
 
 - **Daemon** — resolves config, initializes structured JSON logging (stderr for systemd/journald), acquires the single-host lock, and serves gRPC over a Unix domain socket.
-- **CLI** — local operator interface that talks to the daemon via gRPC. Exposes sandbox lifecycle subcommands (`create`, `list`, `get`, `delete`, `exec`), label-based fleet operations, and JSON output.
+- **CLI** — local operator interface that talks to the daemon via gRPC. Exposes sandbox lifecycle subcommands (`create`, `list`, `get`, `delete`, `exec`), label-based fleet operations, and JSON output. Exception: `agbox claude` and `agbox codex` additionally call `docker exec -it` directly after sandbox creation to attach an interactive TTY session; see [Container Dependency Strategy](container_dependency_strategy.md) for details.
 - **Control service** — core business logic: request validation, accepted-state transitions, in-memory sandbox/exec records, event ordering and sequence generation, async operation orchestration, restart recovery with Docker inspect reconciliation, and retention cleanup.
 - **Persistence layer** — bbolt-backed ID registry (reserves `sandbox_id`/`exec_id` across restarts) and event store (replays sandbox history after restart, retains deleted streams until cleanup).
 - **Docker runtime backend** — single Docker Engine API client owning filesystem ingress materialization, network/container creation, exec commands, and resource removal.
