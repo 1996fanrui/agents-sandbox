@@ -77,7 +77,7 @@ func (c *Client) waitForExecTerminal(
 		if item.Event == nil || item.Event.Sequence <= baselineSequence {
 			continue
 		}
-		if item.Event.ExecID == nil || *item.Event.ExecID != execID {
+		if item.Event.Exec == nil || item.Event.Exec.ExecID != execID {
 			continue
 		}
 		current, getErr := c.getExecSnapshot(waitCtx, execID)

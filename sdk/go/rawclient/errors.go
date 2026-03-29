@@ -2,16 +2,12 @@ package rawclient
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/status"
 )
-
-var sandboxSequenceExpiredPattern = regexp.MustCompile(`^sandbox (\S+) event sequence (\d+) is outside retained history(?:; oldest retained sequence is (\d+))?\.?$`)
 
 // SandboxClientError is the base rawclient error type.
 type SandboxClientError struct {
@@ -35,36 +31,10 @@ type SandboxConflictError struct {
 	SandboxID string
 }
 
-func newSandboxConflictError(message string, cause error) *SandboxConflictError {
-	sandboxID, idProvided := idFromMessage(message)
-	if !idProvided {
-		if message == "" {
-			message = "Sandbox already exists."
-		}
-	}
-	return &SandboxConflictError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		SandboxID:          sandboxID,
-	}
-}
-
 // SandboxNotFoundError is raised when a sandbox is missing.
 type SandboxNotFoundError struct {
 	*SandboxClientError
 	SandboxID string
-}
-
-func newSandboxNotFoundError(message string, cause error) *SandboxNotFoundError {
-	sandboxID, idProvided := idFromMessage(message)
-	if idProvided {
-		message = fmt.Sprintf("Sandbox %s not found.", sandboxID)
-	} else if message == "" {
-		message = "RPC failed."
-	}
-	return &SandboxNotFoundError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		SandboxID:          sandboxID,
-	}
 }
 
 // SandboxNotReadyError is raised when a sandbox cannot accept exec yet.
@@ -73,31 +43,9 @@ type SandboxNotReadyError struct {
 	SandboxID string
 }
 
-func newSandboxNotReadyError(message string, cause error) *SandboxNotReadyError {
-	sandboxID, idProvided := idFromMessage(message)
-	if idProvided {
-		message = fmt.Sprintf("Sandbox %s is not ready.", sandboxID)
-	} else if message == "" {
-		message = "RPC failed."
-	}
-	return &SandboxNotReadyError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		SandboxID:          sandboxID,
-	}
-}
-
 // SandboxInvalidStateError is raised when an operation is invalid for current state.
 type SandboxInvalidStateError struct {
 	*SandboxClientError
-}
-
-func newSandboxInvalidStateError(message string, cause error) *SandboxInvalidStateError {
-	if message == "" {
-		message = "RPC failed."
-	}
-	return &SandboxInvalidStateError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-	}
 }
 
 // ExecNotFoundError is raised when an exec record is missing.
@@ -106,36 +54,10 @@ type ExecNotFoundError struct {
 	ExecID string
 }
 
-func newExecNotFoundError(message string, cause error) *ExecNotFoundError {
-	execID, idProvided := idFromMessage(message)
-	if idProvided {
-		message = fmt.Sprintf("Exec %s not found.", execID)
-	} else if message == "" {
-		message = "RPC failed."
-	}
-	return &ExecNotFoundError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		ExecID:             execID,
-	}
-}
-
 // ExecAlreadyTerminalError is raised when an exec is already terminal.
 type ExecAlreadyTerminalError struct {
 	*SandboxClientError
 	ExecID string
-}
-
-func newExecAlreadyTerminalError(message string, cause error) *ExecAlreadyTerminalError {
-	execID, idProvided := idFromMessage(message)
-	if idProvided {
-		message = fmt.Sprintf("Exec %s is already terminal.", execID)
-	} else if message == "" {
-		message = "RPC failed."
-	}
-	return &ExecAlreadyTerminalError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		ExecID:             execID,
-	}
 }
 
 // ExecNotRunningError can be composed from SandboxInvalidStateError by higher layers.
@@ -144,33 +66,25 @@ type ExecNotRunningError struct {
 	ExecID string
 }
 
-func newExecNotRunningError(message string, cause error) *ExecNotRunningError {
-	execID, idProvided := idFromMessage(message)
-	if idProvided {
-		message = fmt.Sprintf("Exec %s is not running.", execID)
-	} else if message == "" {
-		message = "RPC failed."
-	}
-	return &ExecNotRunningError{
-		SandboxInvalidStateError: newSandboxInvalidStateError(message, cause),
-		ExecID:                   execID,
-	}
-}
-
-// NewSandboxClientError constructs a canonical base SDK error.
+// NewSandboxClientError constructs a base SDK error from a message and optional cause.
 func NewSandboxClientError(message string, cause error) *SandboxClientError {
 	if message == "" {
 		message = "RPC failed."
 	}
-	return &SandboxClientError{
-		message: message,
-		cause:   cause,
-	}
+	return &SandboxClientError{message: message, cause: cause}
 }
 
 // NewExecNotRunningError constructs the canonical high-level exec-not-running error.
 func NewExecNotRunningError(execID string, cause error) *ExecNotRunningError {
-	return newExecNotRunningError(execID, cause)
+	return &ExecNotRunningError{
+		SandboxInvalidStateError: &SandboxInvalidStateError{
+			SandboxClientError: &SandboxClientError{
+				message: fmt.Sprintf("Exec %s is not running.", execID),
+				cause:   cause,
+			},
+		},
+		ExecID: execID,
+	}
 }
 
 // SandboxSequenceExpiredError is raised when a subscription start sequence is outside retained history.
@@ -181,27 +95,6 @@ type SandboxSequenceExpiredError struct {
 	OldestSequence *uint64
 }
 
-func newSandboxSequenceExpiredError(message string, cause error) *SandboxSequenceExpiredError {
-	sandboxID, fromSeq, oldestSeq := parseSequenceExpiredMessage(message)
-	if sandboxID == "" {
-		id, hasID := idFromMessage(message)
-		if hasID {
-			sandboxID = id
-		}
-	}
-
-	if message == "" {
-		message = "RPC failed."
-	}
-
-	return &SandboxSequenceExpiredError{
-		SandboxClientError: &SandboxClientError{message: message, cause: cause},
-		SandboxID:          sandboxID,
-		FromSequence:       fromSeq,
-		OldestSequence:     oldestSeq,
-	}
-}
-
 func translateRPCError(err error) error {
 	st, ok := status.FromError(err)
 	if !ok {
@@ -209,9 +102,11 @@ func translateRPCError(err error) error {
 	}
 
 	reason := ""
+	metadata := map[string]string(nil)
 	for _, detail := range st.Details() {
 		if info, ok := detail.(*errdetails.ErrorInfo); ok {
 			reason = info.GetReason()
+			metadata = info.GetMetadata()
 			break
 		}
 	}
@@ -225,50 +120,87 @@ func translateRPCError(err error) error {
 		}
 	}
 
+	// Extract resource IDs from structured metadata instead of parsing message text.
+	sandboxID := metadata["sandbox_id"]
+	execID := metadata["exec_id"]
+
 	switch reason {
 	case control.ReasonSandboxConflict, control.ReasonSandboxIDAlreadyExists, control.ReasonExecIDAlreadyExists:
-		return newSandboxConflictError(message, err)
+		return &SandboxConflictError{
+			SandboxClientError: &SandboxClientError{message: message, cause: err},
+			SandboxID:          sandboxID,
+		}
 	case control.ReasonSandboxNotFound:
-		return newSandboxNotFoundError(message, err)
+		notFoundMessage := message
+		if sandboxID != "" {
+			notFoundMessage = fmt.Sprintf("Sandbox %s not found.", sandboxID)
+		}
+		return &SandboxNotFoundError{
+			SandboxClientError: &SandboxClientError{message: notFoundMessage, cause: err},
+			SandboxID:          sandboxID,
+		}
 	case control.ReasonSandboxNotReady:
-		return newSandboxNotReadyError(message, err)
+		notReadyMessage := message
+		if sandboxID != "" {
+			notReadyMessage = fmt.Sprintf("Sandbox %s is not ready.", sandboxID)
+		}
+		return &SandboxNotReadyError{
+			SandboxClientError: &SandboxClientError{message: notReadyMessage, cause: err},
+			SandboxID:          sandboxID,
+		}
 	case control.ReasonSandboxInvalidState:
-		return newSandboxInvalidStateError(message, err)
+		return &SandboxInvalidStateError{
+			SandboxClientError: &SandboxClientError{message: message, cause: err},
+		}
 	case control.ReasonExecNotFound:
-		return newExecNotFoundError(message, err)
+		notFoundMessage := message
+		if execID != "" {
+			notFoundMessage = fmt.Sprintf("Exec %s not found.", execID)
+		}
+		return &ExecNotFoundError{
+			SandboxClientError: &SandboxClientError{message: notFoundMessage, cause: err},
+			ExecID:             execID,
+		}
 	case control.ReasonExecAlreadyTerminal:
-		return newExecAlreadyTerminalError(message, err)
+		terminalMessage := message
+		if execID != "" {
+			terminalMessage = fmt.Sprintf("Exec %s is already terminal.", execID)
+		}
+		return &ExecAlreadyTerminalError{
+			SandboxClientError: &SandboxClientError{message: terminalMessage, cause: err},
+			ExecID:             execID,
+		}
+	case control.ReasonExecNotRunning:
+		notRunningMessage := message
+		if execID != "" {
+			notRunningMessage = fmt.Sprintf("Exec %s is not running.", execID)
+		}
+		return &ExecNotRunningError{
+			SandboxInvalidStateError: &SandboxInvalidStateError{
+				SandboxClientError: &SandboxClientError{message: notRunningMessage, cause: err},
+			},
+			ExecID: execID,
+		}
 	case control.ReasonSandboxEventSequenceExpired:
-		return newSandboxSequenceExpiredError(message, err)
+		var fromSeq *uint64
+		var oldestSeq *uint64
+		if s, ok := metadata["from_sequence"]; ok && s != "" {
+			if v, parseErr := strconv.ParseUint(s, 10, 64); parseErr == nil {
+				fromSeq = &v
+			}
+		}
+		if s, ok := metadata["oldest_sequence"]; ok && s != "" {
+			if v, parseErr := strconv.ParseUint(s, 10, 64); parseErr == nil {
+				oldestSeq = &v
+			}
+		}
+		return &SandboxSequenceExpiredError{
+			SandboxClientError: &SandboxClientError{message: message, cause: err},
+			SandboxID:          sandboxID,
+			FromSequence:       fromSeq,
+			OldestSequence:     oldestSeq,
+		}
 	default:
 		return &SandboxClientError{message: message, cause: err}
 	}
-}
-
-func parseSequenceExpiredMessage(message string) (string, *uint64, *uint64) {
-	matches := sandboxSequenceExpiredPattern.FindStringSubmatch(message)
-	if len(matches) != 4 {
-		return "", nil, nil
-	}
-	sandboxID := matches[1]
-	fromSequence, err := strconv.ParseUint(matches[2], 10, 64)
-	if err != nil {
-		return sandboxID, nil, nil
-	}
-	if matches[3] == "" {
-		return sandboxID, &fromSequence, nil
-	}
-	oldestSequence, err := strconv.ParseUint(matches[3], 10, 64)
-	if err != nil {
-		return sandboxID, &fromSequence, nil
-	}
-
-	return sandboxID, &fromSequence, &oldestSequence
-}
-
-func idFromMessage(message string) (string, bool) {
-	if message == "" || strings.Contains(message, " ") {
-		return "", false
-	}
-	return message, true
 }

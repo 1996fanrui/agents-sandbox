@@ -157,9 +157,11 @@ func (c *RawClient) GetExec(ctx context.Context, execID string) (*agboxv1.GetExe
 // ListActiveExecs calls SandboxService.ListActiveExecs.
 func (c *RawClient) ListActiveExecs(ctx context.Context, sandboxID string) (*agboxv1.ListActiveExecsResponse, error) {
 	return callWithTimeoutUnary(ctx, c.timeout, func(callCtx context.Context) (*agboxv1.ListActiveExecsResponse, error) {
-		return c.client.ListActiveExecs(callCtx, &agboxv1.ListActiveExecsRequest{
-			SandboxId: sandboxID,
-		})
+		req := &agboxv1.ListActiveExecsRequest{}
+		if sandboxID != "" {
+			req.SandboxId = &sandboxID
+		}
+		return c.client.ListActiveExecs(callCtx, req)
 	})
 }
 

@@ -23,7 +23,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 			if req.GetCreateSpec().GetImage() != "" {
 				t.Fatal("expected empty image in create_spec when using config only")
 			}
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sb-1"}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-1", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 1}}, nil
 		}
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
 			return &agboxv1.GetSandboxResponse{
@@ -54,7 +54,7 @@ func TestCreateSandboxWithConfig(t *testing.T) {
 			if req.GetCreateSpec().GetImage() != "override:latest" {
 				t.Fatalf("expected image override, got %s", req.GetCreateSpec().GetImage())
 			}
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sb-2"}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-2", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 1}}, nil
 		}
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
 			return &agboxv1.GetSandboxResponse{

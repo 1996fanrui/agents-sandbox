@@ -197,11 +197,15 @@ func eventPB(sandboxID string, sequence uint64, _ string, eventType agboxv1.Even
 		SandboxId:  sandboxID,
 		EventType:  eventType,
 		OccurredAt: timestamppb.New(time.Now()),
-		ExecState:  agboxv1.ExecState_EXEC_STATE_FINISHED,
 	}
 }
 
 func withExecEvent(event *agboxv1.SandboxEvent, execID string) *agboxv1.SandboxEvent {
-	event.ExecId = execID
+	event.Details = &agboxv1.SandboxEvent_Exec{
+		Exec: &agboxv1.ExecEventDetails{
+			ExecId:    execID,
+			ExecState: agboxv1.ExecState_EXEC_STATE_FINISHED,
+		},
+	}
 	return event
 }

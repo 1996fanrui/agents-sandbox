@@ -11,6 +11,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestConversions(t *testing.T) {
@@ -24,12 +25,10 @@ func TestConversions(t *testing.T) {
 			{
 				Name:  "postgres",
 				Image: "postgres:16",
-				Environment: []*agboxv1.KeyValue{
-					{Key: "POSTGRES_DB", Value: "agents"},
-				},
+				Envs:  map[string]string{"POSTGRES_DB": "agents"},
 				Healthcheck: &agboxv1.HealthcheckConfig{
 					Test:     []string{"CMD-SHELL", "pg_isready -U postgres"},
-					Interval: "5s",
+					Interval: durationpb.New(5 * time.Second),
 					Retries:  3,
 				},
 				PostStartOnPrimary: []string{"python", "-c", "print('seeded')"},
@@ -85,12 +84,13 @@ func TestConversions(t *testing.T) {
 		t.Fatalf("unexpected finished last event sequence: %#v", finished.LastEventSequence)
 	}
 
-	event, err := toSandboxEvent(eventPB("sandbox-1", 11, "", agboxv1.EventType_EXEC_FINISHED))
+	event, err := toSandboxEvent(withExecEvent(eventPB("sandbox-1", 11, "", agboxv1.EventType_EXEC_FINISHED), "exec-1"))
 	if err != nil {
 		t.Fatalf("toSandboxEvent failed: %v", err)
 	}
-	if event.ExitCode == nil || *event.ExitCode != 0 {
-		t.Fatalf("exec finished event should expose exit code: %#v", event.ExitCode)
+	// EXEC_FINISHED event exposes exit code (0) via Exec details.
+	if event.Exec == nil || event.Exec.ExitCode == nil || *event.Exec.ExitCode != 0 {
+		t.Fatalf("exec finished event should expose exit code via Exec details: %#v", event.Exec)
 	}
 
 	_, err = toSandboxEvent(&agboxv1.SandboxEvent{
@@ -125,35 +125,30 @@ func TestSandboxLifecycle(t *testing.T) {
 			if request.GetSandboxId() != "sandbox-1" {
 				t.Fatalf("unexpected sandbox id: %q", request.GetSandboxId())
 			}
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sandbox-1"}, nil
+			// CreateSandboxResponse now carries the full SandboxHandle directly.
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventSequence: 1}}, nil
 		}
-		getCalls := 0
+		// getSandboxFn is consulted after sandbox-ready events during wait.
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
-			getCalls++
-			state := agboxv1.SandboxState_SANDBOX_STATE_PENDING
-			sequence := uint64(5)
-			if getCalls > 1 {
-				state = agboxv1.SandboxState_SANDBOX_STATE_READY
-				sequence = 6
-			}
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
 					SandboxId:         sandboxID,
-					State:             state,
-					LastEventSequence: sequence,
+					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence: 3,
 				},
 			}, nil
 		}
 
 		streamClient := &fakeRPCClient{}
 		streamClient.subscribeSandboxEventsFn = func(_ context.Context, sandboxID string, fromSequence uint64, includeCurrentSnapshot bool) (rawclient.SandboxEventStream, error) {
-			if sandboxID != "sandbox-1" || fromSequence != 5 || includeCurrentSnapshot {
+			// CreateSandbox now returns handle directly (sequence 1), so subscribe starts from 1.
+			if sandboxID != "sandbox-1" || fromSequence != 1 || includeCurrentSnapshot {
 				t.Fatalf("unexpected subscribe args: %q %d %v", sandboxID, fromSequence, includeCurrentSnapshot)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB("sandbox-1", 4, "", agboxv1.EventType_SANDBOX_READY),
-				eventPB("sandbox-1", 5, "", agboxv1.EventType_SANDBOX_READY),
-				eventPB("sandbox-1", 6, "", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 1, "", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 2, "", agboxv1.EventType_SANDBOX_READY),
+				eventPB("sandbox-1", 3, "", agboxv1.EventType_SANDBOX_READY),
 			}, nil), nil
 		}
 
@@ -166,7 +161,6 @@ func TestSandboxLifecycle(t *testing.T) {
 			t.Fatalf("unexpected final state: %v", handle.State)
 		}
 
-		getCalls = 0
 		handle, err = client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"), WithSandboxID("sandbox-1"), WithWait(false))
 		if err != nil {
 			t.Fatalf("CreateSandbox(wait=false) failed: %v", err)
@@ -635,19 +629,25 @@ func TestWaitErrorSemantics(t *testing.T) {
 	t.Run("sandbox_failed_returns_base_sdk_error", func(t *testing.T) {
 		base := &fakeRPCClient{}
 		base.createSandboxFn = func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sandbox-1"}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventSequence: 1}}, nil
 		}
 		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
 					SandboxId:         "sandbox-1",
 					State:             agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-					LastEventSequence: 1,
+					LastEventSequence: 2,
 				},
 			}, nil
 		}
+		streamClient := &fakeRPCClient{}
+		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			return streamFromEvents([]*agboxv1.SandboxEvent{
+				eventPB("sandbox-1", 2, "", agboxv1.EventType_SANDBOX_FAILED),
+			}, nil), nil
+		}
 
-		client := newTestClient(base, nil)
+		client := newTestClient(base, func(time.Duration) (rpcClient, error) { return streamClient, nil })
 		_, err := client.CreateSandbox(context.Background(), WithImage("python:3.12-slim"))
 		var clientErr *rawclient.SandboxClientError
 		if !errors.As(err, &clientErr) {
@@ -661,18 +661,7 @@ func TestWaitErrorSemantics(t *testing.T) {
 	t.Run("sandbox_stream_end_returns_base_sdk_error", func(t *testing.T) {
 		base := &fakeRPCClient{}
 		base.createSandboxFn = func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sandbox-1"}, nil
-		}
-		getCalls := 0
-		base.getSandboxFn = func(_ context.Context, sandboxID string) (*agboxv1.GetSandboxResponse, error) {
-			getCalls++
-			return &agboxv1.GetSandboxResponse{
-				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:         sandboxID,
-					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-					LastEventSequence: 1,
-				},
-			}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-1", State: agboxv1.SandboxState_SANDBOX_STATE_PENDING, LastEventSequence: 1}}, nil
 		}
 		streamClient := &fakeRPCClient{}
 		streamClient.subscribeSandboxEventsFn = func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {

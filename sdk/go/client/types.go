@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // SandboxState is the public sandbox lifecycle enum.
@@ -68,18 +69,18 @@ type PingInfo struct {
 // HealthcheckConfig is the public service healthcheck type.
 type HealthcheckConfig struct {
 	Test          []string
-	Interval      *string
-	Timeout       *string
+	Interval      *time.Duration
+	Timeout       *time.Duration
 	Retries       *uint32
-	StartPeriod   *string
-	StartInterval *string
+	StartPeriod   *time.Duration
+	StartInterval *time.Duration
 }
 
 // ServiceSpec is the public service declaration type.
 type ServiceSpec struct {
 	Name               string
 	Image              string
-	Environment        map[string]string
+	Envs               map[string]string
 	Healthcheck        *HealthcheckConfig
 	PostStartOnPrimary []string
 }
@@ -106,6 +107,8 @@ type SandboxHandle struct {
 	RequiredServices  []ServiceSpec
 	OptionalServices  []ServiceSpec
 	Labels            map[string]string
+	CreatedAt         time.Time
+	Image             string
 }
 
 // DeleteSandboxesResult is the public bulk delete result.
@@ -120,13 +123,37 @@ type ExecHandle struct {
 	SandboxID         string
 	State             ExecState
 	Command           []string
-	Cwd               *string
+	Cwd               string
 	EnvOverrides      map[string]string
 	ExitCode          *int32
 	Error             *string
 	LastEventSequence uint64
 	StdoutLogPath     *string
 	StderrLogPath     *string
+}
+
+// SandboxPhaseDetails holds details for sandbox phase transition events.
+type SandboxPhaseDetails struct {
+	Phase        *string
+	ErrorCode    *string
+	ErrorMessage *string
+	Reason       *string
+}
+
+// ExecEventDetails holds details for exec lifecycle events.
+type ExecEventDetails struct {
+	ExecID       string
+	ExitCode     *int32
+	ExecState    *ExecState
+	ErrorCode    *string
+	ErrorMessage *string
+}
+
+// ServiceEventDetails holds details for service lifecycle events.
+type ServiceEventDetails struct {
+	ServiceName  string
+	ErrorCode    *string
+	ErrorMessage *string
 }
 
 // SandboxEvent is the public sandbox event type.
@@ -138,15 +165,10 @@ type SandboxEvent struct {
 	OccurredAt   time.Time
 	Replay       bool
 	Snapshot     bool
-	Phase        *string
-	ServiceName  *string
-	ErrorCode    *string
-	ErrorMessage *string
-	Reason       *string
-	ExecID       *string
-	ExitCode     *int32
 	SandboxState *SandboxState
-	ExecState    *ExecState
+	SandboxPhase *SandboxPhaseDetails
+	Exec         *ExecEventDetails
+	Service      *ServiceEventDetails
 }
 
 // EventOrError is the channel item exposed by SubscribeSandboxEvents.
@@ -166,6 +188,10 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 	if handle == nil {
 		return SandboxHandle{}, fmt.Errorf("sandbox handle is required")
 	}
+	var createdAt time.Time
+	if handle.GetCreatedAt() != nil {
+		createdAt = handle.GetCreatedAt().AsTime().UTC()
+	}
 	return SandboxHandle{
 		SandboxID:         handle.GetSandboxId(),
 		State:             SandboxState(handle.GetState()),
@@ -173,6 +199,8 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 		RequiredServices:  toServices(handle.GetRequiredServices()),
 		OptionalServices:  toServices(handle.GetOptionalServices()),
 		Labels:            cloneStringMap(handle.GetLabels()),
+		CreatedAt:         createdAt,
+		Image:             handle.GetImage(),
 	}, nil
 }
 
@@ -187,8 +215,8 @@ func toExecHandle(execStatus *agboxv1.ExecStatus) ExecHandle {
 		SandboxID:         execStatus.GetSandboxId(),
 		State:             state,
 		Command:           slices.Clone(execStatus.GetCommand()),
-		Cwd:               emptyStringPtr(execStatus.GetCwd()),
-		EnvOverrides:      keyValuesToMap(execStatus.GetEnvOverrides()),
+		Cwd:               execStatus.GetCwd(),
+		EnvOverrides:      cloneStringMap(execStatus.GetEnvOverrides()),
 		ExitCode:          exitCode,
 		Error:             emptyStringPtr(execStatus.GetError()),
 		LastEventSequence: execStatus.GetLastEventSequence(),
@@ -222,12 +250,8 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 	if event.GetOccurredAt() == nil {
 		return SandboxEvent{}, fmt.Errorf("sandbox event %s is missing occurred_at", fallbackID(event.GetEventId()))
 	}
-	var exitCode *int32
-	if event.GetEventType() == agboxv1.EventType_EXEC_FINISHED || event.GetExitCode() != 0 {
-		exitCode = int32Ptr(event.GetExitCode())
-	}
 
-	return SandboxEvent{
+	result := SandboxEvent{
 		EventID:      event.GetEventId(),
 		Sequence:     event.GetSequence(),
 		SandboxID:    event.GetSandboxId(),
@@ -235,16 +259,44 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 		OccurredAt:   event.GetOccurredAt().AsTime().UTC(),
 		Replay:       event.GetReplay(),
 		Snapshot:     event.GetSnapshot(),
-		Phase:        emptyStringPtr(event.GetPhase()),
-		ServiceName:  emptyStringPtr(event.GetServiceName()),
-		ErrorCode:    emptyStringPtr(event.GetErrorCode()),
-		ErrorMessage: emptyStringPtr(event.GetErrorMessage()),
-		Reason:       emptyStringPtr(event.GetReason()),
-		ExecID:       emptyStringPtr(event.GetExecId()),
-		ExitCode:     exitCode,
 		SandboxState: sandboxStatePtr(event.GetSandboxState()),
-		ExecState:    execStatePtr(event.GetExecState()),
-	}, nil
+	}
+
+	switch d := event.GetDetails().(type) {
+	case *agboxv1.SandboxEvent_SandboxPhase:
+		if d != nil && d.SandboxPhase != nil {
+			result.SandboxPhase = &SandboxPhaseDetails{
+				Phase:        emptyStringPtr(d.SandboxPhase.GetPhase()),
+				ErrorCode:    emptyStringPtr(d.SandboxPhase.GetErrorCode()),
+				ErrorMessage: emptyStringPtr(d.SandboxPhase.GetErrorMessage()),
+				Reason:       emptyStringPtr(d.SandboxPhase.GetReason()),
+			}
+		}
+	case *agboxv1.SandboxEvent_Exec:
+		if d != nil && d.Exec != nil {
+			var exitCode *int32
+			if event.GetEventType() == agboxv1.EventType_EXEC_FINISHED || d.Exec.GetExitCode() != 0 {
+				exitCode = int32Ptr(d.Exec.GetExitCode())
+			}
+			result.Exec = &ExecEventDetails{
+				ExecID:       d.Exec.GetExecId(),
+				ExitCode:     exitCode,
+				ExecState:    execStatePtr(d.Exec.GetExecState()),
+				ErrorCode:    emptyStringPtr(d.Exec.GetErrorCode()),
+				ErrorMessage: emptyStringPtr(d.Exec.GetErrorMessage()),
+			}
+		}
+	case *agboxv1.SandboxEvent_Service:
+		if d != nil && d.Service != nil {
+			result.Service = &ServiceEventDetails{
+				ServiceName:  d.Service.GetServiceName(),
+				ErrorCode:    emptyStringPtr(d.Service.GetErrorCode()),
+				ErrorMessage: emptyStringPtr(d.Service.GetErrorMessage()),
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func toProtoMount(spec MountSpec) *agboxv1.MountSpec {
@@ -267,7 +319,7 @@ func toProtoService(spec ServiceSpec) *agboxv1.ServiceSpec {
 	return &agboxv1.ServiceSpec{
 		Name:               spec.Name,
 		Image:              spec.Image,
-		Environment:        mapToKeyValues(spec.Environment),
+		Envs:               cloneStringMap(spec.Envs),
 		Healthcheck:        toProtoHealthcheck(spec.Healthcheck),
 		PostStartOnPrimary: slices.Clone(spec.PostStartOnPrimary),
 	}
@@ -277,14 +329,23 @@ func toProtoHealthcheck(config *HealthcheckConfig) *agboxv1.HealthcheckConfig {
 	if config == nil {
 		return nil
 	}
-	return &agboxv1.HealthcheckConfig{
-		Test:          slices.Clone(config.Test),
-		Interval:      valueOrEmpty(config.Interval),
-		Timeout:       valueOrEmpty(config.Timeout),
-		Retries:       valueOrZero(config.Retries),
-		StartPeriod:   valueOrEmpty(config.StartPeriod),
-		StartInterval: valueOrEmpty(config.StartInterval),
+	result := &agboxv1.HealthcheckConfig{
+		Test:    slices.Clone(config.Test),
+		Retries: valueOrZero(config.Retries),
 	}
+	if config.Interval != nil {
+		result.Interval = durationpb.New(*config.Interval)
+	}
+	if config.Timeout != nil {
+		result.Timeout = durationpb.New(*config.Timeout)
+	}
+	if config.StartPeriod != nil {
+		result.StartPeriod = durationpb.New(*config.StartPeriod)
+	}
+	if config.StartInterval != nil {
+		result.StartInterval = durationpb.New(*config.StartInterval)
+	}
+	return result
 }
 
 func toServices(specs []*agboxv1.ServiceSpec) []ServiceSpec {
@@ -296,7 +357,7 @@ func toServices(specs []*agboxv1.ServiceSpec) []ServiceSpec {
 		result = append(result, ServiceSpec{
 			Name:               spec.GetName(),
 			Image:              spec.GetImage(),
-			Environment:        keyValuesToMap(spec.GetEnvironment()),
+			Envs:               cloneStringMap(spec.GetEnvs()),
 			Healthcheck:        toHealthcheck(spec.GetHealthcheck()),
 			PostStartOnPrimary: slices.Clone(spec.GetPostStartOnPrimary()),
 		})
@@ -308,14 +369,27 @@ func toHealthcheck(config *agboxv1.HealthcheckConfig) *HealthcheckConfig {
 	if config == nil {
 		return nil
 	}
-	return &HealthcheckConfig{
-		Test:          slices.Clone(config.GetTest()),
-		Interval:      emptyStringPtr(config.GetInterval()),
-		Timeout:       emptyStringPtr(config.GetTimeout()),
-		Retries:       zeroUint32Ptr(config.GetRetries()),
-		StartPeriod:   emptyStringPtr(config.GetStartPeriod()),
-		StartInterval: emptyStringPtr(config.GetStartInterval()),
+	result := &HealthcheckConfig{
+		Test:    slices.Clone(config.GetTest()),
+		Retries: zeroUint32Ptr(config.GetRetries()),
 	}
+	if config.GetInterval() != nil {
+		d := config.GetInterval().AsDuration()
+		result.Interval = &d
+	}
+	if config.GetTimeout() != nil {
+		d := config.GetTimeout().AsDuration()
+		result.Timeout = &d
+	}
+	if config.GetStartPeriod() != nil {
+		d := config.GetStartPeriod().AsDuration()
+		result.StartPeriod = &d
+	}
+	if config.GetStartInterval() != nil {
+		d := config.GetStartInterval().AsDuration()
+		result.StartInterval = &d
+	}
+	return result
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
@@ -323,39 +397,6 @@ func cloneStringMap(values map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	return maps.Clone(values)
-}
-
-func mapToKeyValues(values map[string]string) []*agboxv1.KeyValue {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	result := make([]*agboxv1.KeyValue, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, &agboxv1.KeyValue{
-			Key:   key,
-			Value: values[key],
-		})
-	}
-	return result
-}
-
-func keyValuesToMap(values []*agboxv1.KeyValue) map[string]string {
-	if len(values) == 0 {
-		return map[string]string{}
-	}
-	result := make(map[string]string, len(values))
-	for _, value := range values {
-		if value == nil {
-			continue
-		}
-		result[value.GetKey()] = value.GetValue()
-	}
-	return result
 }
 
 func emptyStringPtr(value string) *string {
@@ -392,16 +433,16 @@ func zeroUint32Ptr(value uint32) *uint32 {
 	return &value
 }
 
-func valueOrEmpty(value *string) string {
+func valueOrZero(value *uint32) uint32 {
 	if value == nil {
-		return ""
+		return 0
 	}
 	return *value
 }
 
-func valueOrZero(value *uint32) uint32 {
+func valueOrEmpty(value *string) string {
 	if value == nil {
-		return 0
+		return ""
 	}
 	return *value
 }
