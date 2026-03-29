@@ -52,7 +52,7 @@ Recomputed on startup from Category A and B.
 | Service container name | `agbox-svc-{sanitize(sandbox_id)}-{sanitize(service_name)}` |
 | Exec ID → Sandbox ID mapping | Enumerate `exec-config:{sandbox_id}` buckets |
 | `deletedAtRecorded` flag | Presence check in `sandbox-deleted-at` |
-| `lastTerminalRunFinishedAt` | Latest terminal exec event timestamp |
+| `lastTerminalRunFinishedAt` | Latest terminal exec event timestamp; falls back to `createdAt` when no exec history exists |
 | `nextSequence` | `MaxSequence()` over `events:{sandbox_id}` |
 | `context.CancelFunc` per exec | New cancel context for running execs |
 | `optionalServiceStarts` channels | Re-inspect optional service containers |

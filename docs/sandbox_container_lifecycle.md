@@ -27,7 +27,7 @@ stateDiagram-v2
     Ready --> Stopped : StopSandbox or idle_ttl
     Stopped --> Ready : ResumeSandbox succeeds
     Ready --> Deleting : DeleteSandbox accepted
-    Stopped --> Deleting : DeleteSandbox accepted
+    Stopped --> Deleting : DeleteSandbox accepted or cleanup_ttl exceeded
     Failed --> Deleting : DeleteSandbox accepted
     Pending --> Deleting : DeleteSandbox accepted
     Deleting --> Deleted : resource removal succeeds
@@ -53,7 +53,7 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`. T
 | Delete begins | `SANDBOX_DELETE_REQUESTED` |
 | Delete completes | `SANDBOX_DELETED` |
 
-Idle-stop emits `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` then `SANDBOX_STOPPED`.
+Idle-stop is detected by the `cleanupLoop` periodic scan, which checks all READY sandboxes against `runtime.idle_ttl`. If no exec history exists for a sandbox, the sandbox creation time is used as the idle reference. Idle-stop emits `SANDBOX_STOP_REQUESTED(reason=idle_ttl)` then `SANDBOX_STOPPED`.
 
 Exec lifecycle events: `EXEC_STARTED` on successful `CreateExec`; terminal states `EXEC_FINISHED`, `EXEC_FAILED`, or `EXEC_CANCELLED`. `GetExec().exec.last_event_sequence` lets clients join the exec snapshot to the sandbox event stream without a race. Internal audit action reasons remain daemon-owned and must not appear in the public RPC or event schema.
 
@@ -68,7 +68,7 @@ For one `sandbox_id`:
 - non-zero anchors must be daemon-issued event sequences from the same sandbox stream
 - stale anchors beyond the retained stream fail with `OUT_OF_RANGE` and reason `SANDBOX_EVENT_SEQUENCE_EXPIRED`
 
-On restart, the daemon loads all persisted state, reconciles with Docker container inspect results, and rebuilds operational sandbox records (see [Daemon State Management](daemon_state_management.md) for the full recovery contract). Deleted sandbox event streams remain queryable until `runtime.event_retention_ttl` expires, after which cleanup removes the retained history.
+On restart, the daemon loads all persisted state, reconciles with Docker container inspect results, and rebuilds operational sandbox records (see [Daemon State Management](daemon_state_management.md) for the full recovery contract). STOPPED sandboxes that have exceeded `runtime.cleanup_ttl` are automatically deleted: Docker resources (containers, network) are removed and the sandbox record is purged from the database. Deleted sandbox event streams remain queryable until `runtime.cleanup_ttl` expires, after which cleanup removes the retained history.
 
 ## Create Path
 
@@ -117,7 +117,8 @@ flowchart LR
 
 - Delete is asynchronous and immediately acknowledged. Stop and delete continue on daemon-owned background contexts.
 - Cleanup uses structured Docker Engine API calls with idempotent not-found handling.
-- After `SANDBOX_DELETED`, the daemon retains the event stream for `runtime.event_retention_ttl` before removing retained history.
+- STOPPED sandboxes that have exceeded `runtime.cleanup_ttl` are automatically deleted by the `cleanupLoop`: Docker resources are removed and the sandbox record is purged from the database.
+- After `SANDBOX_DELETED`, the daemon retains the event stream for `runtime.cleanup_ttl` before removing retained history.
 
 ## Reconciliation
 
