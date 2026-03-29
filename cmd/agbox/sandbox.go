@@ -9,6 +9,7 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type sandboxClient interface {
@@ -100,11 +101,15 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, args []string, 
 		return err
 	}
 
+	createSpec := &agboxv1.CreateSpec{
+		Image:  parsed.image,
+		Labels: parsed.labels,
+	}
+	if parsed.idleTTL != nil {
+		createSpec.IdleTtl = durationpb.New(*parsed.idleTTL)
+	}
 	response, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
-		CreateSpec: &agboxv1.CreateSpec{
-			Image:  parsed.image,
-			Labels: parsed.labels,
-		},
+		CreateSpec: createSpec,
 	})
 	if err != nil {
 		return runtimeErrorf("create sandbox: %v", err)

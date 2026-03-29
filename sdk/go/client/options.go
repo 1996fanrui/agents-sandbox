@@ -68,11 +68,12 @@ type createSandboxOptions struct {
 	sandboxID        *string
 	mounts           []MountSpec
 	copies           []CopySpec
-	builtinTools []string
+	builtinTools     []string
 	requiredServices []ServiceSpec
 	optionalServices []ServiceSpec
 	labels           map[string]string
 	envs             map[string]string
+	idleTTL          *time.Duration
 	wait             bool
 }
 
@@ -328,6 +329,23 @@ func WithLabels(labels map[string]string) labelsOption {
 
 func (o labelsOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	opts.labels = cloneStringMap(map[string]string(o))
+	return nil
+}
+
+type idleTTLOption time.Duration
+
+// WithIdleTTL sets a per-sandbox idle TTL override.
+// Zero disables idle stop for this sandbox. Negative values are rejected.
+func WithIdleTTL(d time.Duration) idleTTLOption {
+	return idleTTLOption(d)
+}
+
+func (o idleTTLOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	d := time.Duration(o)
+	if d < 0 {
+		return fmt.Errorf("idle_ttl must not be negative")
+	}
+	opts.idleTTL = &d
 	return nil
 }
 

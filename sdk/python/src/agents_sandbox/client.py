@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
 import os
 import platform
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -133,6 +134,7 @@ class AgentsSandboxClient:
         optional_services: tuple[ServiceSpec, ...] = (),
         labels: Mapping[str, str] | None = None,
         envs: Mapping[str, str] | None = None,
+        idle_ttl: datetime.timedelta | None = None,
         wait: bool = True,
     ) -> SandboxHandle:
         """Create a sandbox and optionally wait until it becomes ready.
@@ -158,6 +160,7 @@ class AgentsSandboxClient:
                 optional_services=optional_services,
                 labels={} if labels is None else dict(labels),
                 envs={} if envs is None else dict(envs),
+                idle_ttl=idle_ttl,
             ),
             config_yaml=resolved_config_yaml,
         )

@@ -81,18 +81,21 @@ def to_proto_service(spec: ServiceSpec) -> service_pb2.ServiceSpec:
 
 
 def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb2.CreateSandboxRequest:
+    create_spec = service_pb2.CreateSpec(
+        image="" if request.create_spec.image is None else request.create_spec.image,
+        mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
+        copies=[to_proto_copy(item) for item in request.create_spec.copies],
+        builtin_tools=list(request.create_spec.builtin_tools),
+        required_services=[to_proto_service(item) for item in request.create_spec.required_services],
+        optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
+        labels=dict(request.create_spec.labels),
+        envs=dict(request.create_spec.envs),
+    )
+    if request.create_spec.idle_ttl is not None:
+        create_spec.idle_ttl.CopyFrom(_timedelta_to_duration(request.create_spec.idle_ttl))
     return service_pb2.CreateSandboxRequest(
         sandbox_id="" if request.sandbox_id is None else request.sandbox_id,
-        create_spec=service_pb2.CreateSpec(
-            image="" if request.create_spec.image is None else request.create_spec.image,
-            mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
-            copies=[to_proto_copy(item) for item in request.create_spec.copies],
-            builtin_tools=list(request.create_spec.builtin_tools),
-            required_services=[to_proto_service(item) for item in request.create_spec.required_services],
-            optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
-            labels=dict(request.create_spec.labels),
-            envs=dict(request.create_spec.envs),
-        ),
+        create_spec=create_spec,
         config_yaml=request.config_yaml,
     )
 
