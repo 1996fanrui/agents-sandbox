@@ -1,0 +1,2 @@
+image: ghcr.io/agents-sandbox/coding-runtime:latest
+builtin_tools: ["codex"]

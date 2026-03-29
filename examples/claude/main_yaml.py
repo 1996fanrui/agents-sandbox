@@ -1,26 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from agents_sandbox import AgentsSandboxClient
 
-IMAGE = "ghcr.io/agents-sandbox/coding-runtime:latest"
-PROMPT = "Compute 1+1 and return a JSON object with keys result and reasoning."
+PROMPT = "Compute 1+1 and return only a JSON object with keys result and reasoning. No other text."
+YAML_PATH = Path(__file__).parent / "sandbox.yaml"
 
 
 async def main() -> None:
     async with AgentsSandboxClient() as client:
         sandbox = await client.create_sandbox(
-            image=IMAGE,
-            builtin_tools=("codex",),
+            config_yaml=YAML_PATH.read_text(),
         )
         try:
-            await client.run(sandbox.sandbox_id, ("npm", "install", "-g", "@openai/codex@latest"))
             result = await client.run(
                 sandbox.sandbox_id,
-                ("codex", "exec", "--skip-git-repo-check", PROMPT),
+                ("claude", "-p", "--output-format", "text", PROMPT),
             )
-            print(result.stdout.strip())
+            if result.stdout_log_path:
+                print(Path(result.stdout_log_path).read_text().strip())
         finally:
             await client.delete_sandbox(sandbox.sandbox_id)
 
