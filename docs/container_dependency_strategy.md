@@ -88,7 +88,7 @@ Services are declared explicitly through `ServiceSpec` and split into `required_
 |-------|-----------|
 | `name` | Stable service name inside the sandbox; also used as the `network_alias` on the sandbox network |
 | `image` | Container image, defined explicitly by the caller or profile |
-| `environment` | Environment variables passed to the service container |
+| `envs` | Environment variables passed to the service container |
 | `healthcheck` | Readiness condition used by the daemon to determine service health |
 | `post_start_on_primary` | Hook commands to run inside the primary container after this service becomes healthy |
 

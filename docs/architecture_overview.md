@@ -103,6 +103,10 @@ The daemon exposes a per-sandbox ordered event stream with:
 - monotonic `sequence` numbers per sandbox
 - optional current-state snapshots for active exec visibility
 
+Each `SandboxEvent` carries a `oneof details` field that is one of `SandboxPhaseDetails` (sandbox lifecycle transitions, errors, and stop reasons), `ExecEventDetails` (exec state and exit code), or `ServiceEventDetails` (service ready or failed). The top-level `sandbox_state` field reflects the sandbox state at the time the event was emitted, regardless of which details variant is set.
+
+`CreateSandbox` returns `CreateSandboxResponse` containing a full `SandboxHandle` with the reserved `sandbox_id`, initial state, and the daemon-issued `last_event_sequence` cursor that seeds incremental event subscription without a snapshot/subscription race.
+
 This supports long-running orchestration, reconnect after temporary client loss, and SDK-side waiting without pretending accepted operations are already complete.
 
 ### SDK layering and integration choices

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -74,7 +75,7 @@ func TestSandboxExecExitCode(t *testing.T) {
 		if request.GetIncludeCurrentSnapshot() {
 			t.Fatal("include_current_snapshot should be false")
 		}
-		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 12, SandboxId: "sandbox-123", ExecId: "exec-1"})
+		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 12, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
 	_, _, exitCode := runCLIWithSandboxServer(
@@ -84,8 +85,8 @@ func TestSandboxExecExitCode(t *testing.T) {
 		"exec",
 		"sandbox-123",
 		"--cwd", "/workspace",
-		"--env", "PATH=/usr/bin",
-		"--env", "TEAM=platform",
+		"--env-overrides", "PATH=/usr/bin",
+		"--env-overrides", "TEAM=platform",
 		"--",
 		"python",
 		"-c",
@@ -125,7 +126,7 @@ func TestSandboxExecPropagatesFailedExitCode(t *testing.T) {
 		if request.GetFromSequence() != 3 {
 			t.Fatalf("unexpected from_sequence: %d", request.GetFromSequence())
 		}
-		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 4, SandboxId: "sandbox-123", ExecId: "exec-1"})
+		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 4, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
 	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
@@ -157,7 +158,7 @@ func TestSandboxExecReturns125ForFailedZeroExitCode(t *testing.T) {
 		if request.GetFromSequence() != 5 {
 			t.Fatalf("unexpected from_sequence: %d", request.GetFromSequence())
 		}
-		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 6, SandboxId: "sandbox-123", ExecId: "exec-1"})
+		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 6, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
 	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
@@ -189,7 +190,7 @@ func TestSandboxExecReturns125ForCancelledWithoutLocalSignal(t *testing.T) {
 		if request.GetFromSequence() != 8 {
 			t.Fatalf("unexpected from_sequence: %d", request.GetFromSequence())
 		}
-		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 9, SandboxId: "sandbox-123", ExecId: "exec-1"})
+		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 9, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
 	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
@@ -239,11 +240,21 @@ func TestSandboxExecRejectsEmptyCommandAfterSeparator(t *testing.T) {
 }
 
 func TestSandboxExecRejectsBadEnvAssignment(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--env", "BAD", "--", "python")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--env-overrides", "BAD", "--", "python")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if !strings.Contains(stderr, "--env") || !strings.Contains(stderr, "=") {
+	if !strings.Contains(stderr, "--env-overrides") || !strings.Contains(stderr, "=") {
+		t.Fatalf("unexpected stderr %q", stderr)
+	}
+}
+
+func TestSandboxExecRejectsDeprecatedEnvFlag(t *testing.T) {
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--env", "KEY=value", "--", "python")
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stderr, "--env") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
@@ -289,7 +300,7 @@ func TestSandboxExecLocalInterruptReturns130(t *testing.T) {
 			}
 			close(subscribeReady)
 			<-releaseEvents
-			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 22, SandboxId: "sandbox-123", ExecId: "exec-1"})
+			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 22, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 		}
 	})
 	if exitCode != 130 {
@@ -325,7 +336,7 @@ func TestSandboxExecLocalTerminateReturns143(t *testing.T) {
 			}
 			close(subscribeReady)
 			<-releaseEvents
-			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 32, SandboxId: "sandbox-123", ExecId: "exec-1"})
+			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 32, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 		}
 	})
 	if exitCode != 143 {
@@ -361,7 +372,7 @@ func TestSandboxExecAlreadyTerminalFallsBackToNormalExit(t *testing.T) {
 			}
 			close(subscribeReady)
 			<-releaseEvents
-			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 42, SandboxId: "sandbox-123", ExecId: "exec-1"})
+			return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 42, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 		}
 	})
 	if exitCode != 0 {
@@ -443,10 +454,15 @@ func startExecTestClient(t *testing.T, service *fakeSandboxService) *rawclient.R
 	return client
 }
 
-func execEnvPairs(values []*agboxv1.KeyValue) string {
-	pairs := make([]string, 0, len(values))
-	for _, value := range values {
-		pairs = append(pairs, value.GetKey()+"="+value.GetValue())
+func execEnvPairs(values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, key+"="+values[key])
 	}
 	return strings.Join(pairs, ",")
 }

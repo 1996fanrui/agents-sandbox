@@ -35,20 +35,12 @@ func runSandboxExecWithSignals(
 	}
 
 	request := &agboxv1.CreateExecRequest{
-		SandboxId: parsed.sandboxID,
-		Command:   parsed.command,
+		SandboxId:    parsed.sandboxID,
+		Command:      parsed.command,
+		EnvOverrides: parsed.envOverrides,
 	}
 	if parsed.cwd != "" {
 		request.Cwd = parsed.cwd
-	}
-	if len(parsed.envOverrides) > 0 {
-		request.EnvOverrides = make([]*agboxv1.KeyValue, 0, len(parsed.envOverrides))
-		for _, env := range parsed.envOverrides {
-			request.EnvOverrides = append(request.EnvOverrides, &agboxv1.KeyValue{
-				Key:   env.key,
-				Value: env.value,
-			})
-		}
 	}
 
 	createResponse, err := client.CreateExec(ctx, request)

@@ -15,6 +15,62 @@ from agents_sandbox import (
 client = AgentsSandboxClient()
 ```
 
+Use `async with` or call `aclose()` explicitly to release resources:
+
+```python
+async with AgentsSandboxClient() as client:
+    ...
+
+# Or manually:
+client = AgentsSandboxClient()
+try:
+    ...
+finally:
+    await client.aclose()
+```
+
+## Key Types
+
+`SandboxHandle` includes `created_at` and `image`:
+
+```python
+@dataclass
+class SandboxHandle:
+    sandbox_id: str
+    state: SandboxState
+    last_event_sequence: int
+    required_services: tuple[ServiceSpec, ...]
+    optional_services: tuple[ServiceSpec, ...]
+    labels: Mapping[str, str]
+    created_at: datetime | None   # None if not set by daemon
+    image: str
+```
+
+`ServiceSpec` uses `envs` (not `environment`):
+
+```python
+@dataclass
+class ServiceSpec:
+    name: str
+    image: str
+    envs: Mapping[str, str]
+    healthcheck: HealthcheckConfig | None
+    post_start_on_primary: tuple[str, ...]
+```
+
+`HealthcheckConfig` uses `timedelta` for duration fields:
+
+```python
+@dataclass
+class HealthcheckConfig:
+    test: tuple[str, ...]
+    interval: timedelta | None
+    timeout: timedelta | None
+    retries: int | None
+    start_period: timedelta | None
+    start_interval: timedelta | None
+```
+
 ## Query APIs
 
 Query methods always return the latest authoritative snapshot and do not accept `wait`:
@@ -24,6 +80,16 @@ Query methods always return the latest authoritative snapshot and do not accept 
 - `list_sandboxes`
 - `get_exec`
 - `list_active_execs`
+
+`list_active_execs` accepts an optional keyword-only `sandbox_id` argument to filter results:
+
+```python
+# All active execs
+execs = await client.list_active_execs()
+
+# Active execs for one sandbox
+execs = await client.list_active_execs(sandbox_id="sandbox-abc")
+```
 
 ## Slow Operations
 
@@ -127,7 +193,15 @@ async for event in client.subscribe_sandbox_events(
     sandbox_id,
     from_sequence=0,
 ):
-    print(event.event_type.name, event.service_name, event.sequence)
+    # event.event_type is a SandboxEventType enum value
+    # detail sub-structs hold event-specific data
+    print(event.event_type.name, event.sequence)
+    if event.sandbox_phase is not None:
+        print("phase:", event.sandbox_phase.phase)
+    if event.exec is not None:
+        print("exec:", event.exec.exec_id, event.exec.exec_state)
+    if event.service is not None:
+        print("service:", event.service.service_name, event.service.error_code)
 ```
 
 Important rules:
@@ -135,7 +209,34 @@ Important rules:
 - `from_sequence=0` replays the full ordered event history for one sandbox
 - other sequence anchors must be daemon-issued event sequences from the same sandbox stream
 - callers must treat event sequences as the ordering source of truth
-- service lifecycle events use `SANDBOX_SERVICE_READY` and `SANDBOX_SERVICE_FAILED`
+- event detail is carried in typed sub-structs: `sandbox_phase`, `exec`, `service`
+
+## Error Handling
+
+Typed errors are importable directly from `agents_sandbox`:
+
+```python
+from agents_sandbox import (
+    SandboxClientError,
+    SandboxNotFoundError,
+    SandboxNotReadyError,
+    SandboxConflictError,
+    ExecNotFoundError,
+    ExecNotRunningError,
+    ExecAlreadyTerminalError,
+    SandboxSequenceExpiredError,
+)
+```
+
+Common patterns:
+
+- `SandboxNotFoundError` — sandbox does not exist; carries `.sandbox_id`
+- `SandboxConflictError` — caller-provided ID already exists; carries `.sandbox_id`
+- `ExecNotRunningError` — `cancel_exec` called on an exec that is no longer running; carries `.exec_id`
+- `SandboxSequenceExpiredError` — `subscribe_sandbox_events` from a sequence that has been garbage-collected; carries `.from_sequence` and `.oldest_sequence`
+- `SandboxClientError` — base class for all of the above; catch for generic SDK errors
+
+Errors are translated from gRPC structured error metadata (`domain`, `reason`, `metadata`) into typed Python exceptions. The translation is performed by the Python SDK's gRPC error handler.
 
 ## Recommended Usage
 

@@ -41,15 +41,10 @@ type sandboxDeleteArgs struct {
 	json      bool
 }
 
-type keyValuePair struct {
-	key   string
-	value string
-}
-
 type sandboxExecArgs struct {
 	sandboxID    string
 	cwd          string
-	envOverrides []keyValuePair
+	envOverrides map[string]string
 	command      []string
 }
 
@@ -183,6 +178,7 @@ func parseSandboxDeleteArgs(args []string) (sandboxDeleteArgs, error) {
 
 func parseSandboxExecArgs(args []string) (sandboxExecArgs, error) {
 	var parsed sandboxExecArgs
+	parsed.envOverrides = make(map[string]string)
 
 	if len(args) == 0 {
 		return sandboxExecArgs{}, usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
@@ -206,15 +202,15 @@ func parseSandboxExecArgs(args []string) (sandboxExecArgs, error) {
 			}
 			parsed.cwd = args[index+1]
 			index += 2
-		case "--env":
+		case "--env-overrides":
 			if index+1 >= len(args) {
-				return sandboxExecArgs{}, usageErrorf("--env must be in key=value form")
+				return sandboxExecArgs{}, usageErrorf("--env-overrides must be in key=value form")
 			}
-			key, value, err := parseKeyValueAssignment(args[index+1], "--env")
+			key, value, err := parseKeyValueAssignment(args[index+1], "--env-overrides")
 			if err != nil {
 				return sandboxExecArgs{}, err
 			}
-			parsed.envOverrides = append(parsed.envOverrides, keyValuePair{key: key, value: value})
+			parsed.envOverrides[key] = value
 			index += 2
 		case "--json":
 			return sandboxExecArgs{}, usageErrorf("sandbox exec does not support --json")
