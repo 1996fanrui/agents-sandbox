@@ -4,6 +4,7 @@ package agbox.v1;
 
 option go_package = "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1;agboxv1";
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 service SandboxService {
@@ -65,11 +66,6 @@ message PingResponse {
   string daemon = 2;
 }
 
-message KeyValue {
-  string key = 1;
-  string value = 2;
-}
-
 message MountSpec {
   string source = 1;
   string target = 2;
@@ -84,17 +80,17 @@ message CopySpec {
 
 message HealthcheckConfig {
   repeated string test = 1;
-  string interval = 2;
-  string timeout = 3;
+  google.protobuf.Duration interval = 2;
+  google.protobuf.Duration timeout = 3;
   uint32 retries = 4;
-  string start_period = 5;
-  string start_interval = 6;
+  google.protobuf.Duration start_period = 5;
+  google.protobuf.Duration start_interval = 6;
 }
 
 message ServiceSpec {
   string name = 1;
   string image = 2;
-  repeated KeyValue environment = 3;
+  map<string, string> envs = 3;
   HealthcheckConfig healthcheck = 4;
   repeated string post_start_on_primary = 5;
 }
@@ -107,7 +103,7 @@ message CreateSpec {
   repeated ServiceSpec required_services = 5;
   repeated ServiceSpec optional_services = 6;
   map<string, string> labels = 7;
-  repeated KeyValue envs = 8;
+  map<string, string> envs = 8;
 }
 
 message SandboxHandle {
@@ -117,6 +113,29 @@ message SandboxHandle {
   repeated ServiceSpec required_services = 4;
   repeated ServiceSpec optional_services = 5;
   map<string, string> labels = 6;
+  google.protobuf.Timestamp created_at = 7;
+  string image = 8;
+}
+
+message SandboxPhaseDetails {
+  string phase = 1;
+  string error_code = 2;
+  string error_message = 3;
+  string reason = 4;
+}
+
+message ExecEventDetails {
+  string exec_id = 1;
+  int32 exit_code = 2;
+  ExecState exec_state = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+
+message ServiceEventDetails {
+  string service_name = 1;
+  string error_code = 2;
+  string error_message = 3;
 }
 
 message SandboxEvent {
@@ -127,15 +146,12 @@ message SandboxEvent {
   google.protobuf.Timestamp occurred_at = 5;
   bool replay = 6;
   bool snapshot = 7;
-  string phase = 8;
-  string error_code = 9;
-  string error_message = 10;
-  string reason = 11;
-  string exec_id = 12;
-  int32 exit_code = 13;
-  SandboxState sandbox_state = 14;
-  ExecState exec_state = 15;
-  string service_name = 16;
+  SandboxState sandbox_state = 8;
+  oneof details {
+    SandboxPhaseDetails sandbox_phase = 9;
+    ExecEventDetails exec = 10;
+    ServiceEventDetails service = 11;
+  }
 }
 
 message ExecStatus {
@@ -144,7 +160,7 @@ message ExecStatus {
   ExecState state = 3;
   repeated string command = 4;
   string cwd = 5;
-  repeated KeyValue env_overrides = 6;
+  map<string, string> env_overrides = 6;
   int32 exit_code = 7;
   string error = 8;
   uint64 last_event_sequence = 9;
@@ -157,8 +173,7 @@ message CreateSandboxRequest {
 }
 
 message CreateSandboxResponse {
-  string sandbox_id = 1;
-  SandboxState initial_state = 2;
+  SandboxHandle sandbox = 1;
 }
 
 message GetSandboxRequest {
@@ -213,7 +228,7 @@ message CreateExecRequest {
   string sandbox_id = 1;
   repeated string command = 2;
   string cwd = 3;
-  repeated KeyValue env_overrides = 4;
+  map<string, string> env_overrides = 4;
   string exec_id = 5;
 }
 
@@ -236,7 +251,7 @@ message GetExecResponse {
 }
 
 message ListActiveExecsRequest {
-  string sandbox_id = 1;
+  optional string sandbox_id = 1;
 }
 
 message ListActiveExecsResponse {

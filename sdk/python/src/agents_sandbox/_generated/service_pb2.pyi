@@ -1,5 +1,6 @@
 import datetime
 
+from google.protobuf import duration_pb2 as _duration_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
@@ -85,14 +86,6 @@ class PingResponse(_message.Message):
     daemon: str
     def __init__(self, version: _Optional[str] = ..., daemon: _Optional[str] = ...) -> None: ...
 
-class KeyValue(_message.Message):
-    __slots__ = ("key", "value")
-    KEY_FIELD_NUMBER: _ClassVar[int]
-    VALUE_FIELD_NUMBER: _ClassVar[int]
-    key: str
-    value: str
-    def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
-
 class MountSpec(_message.Message):
     __slots__ = ("source", "target", "writable")
     SOURCE_FIELD_NUMBER: _ClassVar[int]
@@ -122,30 +115,44 @@ class HealthcheckConfig(_message.Message):
     START_PERIOD_FIELD_NUMBER: _ClassVar[int]
     START_INTERVAL_FIELD_NUMBER: _ClassVar[int]
     test: _containers.RepeatedScalarFieldContainer[str]
-    interval: str
-    timeout: str
+    interval: _duration_pb2.Duration
+    timeout: _duration_pb2.Duration
     retries: int
-    start_period: str
-    start_interval: str
-    def __init__(self, test: _Optional[_Iterable[str]] = ..., interval: _Optional[str] = ..., timeout: _Optional[str] = ..., retries: _Optional[int] = ..., start_period: _Optional[str] = ..., start_interval: _Optional[str] = ...) -> None: ...
+    start_period: _duration_pb2.Duration
+    start_interval: _duration_pb2.Duration
+    def __init__(self, test: _Optional[_Iterable[str]] = ..., interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., timeout: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., retries: _Optional[int] = ..., start_period: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., start_interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class ServiceSpec(_message.Message):
-    __slots__ = ("name", "image", "environment", "healthcheck", "post_start_on_primary")
+    __slots__ = ("name", "image", "envs", "healthcheck", "post_start_on_primary")
+    class EnvsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     NAME_FIELD_NUMBER: _ClassVar[int]
     IMAGE_FIELD_NUMBER: _ClassVar[int]
-    ENVIRONMENT_FIELD_NUMBER: _ClassVar[int]
+    ENVS_FIELD_NUMBER: _ClassVar[int]
     HEALTHCHECK_FIELD_NUMBER: _ClassVar[int]
     POST_START_ON_PRIMARY_FIELD_NUMBER: _ClassVar[int]
     name: str
     image: str
-    environment: _containers.RepeatedCompositeFieldContainer[KeyValue]
+    envs: _containers.ScalarMap[str, str]
     healthcheck: HealthcheckConfig
     post_start_on_primary: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., environment: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
     __slots__ = ("image", "mounts", "copies", "builtin_tools", "required_services", "optional_services", "labels", "envs")
     class LabelsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class EnvsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -167,11 +174,11 @@ class CreateSpec(_message.Message):
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     labels: _containers.ScalarMap[str, str]
-    envs: _containers.RepeatedCompositeFieldContainer[KeyValue]
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ...) -> None: ...
+    envs: _containers.ScalarMap[str, str]
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
-    __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels")
+    __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels", "created_at", "image")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -185,16 +192,56 @@ class SandboxHandle(_message.Message):
     REQUIRED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     state: SandboxState
     last_event_sequence: int
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     labels: _containers.ScalarMap[str, str]
-    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_sequence: _Optional[int] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    created_at: _timestamp_pb2.Timestamp
+    image: str
+    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_sequence: _Optional[int] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., image: _Optional[str] = ...) -> None: ...
+
+class SandboxPhaseDetails(_message.Message):
+    __slots__ = ("phase", "error_code", "error_message", "reason")
+    PHASE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    phase: str
+    error_code: str
+    error_message: str
+    reason: str
+    def __init__(self, phase: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class ExecEventDetails(_message.Message):
+    __slots__ = ("exec_id", "exit_code", "exec_state", "error_code", "error_message")
+    EXEC_ID_FIELD_NUMBER: _ClassVar[int]
+    EXIT_CODE_FIELD_NUMBER: _ClassVar[int]
+    EXEC_STATE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    exec_id: str
+    exit_code: int
+    exec_state: ExecState
+    error_code: str
+    error_message: str
+    def __init__(self, exec_id: _Optional[str] = ..., exit_code: _Optional[int] = ..., exec_state: _Optional[_Union[ExecState, str]] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ...) -> None: ...
+
+class ServiceEventDetails(_message.Message):
+    __slots__ = ("service_name", "error_code", "error_message")
+    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    service_name: str
+    error_code: str
+    error_message: str
+    def __init__(self, service_name: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ...) -> None: ...
 
 class SandboxEvent(_message.Message):
-    __slots__ = ("event_id", "sequence", "sandbox_id", "event_type", "occurred_at", "replay", "snapshot", "phase", "error_code", "error_message", "reason", "exec_id", "exit_code", "sandbox_state", "exec_state", "service_name")
+    __slots__ = ("event_id", "sequence", "sandbox_id", "event_type", "occurred_at", "replay", "snapshot", "sandbox_state", "sandbox_phase", "exec", "service")
     EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
@@ -202,15 +249,10 @@ class SandboxEvent(_message.Message):
     OCCURRED_AT_FIELD_NUMBER: _ClassVar[int]
     REPLAY_FIELD_NUMBER: _ClassVar[int]
     SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
-    PHASE_FIELD_NUMBER: _ClassVar[int]
-    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
-    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    REASON_FIELD_NUMBER: _ClassVar[int]
-    EXEC_ID_FIELD_NUMBER: _ClassVar[int]
-    EXIT_CODE_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_STATE_FIELD_NUMBER: _ClassVar[int]
-    EXEC_STATE_FIELD_NUMBER: _ClassVar[int]
-    SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_PHASE_FIELD_NUMBER: _ClassVar[int]
+    EXEC_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
     event_id: str
     sequence: int
     sandbox_id: str
@@ -218,19 +260,21 @@ class SandboxEvent(_message.Message):
     occurred_at: _timestamp_pb2.Timestamp
     replay: bool
     snapshot: bool
-    phase: str
-    error_code: str
-    error_message: str
-    reason: str
-    exec_id: str
-    exit_code: int
     sandbox_state: SandboxState
-    exec_state: ExecState
-    service_name: str
-    def __init__(self, event_id: _Optional[str] = ..., sequence: _Optional[int] = ..., sandbox_id: _Optional[str] = ..., event_type: _Optional[_Union[EventType, str]] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., replay: bool = ..., snapshot: bool = ..., phase: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., reason: _Optional[str] = ..., exec_id: _Optional[str] = ..., exit_code: _Optional[int] = ..., sandbox_state: _Optional[_Union[SandboxState, str]] = ..., exec_state: _Optional[_Union[ExecState, str]] = ..., service_name: _Optional[str] = ...) -> None: ...
+    sandbox_phase: SandboxPhaseDetails
+    exec: ExecEventDetails
+    service: ServiceEventDetails
+    def __init__(self, event_id: _Optional[str] = ..., sequence: _Optional[int] = ..., sandbox_id: _Optional[str] = ..., event_type: _Optional[_Union[EventType, str]] = ..., occurred_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., replay: bool = ..., snapshot: bool = ..., sandbox_state: _Optional[_Union[SandboxState, str]] = ..., sandbox_phase: _Optional[_Union[SandboxPhaseDetails, _Mapping]] = ..., exec: _Optional[_Union[ExecEventDetails, _Mapping]] = ..., service: _Optional[_Union[ServiceEventDetails, _Mapping]] = ...) -> None: ...
 
 class ExecStatus(_message.Message):
     __slots__ = ("exec_id", "sandbox_id", "state", "command", "cwd", "env_overrides", "exit_code", "error", "last_event_sequence")
+    class EnvOverridesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     EXEC_ID_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     STATE_FIELD_NUMBER: _ClassVar[int]
@@ -245,11 +289,11 @@ class ExecStatus(_message.Message):
     state: ExecState
     command: _containers.RepeatedScalarFieldContainer[str]
     cwd: str
-    env_overrides: _containers.RepeatedCompositeFieldContainer[KeyValue]
+    env_overrides: _containers.ScalarMap[str, str]
     exit_code: int
     error: str
     last_event_sequence: int
-    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
+    def __init__(self, exec_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., state: _Optional[_Union[ExecState, str]] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Mapping[str, str]] = ..., exit_code: _Optional[int] = ..., error: _Optional[str] = ..., last_event_sequence: _Optional[int] = ...) -> None: ...
 
 class CreateSandboxRequest(_message.Message):
     __slots__ = ("create_spec", "sandbox_id", "config_yaml")
@@ -262,12 +306,10 @@ class CreateSandboxRequest(_message.Message):
     def __init__(self, create_spec: _Optional[_Union[CreateSpec, _Mapping]] = ..., sandbox_id: _Optional[str] = ..., config_yaml: _Optional[bytes] = ...) -> None: ...
 
 class CreateSandboxResponse(_message.Message):
-    __slots__ = ("sandbox_id", "initial_state")
-    SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
-    INITIAL_STATE_FIELD_NUMBER: _ClassVar[int]
-    sandbox_id: str
-    initial_state: SandboxState
-    def __init__(self, sandbox_id: _Optional[str] = ..., initial_state: _Optional[_Union[SandboxState, str]] = ...) -> None: ...
+    __slots__ = ("sandbox",)
+    SANDBOX_FIELD_NUMBER: _ClassVar[int]
+    sandbox: SandboxHandle
+    def __init__(self, sandbox: _Optional[_Union[SandboxHandle, _Mapping]] = ...) -> None: ...
 
 class GetSandboxRequest(_message.Message):
     __slots__ = ("sandbox_id",)
@@ -359,6 +401,13 @@ class SubscribeSandboxEventsRequest(_message.Message):
 
 class CreateExecRequest(_message.Message):
     __slots__ = ("sandbox_id", "command", "cwd", "env_overrides", "exec_id")
+    class EnvOverridesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
     CWD_FIELD_NUMBER: _ClassVar[int]
@@ -367,9 +416,9 @@ class CreateExecRequest(_message.Message):
     sandbox_id: str
     command: _containers.RepeatedScalarFieldContainer[str]
     cwd: str
-    env_overrides: _containers.RepeatedCompositeFieldContainer[KeyValue]
+    env_overrides: _containers.ScalarMap[str, str]
     exec_id: str
-    def __init__(self, sandbox_id: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., exec_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, sandbox_id: _Optional[str] = ..., command: _Optional[_Iterable[str]] = ..., cwd: _Optional[str] = ..., env_overrides: _Optional[_Mapping[str, str]] = ..., exec_id: _Optional[str] = ...) -> None: ...
 
 class CreateExecResponse(_message.Message):
     __slots__ = ("exec_id", "stdout_log_path", "stderr_log_path")
