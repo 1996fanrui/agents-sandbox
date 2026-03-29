@@ -15,14 +15,17 @@ import (
 // YAMLConfig is the top-level schema for declarative sandbox configuration
 // supplied via the config_yaml field in CreateSandboxRequest.
 type YAMLConfig struct {
-	Image            string                       `yaml:"image"`
-	Mounts           []YAMLMountSpec              `yaml:"mounts"`
-	Copies           []YAMLCopySpec               `yaml:"copies"`
-	BuiltinTools []string                     `yaml:"builtin_tools"`
-	RequiredServices map[string]YAMLServiceSpec   `yaml:"required_services"`
-	OptionalServices map[string]YAMLServiceSpec   `yaml:"optional_services"`
-	Labels           map[string]string            `yaml:"labels"`
-	Envs             map[string]string            `yaml:"envs"`
+	Image            string                     `yaml:"image"`
+	Mounts           []YAMLMountSpec            `yaml:"mounts"`
+	Copies           []YAMLCopySpec             `yaml:"copies"`
+	BuiltinTools     []string                   `yaml:"builtin_tools"`
+	RequiredServices map[string]YAMLServiceSpec `yaml:"required_services"`
+	OptionalServices map[string]YAMLServiceSpec `yaml:"optional_services"`
+	Labels           map[string]string          `yaml:"labels"`
+	Envs             map[string]string          `yaml:"envs"`
+	// IdleTTL is the per-sandbox idle TTL override. Empty = use global daemon
+	// default; "0" = disable idle stop for this sandbox.
+	IdleTTL string `yaml:"idle_ttl"`
 }
 
 // YAMLMountSpec describes a bind-mount from host to container.
@@ -115,6 +118,14 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 		for k, v := range cfg.Envs {
 			spec.Envs[k] = v
 		}
+	}
+
+	if cfg.IdleTTL != "" {
+		d, err := time.ParseDuration(cfg.IdleTTL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid duration for idle_ttl: %q: %w", cfg.IdleTTL, err)
+		}
+		spec.IdleTtl = durationpb.New(d)
 	}
 
 	return spec, nil
@@ -247,6 +258,11 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		for k, v := range override.GetEnvs() {
 			result.Envs[k] = v
 		}
+	}
+
+	// idle_ttl: non-nil override replaces base (nil = not set, use global).
+	if override.GetIdleTtl() != nil {
+		result.IdleTtl = durationpb.New(override.GetIdleTtl().AsDuration())
 	}
 
 	return result

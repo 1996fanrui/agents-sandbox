@@ -144,7 +144,7 @@ class ServiceSpec(_message.Message):
     def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_tools", "required_services", "optional_services", "labels", "envs")
+    __slots__ = ("image", "mounts", "copies", "builtin_tools", "required_services", "optional_services", "labels", "envs", "idle_ttl")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -167,6 +167,7 @@ class CreateSpec(_message.Message):
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
     ENVS_FIELD_NUMBER: _ClassVar[int]
+    IDLE_TTL_FIELD_NUMBER: _ClassVar[int]
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
@@ -175,7 +176,8 @@ class CreateSpec(_message.Message):
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     labels: _containers.ScalarMap[str, str]
     envs: _containers.ScalarMap[str, str]
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    idle_ttl: _duration_pb2.Duration
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
     __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels", "created_at", "image")

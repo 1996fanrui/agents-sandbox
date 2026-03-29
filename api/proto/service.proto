@@ -104,6 +104,8 @@ message CreateSpec {
   repeated ServiceSpec optional_services = 6;
   map<string, string> labels = 7;
   map<string, string> envs = 8;
+  // Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
+  google.protobuf.Duration idle_ttl = 9;
 }
 
 message SandboxHandle {

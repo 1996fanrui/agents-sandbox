@@ -11,6 +11,7 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func cloneMounts(items []*agboxv1.MountSpec) []*agboxv1.MountSpec {
@@ -41,16 +42,20 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	if spec == nil {
 		return &agboxv1.CreateSpec{}
 	}
-	return &agboxv1.CreateSpec{
+	cloned := &agboxv1.CreateSpec{
 		Image:            spec.GetImage(),
 		Labels:           cloneStringMap(spec.GetLabels()),
 		Mounts:           cloneMounts(spec.GetMounts()),
 		Copies:           cloneCopies(spec.GetCopies()),
-		BuiltinTools: slices.Clone(spec.GetBuiltinTools()),
+		BuiltinTools:     slices.Clone(spec.GetBuiltinTools()),
 		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
 		Envs:             cloneStringMap(spec.GetEnvs()),
 	}
+	if spec.GetIdleTtl() != nil {
+		cloned.IdleTtl = durationpb.New(spec.GetIdleTtl().AsDuration())
+	}
+	return cloned
 }
 
 func cloneStringMap(source map[string]string) map[string]string {

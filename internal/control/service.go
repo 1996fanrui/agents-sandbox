@@ -113,9 +113,6 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	if config.PollInterval <= 0 {
 		config.PollInterval = defaults.PollInterval
 	}
-	if config.IdleTTL <= 0 {
-		config.IdleTTL = defaults.IdleTTL
-	}
 	if config.CleanupTTL <= 0 {
 		config.CleanupTTL = defaults.CleanupTTL
 	}

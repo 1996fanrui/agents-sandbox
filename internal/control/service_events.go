@@ -11,14 +11,22 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// idleScanAndStop scans all READY sandboxes and stops those that have been idle
-// longer than IdleTTL. Idle reference time: lastTerminalRunFinishedAt if any exec
-// has completed, otherwise createdAt (fixing the never-ran-exec leak).
-func (s *Service) idleScanAndStop() {
-	if s.config.IdleTTL <= 0 {
-		return
+// effectiveIdleTTL returns the idle TTL for a sandbox. If the sandbox has a
+// per-sandbox override (IdleTtl != nil), that value is used; otherwise the
+// global daemon IdleTTL is returned.
+func effectiveIdleTTL(record *sandboxRecord, globalTTL time.Duration) time.Duration {
+	if record.createSpec.GetIdleTtl() != nil {
+		return record.createSpec.GetIdleTtl().AsDuration()
 	}
+	return globalTTL
+}
 
+// idleScanAndStop scans all READY sandboxes and stops those that have been idle
+// longer than their effective IdleTTL. Idle reference time: lastTerminalRunFinishedAt
+// if any exec has completed, otherwise createdAt (fixing the never-ran-exec leak).
+// Each sandbox uses its own effective TTL: per-sandbox override if set, else global.
+// A TTL <= 0 for a sandbox means idle detection is disabled for that sandbox.
+func (s *Service) idleScanAndStop() {
 	s.mu.Lock()
 	var idleSandboxIDs []string
 	for sandboxID, record := range s.boxes {
@@ -28,12 +36,16 @@ func (s *Service) idleScanAndStop() {
 		if hasActiveExec(record) {
 			continue
 		}
+		ttl := effectiveIdleTTL(record, s.config.IdleTTL)
+		if ttl <= 0 {
+			continue
+		}
 		// Determine idle reference time.
 		idleRef := record.lastTerminalRunFinishedAt
 		if idleRef.IsZero() {
 			idleRef = record.handle.GetCreatedAt().AsTime()
 		}
-		if time.Since(idleRef) < s.config.IdleTTL {
+		if time.Since(idleRef) < ttl {
 			continue
 		}
 		if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{

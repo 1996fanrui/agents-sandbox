@@ -10,6 +10,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestDefaultServiceConfig(t *testing.T) {
@@ -602,4 +603,139 @@ func TestIdleTTLStopsReadySandboxWithoutExec(t *testing.T) {
 	if eventReason(lastEvent) != "idle_ttl" {
 		t.Fatalf("unexpected stop reason: %#v", lastEvent)
 	}
+}
+
+func TestPerSandboxIdleTTLOverridesGlobal(t *testing.T) {
+	// Global idle TTL is 10s; per-sandbox override is 1ms so the sandbox
+	// should be idle-stopped well before the global threshold.
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		IdleTTL:         10 * time.Second,
+		CleanupInterval: 10 * time.Millisecond,
+	})
+
+	req := createSandboxRequest("per-sandbox-idle-override", "ghcr.io/agents-sandbox/coding-runtime:test")
+	req.CreateSpec.IdleTtl = durationpb.New(1 * time.Millisecond)
+
+	createResp, err := client.CreateSandbox(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		for _, event := range items {
+			if event.GetEventType() == agboxv1.EventType_SANDBOX_STOPPED {
+				return true
+			}
+		}
+		return false
+	})
+	lastEvent := events[len(events)-1]
+	if lastEvent.GetEventType() != agboxv1.EventType_SANDBOX_STOPPED {
+		t.Fatalf("expected SANDBOX_STOPPED via per-sandbox idle_ttl, got: %v", lastEvent.GetEventType())
+	}
+	if eventReason(lastEvent) != "idle_ttl" {
+		t.Fatalf("unexpected idle-stop reason: %v", lastEvent)
+	}
+}
+
+func TestPerSandboxIdleTTLZeroDisablesIdleStop(t *testing.T) {
+	// Global idle TTL is short (20ms); per-sandbox override is 0 (disable).
+	// The sandbox must NOT be stopped by the idle scanner.
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		IdleTTL:         20 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
+	})
+
+	req := createSandboxRequest("per-sandbox-idle-disabled", "ghcr.io/agents-sandbox/coding-runtime:test")
+	req.CreateSpec.IdleTtl = durationpb.New(0)
+
+	createResp, err := client.CreateSandbox(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	// Wait several cleanup cycles to confirm the sandbox is NOT idle-stopped.
+	time.Sleep(200 * time.Millisecond)
+
+	resp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
+	})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("expected sandbox to remain READY when idle_ttl=0, got %v", resp.GetSandbox().GetState())
+	}
+}
+
+func TestPerSandboxIdleTTLWithGlobalDisabled(t *testing.T) {
+	// Global idle TTL is 0 (disabled); per-sandbox override is 1ms.
+	// The sandbox should be stopped by its per-sandbox idle TTL.
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		IdleTTL:         0, // global idle TTL disabled
+		CleanupInterval: 10 * time.Millisecond,
+	})
+
+	req := createSandboxRequest("per-sandbox-idle-global-off", "ghcr.io/agents-sandbox/coding-runtime:test")
+	req.CreateSpec.IdleTtl = durationpb.New(1 * time.Millisecond)
+
+	createResp, err := client.CreateSandbox(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		for _, event := range items {
+			if event.GetEventType() == agboxv1.EventType_SANDBOX_STOPPED {
+				return true
+			}
+		}
+		return false
+	})
+	lastEvent := events[len(events)-1]
+	if lastEvent.GetEventType() != agboxv1.EventType_SANDBOX_STOPPED {
+		t.Fatalf("expected SANDBOX_STOPPED via per-sandbox idle_ttl (global disabled), got: %v", lastEvent.GetEventType())
+	}
+	if eventReason(lastEvent) != "idle_ttl" {
+		t.Fatalf("unexpected idle-stop reason: %v", lastEvent)
+	}
+}
+
+func TestValidateCreateSpecNegativeIdleTTL(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	req := createSandboxRequest("negative-idle-ttl", "ghcr.io/agents-sandbox/coding-runtime:test")
+	req.CreateSpec.IdleTtl = durationpb.New(-1 * time.Second)
+
+	_, err := client.CreateSandbox(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected CreateSandbox to fail with negative idle_ttl")
+	}
+	assertStatusCode(t, err, codes.InvalidArgument)
 }
