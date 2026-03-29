@@ -32,6 +32,7 @@ go.work.sum
 
 # Local-only files
 .local/
+.wrangler/
 requirements/
 CLAUDE.md
 AGENTS.md
