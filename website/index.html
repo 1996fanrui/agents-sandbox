@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agents-sandbox — Full power for your AI agents. Full safety for the host.</title>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400;500;600;700&f[]=clash-display@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="inner">
+    <div class="nav-left">
+      <a class="nav-logo" href="#">
+        <div class="nav-logo-box"></div>
+        agents-sandbox
+      </a>
+      <div class="nav-links">
+        <a href="#how">How It Works</a>
+        <a href="#features">Features</a>
+        <a href="#security">Security</a>
+        <a href="#comparison">vs Codex/Claude</a>
+        <a href="#quickstart">Quick Start</a>
+        <a href="https://docs.agents-sandbox.com" target="_blank">Docs</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <a class="gh-link" href="https://github.com/1996fanrui/agents-sandbox" target="_blank">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+        <span class="icon-sun"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
+        <span class="icon-moon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
+      </button>
+      <a class="btn-primary" href="#quickstart">Get Started</a>
+      <button class="hamburger" id="hamburgerBtn" aria-label="Menu">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- Mobile Menu -->
+<div class="mobile-menu" id="mobileMenu">
+  <a href="#how"        onclick="closeMobileMenu()">How It Works</a>
+  <a href="#features"   onclick="closeMobileMenu()">Features</a>
+  <a href="#security"   onclick="closeMobileMenu()">Security</a>
+  <a href="#quickstart" onclick="closeMobileMenu()">Quick Start</a>
+  <a href="https://docs.agents-sandbox.com" target="_blank" onclick="closeMobileMenu()">Docs</a>
+  <a href="#oss"        onclick="closeMobileMenu()">Open Source</a>
+  <div class="mobile-menu-actions">
+    <button class="theme-toggle" id="mobileThemeToggle" aria-label="Toggle theme">
+      <span class="icon-sun"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
+      <span class="icon-moon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
+    </button>
+    <a class="btn-primary" href="#quickstart">Get Started</a>
+  </div>
+</div>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <h1>Full power.<br>Full safety.<br>No compromise.</h1>
+    <p class="sub">The sandbox runtime that ends the AI agent dilemma &mdash; agents run without restrictions, your host stays completely untouched.</p>
+    <div class="hero-buttons">
+      <a class="btn-primary" href="#quickstart">Get Started</a>
+      <a class="btn-outline" href="https://github.com/1996fanrui/agents-sandbox" target="_blank">GitHub &rarr;</a>
+    </div>
+
+    <!-- Nested: Host wraps Sandbox -->
+    <div class="host-frame" id="hostFrame">
+      <div class="host-danger-overlay" id="hostDangerOverlay"></div>
+      <div class="host-top">
+        <svg class="host-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span class="host-label">YOUR HOST</span>
+        <span class="host-label-status">Mac Mini &middot; localhost</span>
+      </div>
+      <div class="host-body" id="hostBody"></div>
+
+      <!-- Sandbox: locked box inside host -->
+      <div class="sandbox-frame" id="sandboxFrame">
+        <div class="sandbox-top">
+          <svg class="sandbox-lock" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span class="sandbox-label">SANDBOX</span>
+          <div class="sandbox-tags">
+            <span class="sandbox-tag">NO HOST NET</span>
+            <span class="sandbox-tag">NO HOST FS</span>
+            <span class="sandbox-tag">CREDS SAFE</span>
+          </div>
+        </div>
+        <div class="sandbox-body" id="sandboxBody"></div>
+        <div class="safe-overlay" id="safeOverlay">
+          <div class="overlay-icon">&#128737;</div>
+          HOST UNTOUCHED
+          <div class="overlay-msg">agent ran free &middot; host saw nothing</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How It Works -->
+<section id="how">
+  <div class="container">
+    <h2 class="section-title reveal">How It Works</h2>
+    <p class="section-sub reveal">One daemon, many sandboxes, unlimited agents</p>
+    <div class="steps-flow reveal-stagger">
+
+      <div class="step-block">
+        <div class="step-num">1</div>
+        <div class="step-title">Start Daemon</div>
+        <div class="step-desc">One daemon per host. Manages all networks, mounts, and credentials.</div>
+        <div class="step-relation">1 HOST &rarr; 1 DAEMON</div>
+      </div>
+
+      <div class="step-fan">
+        <svg width="52" height="40" viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20 H18"/><path d="M18 20 L34 6"/><path d="M18 20 L34 20"/><path d="M18 20 L34 34"/>
+          <path d="M34 6 H42 M38 2 L44 6 L38 10"/><path d="M34 20 H42 M38 16 L44 20 L38 24"/><path d="M34 34 H42 M38 30 L44 34 L38 38"/>
+        </svg>
+      </div>
+
+      <div class="step-block">
+        <div class="step-num">2</div>
+        <div class="step-title">Create Sandboxes</div>
+        <div class="step-desc">One daemon creates N isolated sandboxes. Each has its own network and filesystem.</div>
+        <div class="step-relation">1 DAEMON &rarr; N SANDBOXES</div>
+      </div>
+
+      <div class="step-fan">
+        <svg width="52" height="40" viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 20 H18"/><path d="M18 20 L34 6"/><path d="M18 20 L34 20"/><path d="M18 20 L34 34"/>
+          <path d="M34 6 H42 M38 2 L44 6 L38 10"/><path d="M34 20 H42 M38 16 L44 20 L38 24"/><path d="M34 34 H42 M38 30 L44 34 L38 38"/>
+        </svg>
+      </div>
+
+      <div class="step-block">
+        <div class="step-num">3</div>
+        <div class="step-title">Run Agents</div>
+        <div class="step-desc">Each sandbox runs M agents. Claude Code, Codex, or any CLI &mdash; all in parallel.</div>
+        <div class="step-relation">1 SANDBOX &rarr; M AGENTS</div>
+      </div>
+
+      <div class="step-fan">
+        <svg width="52" height="40" viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6 H42 M38 2 L44 6 L38 10"/>
+          <path d="M4 20 H42 M38 16 L44 20 L38 24"/>
+          <path d="M4 34 H42 M38 30 L44 34 L38 38"/>
+        </svg>
+      </div>
+
+      <div class="step-block">
+        <div class="step-num">4</div>
+        <div class="step-title">Get Results</div>
+        <div class="step-desc">Agents deliver code, commits, PRs back to host. Sandboxes destroyed &mdash; host untouched.</div>
+        <div class="step-relation">M RESULTS &rarr; HOST &middot; SANDBOX &rarr; &#8709;</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- Features Bento -->
+<section id="features">
+  <div class="container">
+    <h2 class="section-title reveal">Core Features</h2>
+    <p class="section-sub reveal">Everything your agents need. Nothing your host risks.</p>
+    <div class="bento bento-reveal">
+
+      <div class="bento-cell bento-1">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="bento-title">Unrestricted Agents</div>
+        <div class="bento-desc">Agents install anything, run anything, break anything &mdash; inside the sandbox. Zero permission prompts. Zero manual approvals. Full autonomy.</div>
+        <div class="bento-mini-terminal">
+          <div><span class="mt-p">$ </span><span class="mt-cmd">npm install tensorflow-gpu</span></div>
+          <div><span class="mt-ok">&#10003;</span>  847 packages installed</div>
+          <div><span class="mt-p">$ </span><span class="mt-cmd">python train.py --epochs 500</span></div>
+          <div><span class="mt-ok">&#10003;</span>  Running at full speed...</div>
+          <div><span class="mt-p">$ </span><span class="mt-cmd">curl api.openai.com/v1/chat</span></div>
+          <div><span class="mt-ok">&#10003;</span>  Internet open &mdash; host safe</div>
+        </div>
+      </div>
+
+      <div class="bento-cell bento-2">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <div class="bento-title">Complete Host Isolation</div>
+        <div class="bento-desc">No host filesystem access. No host network access. No exceptions. A bad agent command destroys only the sandbox &mdash; never your machine.</div>
+      </div>
+
+      <div class="bento-cell bento-3">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        </div>
+        <div class="bento-title">Credential Inheritance</div>
+        <div class="bento-desc">SSH agent forwarding and GitHub CLI auth inherited automatically. Claude Code and Codex work immediately &mdash; no manual token wiring.</div>
+      </div>
+
+      <div class="bento-cell bento-4">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <div class="bento-title">Internet Fully Open</div>
+        <div class="bento-desc">Agents freely download packages, call external APIs, clone repos. Internet is open &mdash; your internal network is permanently blocked.</div>
+      </div>
+
+      <div class="bento-cell bento-5">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="bento-title">Local-First</div>
+        <div class="bento-desc">Runs on your machine. Zero latency, zero cost, data never leaves. Same daemon and SDK work in cloud deployments when you need to scale.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- Security Model -->
+<section id="security">
+  <div class="container">
+    <h2 class="section-title reveal">Security Model</h2>
+    <p class="section-sub reveal">Every guarantee is enforced by the platform &mdash; not reliant on agent behavior</p>
+    <div class="security-wrap reveal">
+      <table class="security-table">
+        <thead><tr><th>Layer</th><th>Mechanism</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Host network</td><td>Each sandbox gets its own isolated Docker network. Cannot reach <code>localhost</code>, host services, or the local network.</td><td><span class="badge-ok">blocked</span></td></tr>
+          <tr><td>Internet access</td><td>Agents freely download packages, call APIs, clone repos, and interact with the outside world.</td><td><span class="badge-ok">open</span></td></tr>
+          <tr><td>Host filesystem</td><td>Zero access by default. Only explicitly declared mounts are allowed; the daemon rejects anything unsafe.</td><td><span class="badge-ok">invisible</span></td></tr>
+          <tr><td>Credentials</td><td>Only daemon-defined shortcuts (SSH forwarding, gh CLI auth) can enter. Fixed rules &mdash; no arbitrary host path passthrough.</td><td><span class="badge-ok">minimal</span></td></tr>
+          <tr><td>Cleanup</td><td>All runtime resources (containers, networks, filesystem state) fully removed on delete. No orphans, no leaks.</td><td><span class="badge-ok">complete</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Comparison -->
+<section id="comparison">
+  <div class="container">
+    <h2 class="section-title reveal">Why Not Built-in Sandboxes?</h2>
+    <p class="section-sub reveal">Codex and Claude Code both have sandboxes. Neither actually solves the dilemma.</p>
+    <div class="cmp-wrap reveal">
+      <table class="cmp-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="col-bad">Codex<br><span style="font-weight:400;opacity:.7">danger-full-access</span></th>
+            <th class="col-bad2">Claude Code<br><span style="font-weight:400;opacity:.7">--dangerously-skip-permissions</span></th>
+            <th class="col-us">agents-sandbox</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>git commit / push</td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+          </tr>
+          <tr>
+            <td>Install deps, build, test</td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+          </tr>
+          <tr>
+            <td>Approval prompts</td>
+            <td><span class="cmp-val-bad">&#10007; None — all bypassed</span></td>
+            <td><span class="cmp-val-bad">&#10007; None — all bypassed</span></td>
+            <td><span class="cmp-val-ok">&#10003; None needed</span></td>
+          </tr>
+          <tr>
+            <td>Host filesystem</td>
+            <td><span class="cmp-val-bad">Fully read &amp; writable</span></td>
+            <td><span class="cmp-val-bad">Fully read &amp; writable</span></td>
+            <td><span class="cmp-val-ok">Invisible — declared mounts only</span></td>
+          </tr>
+          <tr>
+            <td>Other projects on machine</td>
+            <td><span class="cmp-val-bad">Readable &amp; writable</span></td>
+            <td><span class="cmp-val-bad">Readable &amp; writable</span></td>
+            <td><span class="cmp-val-ok">Invisible</span></td>
+          </tr>
+          <tr>
+            <td>Credential exposure</td>
+            <td><span class="cmp-val-bad">Inherits full host env</span></td>
+            <td><span class="cmp-val-bad">Inherits full host env</span></td>
+            <td><span class="cmp-val-ok">SSH agent &amp; gh CLI only</span></td>
+          </tr>
+          <tr>
+            <td>Host network</td>
+            <td><span class="cmp-val-bad">Fully exposed</span></td>
+            <td><span class="cmp-val-bad">Fully exposed</span></td>
+            <td><span class="cmp-val-ok">Blocked — internet open</span></td>
+          </tr>
+          <tr>
+            <td>Blast radius of a bad command</td>
+            <td><span class="cmp-val-bad">Entire host machine</span></td>
+            <td><span class="cmp-val-bad">Entire host machine</span></td>
+            <td><span class="cmp-val-ok">Disposable sandbox only</span></td>
+          </tr>
+          <tr>
+            <td>Host safety</td>
+            <td><span class="cmp-val-bad">None</span></td>
+            <td><span class="cmp-val-bad">None</span></td>
+            <td><span class="cmp-val-ok">Full — host untouched</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Quick Start -->
+<section class="quickstart" id="quickstart">
+  <div class="container">
+    <h2 class="section-title reveal">Quick Start</h2>
+    <p class="section-sub reveal">Pull the runtime image and start sandboxing your agents in minutes</p>
+    <div class="quickstart-terminal reveal">
+      <div class="qs-bar">
+        <div style="display:flex;gap:6px;">
+          <span class="qs-dot"></span><span class="qs-dot"></span><span class="qs-dot"></span>
+        </div>
+        <button class="copy-btn" onclick="copyCommands()">Copy</button>
+      </div>
+      <div class="qs-body"><span class="cmd-prefix">$ </span>docker pull ghcr.io/agents-sandbox/coding-runtime:latest
+<span class="cmd-prefix">$ </span>pip install agents-sandbox
+<span class="cmd-prefix">$ </span>python -c "
+import asyncio
+from agents_sandbox import AgentsSandboxClient
+
+async def main():
+    async with AgentsSandboxClient() as client:
+        sb = await client.create_sandbox(
+            image='ghcr.io/agents-sandbox/coding-runtime:latest',
+        )
+        result = await client.run(sb.sandbox_id,
+            ('python', '-c', 'print(\"hello from sandbox\")'))
+        print(result.stdout)
+
+asyncio.run(main())"</div>
+    </div>
+    <a href="https://docs.agents-sandbox.com" class="link-arrow">View full documentation &rarr;</a>
+  </div>
+</section>
+
+<!-- Open Source -->
+<section class="oss" id="oss">
+  <div class="container">
+    <h2 class="section-title reveal">Open Source</h2>
+    <p class="section-sub reveal">Built in the open, for everyone</p>
+    <div class="oss-stats reveal-stagger">
+      <div><span class="oss-stat-num">Apache-2.0</span><span class="oss-stat-label">License</span></div>
+      <div><span class="oss-stat-num">Go</span><span class="oss-stat-label">Runtime Language</span></div>
+      <div><span class="oss-stat-num">Python</span><span class="oss-stat-label">SDK</span></div>
+      <div><span class="oss-stat-num">Proto3</span><span class="oss-stat-label">API Protocol</span></div>
+    </div>
+    <div class="oss-contributors reveal">
+      <span class="oss-avatar"></span><span class="oss-avatar"></span>
+      <span class="oss-avatar"></span><span class="oss-avatar"></span><span class="oss-avatar"></span>
+    </div>
+    <button class="btn-primary reveal" onclick="window.open('https://github.com/1996fanrui/agents-sandbox','_blank')">Star on GitHub</button>
+  </div>
+</section>
+
+<script src="script.js"></script>
+</body>
+</html>
