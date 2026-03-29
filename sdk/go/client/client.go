@@ -137,7 +137,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 			Image:            image,
 			Mounts:           toProtoMounts(options.mounts),
 			Copies:           toProtoCopies(options.copies),
-			BuiltinResources: slicesClone(options.builtinResources),
+			BuiltinTools: slicesClone(options.builtinTools),
 			RequiredServices: toProtoServices(options.requiredServices),
 			OptionalServices: toProtoServices(options.optionalServices),
 			Labels:           cloneStringMap(options.labels),

@@ -19,7 +19,7 @@ mounts:
     target: /data
     writable: true
 
-builtin_resources: [".claude", "uv", "uv-python", "npm", "gh-auth", "ssh-agent"]
+builtin_tools: ["claude", "git", "uv", "npm"]
 
 labels:
   team: my-team
@@ -60,7 +60,7 @@ optional_services:
 | `image` | `CreateSpec.image` | string | Container image for the primary sandbox |
 | `copies` | `CreateSpec.copies` | list of CopySpec | Files to copy into the container |
 | `mounts` | `CreateSpec.mounts` | list of MountSpec | Bind mounts from host to container |
-| `builtin_resources` | `CreateSpec.builtin_resources` | list of string | Built-in resources to provision |
+| `builtin_tools` | `CreateSpec.builtin_tools` | list of string | Built-in resources to provision |
 | `required_services` | `CreateSpec.required_services` | map of ServiceSpec | Services that must be healthy before sandbox is READY |
 | `optional_services` | `CreateSpec.optional_services` | map of ServiceSpec | Services started concurrently, not blocking READY |
 | `labels` | `CreateSpec.labels` | map of string | Key-value labels attached to the sandbox |
@@ -112,8 +112,8 @@ Services use a map format where the YAML key becomes `ServiceSpec.name`:
 ```python
 yaml_config = """
 image: ghcr.io/agents-sandbox/coding-runtime:latest
-builtin_resources:
-  - .claude
+builtin_tools:
+  - claude
 """
 
 # YAML only
@@ -136,8 +136,8 @@ sandbox = await client.create_sandbox(image="python:3.12")
 ```go
 configYAML := []byte(`
 image: ghcr.io/agents-sandbox/coding-runtime:latest
-builtin_resources:
-  - .claude
+builtin_tools:
+  - claude
 `)
 
 // YAML only
@@ -162,7 +162,7 @@ When both YAML config and explicit parameters are provided, explicit parameters 
 | Field Type | Override Behavior |
 |---|---|
 | Scalar (`image`) | Non-empty explicit value overwrites YAML value |
-| Repeated (`mounts`, `copies`, `builtin_resources`, `required_services`, `optional_services`) | Non-empty explicit value replaces YAML value entirely |
+| Repeated (`mounts`, `copies`, `builtin_tools`, `required_services`, `optional_services`) | Non-empty explicit value replaces YAML value entirely |
 | Map (`labels`, `envs`) | Key-level merge: explicit keys overwrite same-name YAML keys; YAML-only keys are preserved |
 
 ### Known Limitation

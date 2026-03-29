@@ -152,7 +152,7 @@ sandbox = await client.create_sandbox(
 
 # YAML config with parameter overrides
 sandbox = await client.create_sandbox(
-    config_yaml="builtin_resources:\n  - .claude\n",
+    config_yaml="builtin_tools:\n  - claude\n",
     image="custom:latest",
     labels={"team": "my-team"},
 )

@@ -44,7 +44,7 @@ def test_create_sandbox_accepts_config_yaml_string(monkeypatch: pytest.MonkeyPat
     from agents_sandbox._generated import service_pb2
     from agents_sandbox.client import AgentsSandboxClient
 
-    yaml_content = "image: test:latest\nbuiltin_resources:\n  - .claude\n"
+    yaml_content = "image: test:latest\nbuiltin_tools:\n  - claude\n"
     captured_requests: list[service_pb2.CreateSandboxRequest] = []
 
     class _FakeRawSandboxClient:
@@ -91,7 +91,7 @@ def test_create_sandbox_accepts_config_yaml_bytes(monkeypatch: pytest.MonkeyPatc
     from agents_sandbox._generated import service_pb2
     from agents_sandbox.client import AgentsSandboxClient
 
-    yaml_content = b"image: test:latest\nbuiltin_resources:\n  - .claude\n"
+    yaml_content = b"image: test:latest\nbuiltin_tools:\n  - claude\n"
     captured_requests: list[service_pb2.CreateSandboxRequest] = []
 
     class _FakeRawSandboxClient:

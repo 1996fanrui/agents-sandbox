@@ -144,7 +144,7 @@ class ServiceSpec(_message.Message):
     def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., environment: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_resources", "required_services", "optional_services", "labels", "envs")
+    __slots__ = ("image", "mounts", "copies", "builtin_tools", "required_services", "optional_services", "labels", "envs")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -155,7 +155,7 @@ class CreateSpec(_message.Message):
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     MOUNTS_FIELD_NUMBER: _ClassVar[int]
     COPIES_FIELD_NUMBER: _ClassVar[int]
-    BUILTIN_RESOURCES_FIELD_NUMBER: _ClassVar[int]
+    BUILTIN_TOOLS_FIELD_NUMBER: _ClassVar[int]
     REQUIRED_SERVICES_FIELD_NUMBER: _ClassVar[int]
     OPTIONAL_SERVICES_FIELD_NUMBER: _ClassVar[int]
     LABELS_FIELD_NUMBER: _ClassVar[int]
@@ -163,12 +163,12 @@ class CreateSpec(_message.Message):
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
-    builtin_resources: _containers.RepeatedScalarFieldContainer[str]
+    builtin_tools: _containers.RepeatedScalarFieldContainer[str]
     required_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     optional_services: _containers.RepeatedCompositeFieldContainer[ServiceSpec]
     labels: _containers.ScalarMap[str, str]
     envs: _containers.RepeatedCompositeFieldContainer[KeyValue]
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_resources: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ...) -> None: ...
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Iterable[_Union[KeyValue, _Mapping]]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
     __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels")

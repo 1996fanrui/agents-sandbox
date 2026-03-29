@@ -30,7 +30,7 @@ flowchart LR
 - `internal/control/id_registry.go` owns the shared bbolt-backed persistence bootstrap that opens `ids.db`, reserves caller-provided and daemon-generated `sandbox_id` / `exec_id` values across daemon restarts, and shares the database handle with the persistent event store.
 - `internal/control/event_store.go` owns the event-store abstraction plus the persistent bbolt implementation used to replay sandbox history after daemon restart and to retain deleted sandbox streams until cleanup.
 - `internal/control/docker_runtime.go` is the concrete runtime backend. It owns a long-lived Docker Engine API client, materializes filesystem inputs, creates Docker networks and containers, runs exec commands, and removes runtime-owned resources.
-- `internal/profile` defines daemon-managed built-in resources such as `.claude`, `.codex`, `uv`, `npm`, `apt`, `gh-auth`, and `ssh-agent`.
+- `internal/profile` defines daemon-managed built-in resources. Tools (`claude`, `codex`, `git`, `uv`, `npm`, `apt`) are the user-facing names; each tool resolves to one or more named mounts (`.claude`, `.codex`, `.agents`, `gh-auth`, `ssh-agent`, `uv-cache`, `uv-data`, `npm`, `apt`). Multiple tools may share a mount; the daemon deduplicates by mount ID.
 - `api/proto/service.proto` is the transport contract shared by the daemon, the Go SDK, and the Python SDK.
 - `sdk/go/rawclient` contains the synchronous transport-facing Go client that resolves the default socket path, dials the Unix socket, wraps raw RPCs, translates typed gRPC errors, and exposes the raw event-stream primitive used by both the CLI and the high-level SDK.
 - `sdk/go/client` contains the public high-level Go SDK. It converts protobuf payloads into public Go types, exposes direct-parameter lifecycle and exec APIs, adds `wait` behavior, and bridges sandbox events into Go channels.
@@ -84,13 +84,13 @@ Sandbox creation supports three public filesystem ingress modes:
 
 - `mounts` for explicit bind mounts
 - `copies` for daemon-owned copied content
-- `builtin_resources` for daemon-defined resource shortcuts
+- `builtin_tools` for daemon-defined resource shortcuts
 
 These cover common scenarios such as:
 
 - mounting a local project tree at `/workspace`
 - copying seed files or fixture data into a sandbox
-- exposing operator tooling such as `.claude`, `.codex`, `gh-auth`, `uv`, or `ssh-agent`
+- exposing operator tooling such as `claude`, `codex`, `git`, or `uv`
 
 Services are declared explicitly as `required_services` or `optional_services` and become sibling containers on the sandbox network. Required services must be healthy before the primary is reported ready; optional services start in parallel and report their initial ready or failed result through sandbox events without blocking the primary ready transition. This supports cases such as adding a database or service sidecar next to the primary runtime image.
 
@@ -131,7 +131,7 @@ This separation keeps the wire contract stable while letting each language expos
 
 - Unsafe or invalid create inputs are rejected at the RPC boundary instead of being accepted and failing later in the background.
 - `mounts` and `copies` require absolute container targets and real host file or directory sources.
-- `copies` and builtin-resource shadow copies require `runtime.state_root` because the daemon materializes copied content into daemon-owned filesystem state.
+- `copies` and builtin-tool shadow copies require `runtime.state_root` because the daemon materializes copied content into daemon-owned filesystem state.
 - Runtime exec assumes a non-root sandbox user model. Writable paths must remain writable to that runtime user.
 - Built-in resources are daemon-defined. Callers can select capability IDs but cannot replace them with arbitrary hidden host paths through the public SDK surface.
 
@@ -142,7 +142,7 @@ This separation keeps the wire contract stable while letting each language expos
 - gRPC and protobuf for the wire contract
 - Go gRPC client stack for `sdk/go/rawclient` and `sdk/go/client`
 - Python `grpcio` client stack and `uv`-managed SDK environment
-- Optional host resources such as `SSH_AUTH_SOCK`, `~/.claude`, `~/.codex`, `~/.agents`, and local cache directories
+- Optional host resources such as `SSH_AUTH_SOCK`, `~/.claude`, `~/.codex`, `~/.agents`, `~/.cache/uv`, `~/.local/share/uv`, and local cache directories
 
 ## Important Design Decisions And Reasons
 
@@ -176,11 +176,11 @@ The runtime backend uses a single Docker Engine API client per service instance 
 
 ### Filesystem ingress is split by semantics
 
-`mounts`, `copies`, and `builtin_resources` are separate concepts because they have different security and lifecycle behavior. A bind mount keeps a live host path, a copy materializes daemon-owned content, and a built-in resource is a daemon-defined shortcut with its own validation and resolution rules. Keeping them separate avoids stringly typed overloading and keeps fail-fast validation clear.
+`mounts`, `copies`, and `builtin_tools` are separate concepts because they have different security and lifecycle behavior. A bind mount keeps a live host path, a copy materializes daemon-owned content, and a built-in resource is a daemon-defined shortcut with its own validation and resolution rules. Keeping them separate avoids stringly typed overloading and keeps fail-fast validation clear.
 
 ### Built-in resources remain daemon-owned capabilities
 
-Capabilities such as `.claude`, `.codex`, `uv`, `npm`, and `ssh-agent` are resolved by the daemon, not by caller-supplied hidden path conventions. This keeps host-sensitive path logic centralized and lets the daemon decide when bind mounting is safe and when shadow-copy fallback is required.
+Tool names such as `claude`, `codex`, `git`, `uv`, and `npm` are resolved by the daemon into their underlying mounts, not by caller-supplied hidden path conventions. This keeps host-sensitive path logic centralized and lets the daemon decide when bind mounting is safe and when shadow-copy fallback is required. Multiple tools may share a mount; the daemon deduplicates by mount ID before materializing.
 
 ### Exec output is redirected to disk inside the container
 

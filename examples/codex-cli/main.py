@@ -12,7 +12,7 @@ async def main() -> None:
     async with AgentsSandboxClient() as client:
         sandbox = await client.create_sandbox(
             image=IMAGE,
-            builtin_resources=(".codex",),
+            builtin_tools=("codex",),
         )
         try:
             await client.run(sandbox.sandbox_id, ("npm", "install", "-g", "@openai/codex@latest"))

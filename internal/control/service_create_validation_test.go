@@ -71,7 +71,7 @@ func TestCreateSandboxUsesRequestedImageForRuntime(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.T) {
+func TestCreateSandboxPassesMountsCopiesAndBuiltinToolsToRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -97,7 +97,7 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.
 			Copies: []*agboxv1.CopySpec{
 				{Source: copySource, Target: "/workspace/project", ExcludePatterns: []string{".git"}},
 			},
-			BuiltinResources: []string{".claude", "uv"},
+			BuiltinTools: []string{"claude", "uv"},
 		},
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func TestCreateSandboxPassesMountsCopiesAndBuiltinResourcesToRuntime(t *testing.
 	if got := runtime.lastCreateSpec.GetCopies(); len(got) != 1 || got[0].GetTarget() != "/workspace/project" {
 		t.Fatalf("unexpected copies passed to runtime: %#v", got)
 	}
-	if got := runtime.lastCreateSpec.GetBuiltinResources(); len(got) != 2 || got[0] != ".claude" || got[1] != "uv" {
+	if got := runtime.lastCreateSpec.GetBuiltinTools(); len(got) != 2 || got[0] != "claude" || got[1] != "uv" {
 		t.Fatalf("unexpected builtin resources passed to runtime: %#v", got)
 	}
 }
@@ -452,7 +452,7 @@ func TestCreateSandboxRejectsInvalidGenericSourcesBeforeRuntime(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxRejectsUnknownBuiltinResourcesBeforeRuntime(t *testing.T) {
+func TestCreateSandboxRejectsUnknownBuiltinToolsBeforeRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -464,7 +464,7 @@ func TestCreateSandboxRejectsUnknownBuiltinResourcesBeforeRuntime(t *testing.T) 
 		SandboxId: "session-unknown-builtin",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
-			BuiltinResources: []string{"missing-builtin"},
+			BuiltinTools: []string{"missing-builtin"},
 		},
 	})
 	if status.Code(err) != codes.InvalidArgument {

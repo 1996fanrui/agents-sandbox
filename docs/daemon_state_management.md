@@ -30,7 +30,7 @@ Daemon-originated intent and history. Docker does not know about it; if lost, it
 | Sandbox config | `sandbox-config` | sandbox_id | `proto.Marshal(CreateSpec)` |
 | Exec config | `exec-config:{sandbox_id}` | exec_id | `proto.Marshal(CreateExecRequest)` |
 
-`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. It contains all sandbox configuration: image, mounts, copies, builtin_resources, required_services, optional_services, and labels.
+`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. It contains all sandbox configuration: image, mounts, copies, builtin_tools, required_services, optional_services, and labels.
 
 ### Category B — Docker Runtime State
 

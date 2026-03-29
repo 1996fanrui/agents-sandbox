@@ -204,7 +204,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
 	}()
 
-	mounts, err := backend.materializeBuiltinResources(record.handle.GetSandboxId(), record.createSpec.GetBuiltinResources(), state)
+	mounts, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state)
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}

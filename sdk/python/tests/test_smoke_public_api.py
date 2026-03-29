@@ -281,7 +281,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "sandbox_id",
         "mounts",
         "copies",
-        "builtin_resources",
+        "builtin_tools",
         "required_services",
         "optional_services",
         "labels",
@@ -430,7 +430,7 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
     assert _FakeRawSandboxClient.create_requests[1].sandbox_id == ""
 
 
-def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_to_proto(
+def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_proto(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FakeRawSandboxClient:
@@ -475,7 +475,7 @@ def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_t
                     exclude_patterns=(".git", "__pycache__"),
                 ),
             ),
-            builtin_resources=(".claude", "uv"),
+            builtin_tools=("claude", "uv"),
             required_services=(
                 ServiceSpec(
                     name="postgres",
@@ -500,7 +500,7 @@ def test_create_sandbox_mounts_copies_builtin_resources_and_services_serialize_t
     asyncio.run(run_test())
 
     create_spec = _FakeRawSandboxClient.create_requests[0].create_spec
-    assert list(create_spec.builtin_resources) == [".claude", "uv"]
+    assert list(create_spec.builtin_tools) == ["claude", "uv"]
     assert create_spec.mounts == [
         service_pb2.MountSpec(source="/host/workspace", target="/workspace", writable=True)
     ]

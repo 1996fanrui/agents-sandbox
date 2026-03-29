@@ -15,7 +15,7 @@ type YAMLConfig struct {
 	Image            string                       `yaml:"image"`
 	Mounts           []YAMLMountSpec              `yaml:"mounts"`
 	Copies           []YAMLCopySpec               `yaml:"copies"`
-	BuiltinResources []string                     `yaml:"builtin_resources"`
+	BuiltinTools []string                     `yaml:"builtin_tools"`
 	RequiredServices map[string]YAMLServiceSpec   `yaml:"required_services"`
 	OptionalServices map[string]YAMLServiceSpec   `yaml:"optional_services"`
 	Labels           map[string]string            `yaml:"labels"`
@@ -73,7 +73,7 @@ func parseYAMLConfig(raw []byte) (*YAMLConfig, error) {
 func yamlConfigToCreateSpec(cfg *YAMLConfig) *agboxv1.CreateSpec {
 	spec := &agboxv1.CreateSpec{
 		Image:            cfg.Image,
-		BuiltinResources: cfg.BuiltinResources,
+		BuiltinTools: cfg.BuiltinTools,
 	}
 
 	for _, m := range cfg.Mounts {
@@ -219,8 +219,8 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	if len(override.GetCopies()) > 0 {
 		result.Copies = cloneCopies(override.GetCopies())
 	}
-	if len(override.GetBuiltinResources()) > 0 {
-		result.BuiltinResources = append([]string(nil), override.GetBuiltinResources()...)
+	if len(override.GetBuiltinTools()) > 0 {
+		result.BuiltinTools = append([]string(nil), override.GetBuiltinTools()...)
 	}
 	if len(override.GetRequiredServices()) > 0 {
 		result.RequiredServices = cloneServiceSpecs(override.GetRequiredServices())

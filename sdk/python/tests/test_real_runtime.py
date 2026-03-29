@@ -173,7 +173,7 @@ async def _run_real_runtime_projection_flow(*, socket_path: Path, workspace: Pat
             image=RUNTIME_IMAGE,
             sandbox_id="real-runtime-claude",
             mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
-            builtin_resources=(".claude",),
+            builtin_tools=("claude",),
         )
 
         exec_handle = await client.run(

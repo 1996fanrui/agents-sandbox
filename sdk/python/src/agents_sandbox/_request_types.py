@@ -13,7 +13,7 @@ class CreateSandboxSpec:
     image: str | None = None
     mounts: tuple[MountSpec, ...] = ()
     copies: tuple[CopySpec, ...] = ()
-    builtin_resources: tuple[str, ...] = ()
+    builtin_tools: tuple[str, ...] = ()
     required_services: tuple[ServiceSpec, ...] = ()
     optional_services: tuple[ServiceSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)

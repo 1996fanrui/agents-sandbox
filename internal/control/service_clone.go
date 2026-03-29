@@ -45,7 +45,7 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		Labels:           cloneStringMap(spec.GetLabels()),
 		Mounts:           cloneMounts(spec.GetMounts()),
 		Copies:           cloneCopies(spec.GetCopies()),
-		BuiltinResources: slices.Clone(spec.GetBuiltinResources()),
+		BuiltinTools: slices.Clone(spec.GetBuiltinTools()),
 		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
 		Envs:             cloneKeyValues(spec.GetEnvs()),
