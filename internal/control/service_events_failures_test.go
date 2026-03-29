@@ -417,6 +417,7 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
 		IdleTTL:         20 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
 		Version:         "test",
 		DaemonName:      "agboxd-test",
 	})
@@ -457,5 +458,45 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 	}
 	if eventReason(lastEvent) != "idle_ttl" {
 		t.Fatalf("unexpected idle-stop reason: %#v", lastEvent)
+	}
+}
+
+func TestIdleTTLStopsReadySandboxWithoutExec(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		IdleTTL:         20 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
+		Version:         "test",
+		DaemonName:      "agboxd-test",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("session-no-exec-idle", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		for _, event := range items {
+			if event.GetEventType() == agboxv1.EventType_SANDBOX_STOPPED {
+				return true
+			}
+		}
+		return false
+	})
+	lastEvent := events[len(events)-1]
+	if lastEvent.GetEventType() != agboxv1.EventType_SANDBOX_STOPPED {
+		t.Fatalf("unexpected terminal event: %#v", lastEvent)
+	}
+	if eventReason(lastEvent) != "idle_ttl" {
+		t.Fatalf("unexpected stop reason: %#v", lastEvent)
 	}
 }

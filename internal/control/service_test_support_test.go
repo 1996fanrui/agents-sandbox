@@ -154,10 +154,15 @@ func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxService
 		})
 	}
 	agboxv1.RegisterSandboxServiceServer(server, service)
+	ctx, cancel := context.WithCancel(context.Background())
+	go service.cleanupLoop(ctx)
 	go func() {
 		_ = server.Serve(listener)
 	}()
-	t.Cleanup(server.Stop)
+	t.Cleanup(func() {
+		cancel()
+		server.Stop()
+	})
 
 	conn, err := grpc.NewClient("passthrough:///bufnet",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {

@@ -294,7 +294,6 @@ func (s *Service) completeExec(execContext context.Context, execID string) {
 	execRecord.ExitCode = result.ExitCode
 	s.config.Logger.Info("exec finished", slog.String("sandbox_id", sandboxID), slog.String("exec_id", execID), slog.Int("exit_code", int(result.ExitCode)))
 	record.lastTerminalRunFinishedAt = time.Now().UTC()
-	go s.scheduleIdleStop(sandboxID)
 }
 
 func (s *Service) prepareExecArtifactPaths(sandboxID string, execID string) (execArtifactPaths, error) {
