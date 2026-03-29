@@ -109,3 +109,17 @@ The runtime must execute under a non-root user inside the sandbox. Bind-mounted 
 `agents-sandbox` owns cleanup for resources carrying the `io.github.1996fanrui.agents-sandbox.*` label namespace: primary containers, service containers, dedicated networks, shadow-copy trees, and event/artifact files.
 
 Docker objects without these labels are never inspected, stopped, or removed by the daemon. Ownership must be derivable from runtime state plus namespaced labels without requiring an external product database snapshot. Cleanup continues on daemon-owned contexts rather than request-scoped cancellation.
+
+## Architectural Exception: `agbox claude` and `agbox codex`
+
+The rule that all Docker access goes through the daemon's structured runtime client has one deliberate exception: `agbox claude` and `agbox codex`.
+
+These commands create a sandbox via gRPC, wait for it to become READY, then call `docker exec -it` directly from the CLI process to attach an interactive TTY session into the primary container. On exit, the sandbox is deleted via gRPC.
+
+**Why this is necessary:**
+
+The daemon's exec model is designed for non-interactive batch execution. Adding interactive TTY support at the daemon protocol layer would require gRPC bidirectional streaming plus in-daemon PTY management — significant complexity with little benefit beyond these two commands. Calling `docker exec -it` directly from the CLI is simpler, keeps the daemon out of the TTY path, and is equivalent to what a user would do manually.
+
+**Known constraint:** The CLI's `docker exec` call and the daemon's Docker Engine API calls must target the same Docker daemon. If `DOCKER_HOST` or `DOCKER_CONTEXT` differs between the environment where `agboxd` was started and the shell running `agbox claude/codex`, the exec may land on the wrong target. This is rarely a problem when `agboxd` runs as a user process sharing the shell environment.
+
+**Scope:** This exception is strictly limited to `agbox claude` and `agbox codex`. No other CLI commands bypass the daemon for Docker operations.

@@ -36,6 +36,10 @@ func run(
 		err = runPing(ctx, args[1:], stdout, lookupEnv)
 	case "sandbox":
 		err = runSandbox(ctx, args[1:], stdout, stderr, lookupEnv)
+	case "claude":
+		err = runAgentSession(ctx, "claude", args[1:], stdout, stderr, lookupEnv)
+	case "codex":
+		err = runAgentSession(ctx, "codex", args[1:], stdout, stderr, lookupEnv)
 	default:
 		err = usageErrorf("unknown command %q", args[0])
 	}
