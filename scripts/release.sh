@@ -35,7 +35,23 @@ bump_patch() {
 }
 
 latest_release_version() {
-  git tag -l 'v[0-9]*' | sed 's/^v//' | sort -V | tail -1
+  # Stable versions sort before their own pre-releases under sort -V (e.g.
+  # 0.1.1-alpha.4 > 0.1.1), so we prefer the latest stable tag when one
+  # exists, and fall back to the latest alpha only when there are no stables.
+  local latest_stable latest_alpha
+  latest_stable="$(git tag -l 'v[0-9]*' | grep -vE '\-alpha\.' | sed 's/^v//' | sort -V | tail -1)"
+  if [ -n "${latest_stable}" ]; then
+    # Check if any alpha exists beyond the latest stable (i.e. for a newer base).
+    latest_alpha="$(git tag -l 'v[0-9]*' | grep -E '\-alpha\.' | sed 's/^v//' | sort -V | tail -1)"
+    if [ -n "${latest_alpha}" ] && [ "$(printf '%s\n%s' "$(base_version "${latest_alpha}")" "${latest_stable}" | sort -V | tail -1)" != "${latest_stable}" ]; then
+      # The alpha's base version is strictly newer than the latest stable.
+      echo "${latest_alpha}"
+    else
+      echo "${latest_stable}"
+    fi
+  else
+    git tag -l 'v[0-9]*' | sed 's/^v//' | sort -V | tail -1
+  fi
 }
 
 # -- worktree management ------------------------------------------------------
