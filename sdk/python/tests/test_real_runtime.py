@@ -93,6 +93,7 @@ def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
     claude_root.mkdir(parents=True)
     (claude_root / "settings.json").write_text('{"theme":"dark"}', encoding="utf-8")
     (claude_root / "settings-link.json").symlink_to("settings.json")
+    (fake_home / ".claude.json").write_text("{}", encoding="utf-8")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

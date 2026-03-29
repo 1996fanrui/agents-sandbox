@@ -54,6 +54,19 @@ func TestUVMountsBothDirs(t *testing.T) {
 	}
 }
 
+func TestClaudeMountsBothEntries(t *testing.T) {
+	capability, ok := CapabilityByID(string(ToolIDClaude))
+	if !ok {
+		t.Fatal("missing tool capability claude")
+	}
+	if len(capability.MountIDs) != 2 {
+		t.Fatalf("expected claude to have 2 mount IDs, got %d", len(capability.MountIDs))
+	}
+	if capability.MountIDs[0] != MountIDClaude || capability.MountIDs[1] != MountIDClaudeJSON {
+		t.Fatalf("unexpected claude mount IDs: %v", capability.MountIDs)
+	}
+}
+
 func TestGitMountsBothAuthResources(t *testing.T) {
 	capability, ok := CapabilityByID(string(ToolIDGit))
 	if !ok {

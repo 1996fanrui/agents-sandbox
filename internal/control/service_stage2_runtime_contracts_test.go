@@ -612,6 +612,10 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 	if err := os.MkdirAll(builtinSource, 0o755); err != nil {
 		t.Fatalf("MkdirAll builtin source failed: %v", err)
 	}
+	claudeJSONSource := filepath.Join(homeDir, ".claude.json")
+	if err := os.WriteFile(claudeJSONSource, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile .claude.json failed: %v", err)
+	}
 	externalRoot := t.TempDir()
 	externalFile := filepath.Join(externalRoot, "secret.txt")
 	if err := os.WriteFile(externalFile, []byte("secret"), 0o644); err != nil {
@@ -628,14 +632,29 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("materializeBuiltinTools failed: %v", err)
 	}
-	if len(mounts) != 1 {
-		t.Fatalf("expected one builtin mount, got %d", len(mounts))
+	if len(mounts) != 2 {
+		t.Fatalf("expected two builtin mounts, got %d", len(mounts))
 	}
 	if mounts[0].Source != builtinSource {
 		t.Fatalf("expected builtin source to be %q, got %q", builtinSource, mounts[0].Source)
 	}
 	if mounts[0].ReadOnly {
 		t.Fatal("expected writable builtin mount to preserve capability mode")
+	}
+	if mounts[1].Source != claudeJSONSource {
+		t.Fatalf("expected .claude.json source to be %q, got %q", claudeJSONSource, mounts[1].Source)
+	}
+	if mounts[1].ReadOnly {
+		t.Fatal("expected writable .claude.json mount to preserve capability mode")
+	}
+
+	// Negative case: when ~/.claude.json does not exist on host, materializeBuiltinTools
+	// must fail because os.Stat will return an error for the missing file.
+	if err := os.Remove(claudeJSONSource); err != nil {
+		t.Fatalf("Remove .claude.json failed: %v", err)
+	}
+	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin-missing", []string{"claude"}, &sandboxRuntimeState{}); err == nil {
+		t.Fatal("expected error when ~/.claude.json does not exist, got nil")
 	}
 }
 

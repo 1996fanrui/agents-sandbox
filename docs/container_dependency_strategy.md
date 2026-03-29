@@ -28,7 +28,7 @@ Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to
 
 | Tool | Resolved Mounts (Host Source → Container Target, Mode) |
 |------|--------------------------------------------------------|
-| `claude` | `~/.claude` → `/home/agbox/.claude` (read-write) |
+| `claude` | `~/.claude` → `/home/agbox/.claude` (rw), `~/.claude.json` → `/home/agbox/.claude.json` (rw) |
 | `codex` | `~/.codex` → `/home/agbox/.codex` (rw), `~/.agents` → `/home/agbox/.agents` (rw) |
 | `git` | `SSH_AUTH_SOCK` → `/ssh-agent` (socket forwarding), `~/.config/gh` → `/home/agbox/.config/gh` (read-only) |
 | `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (rw), `~/.local/share/uv` → `/home/agbox/.local/share/uv` (rw) |
