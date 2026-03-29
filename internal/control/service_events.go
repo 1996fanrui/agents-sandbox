@@ -75,6 +75,50 @@ func (s *Service) cleanupExpiredEvents() error {
 	return nil
 }
 
+// cleanupStoppedSandboxes scans all STOPPED sandboxes and triggers deletion
+// for those that have been stopped longer than CleanupTTL. The stoppedAt time
+// is derived from the SANDBOX_STOPPED event in the event stream.
+func (s *Service) cleanupStoppedSandboxes() {
+	s.mu.Lock()
+	var deleteSandboxIDs []string
+	for sandboxID, record := range s.boxes {
+		if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_STOPPED {
+			continue
+		}
+		// Find stoppedAt from events (reverse scan for SANDBOX_STOPPED).
+		var stoppedAt time.Time
+		for i := len(record.events) - 1; i >= 0; i-- {
+			if record.events[i].GetEventType() == agboxv1.EventType_SANDBOX_STOPPED {
+				stoppedAt = record.events[i].GetOccurredAt().AsTime()
+				break
+			}
+		}
+		if stoppedAt.IsZero() {
+			s.config.Logger.Warn("cleanup: STOPPED sandbox missing SANDBOX_STOPPED event, skipping",
+				slog.String("sandbox_id", sandboxID))
+			continue
+		}
+		if time.Since(stoppedAt) < s.config.CleanupTTL {
+			continue
+		}
+		started, err := s.beginSandboxDeleteLocked(record, "cleanup_ttl")
+		if err != nil {
+			s.config.Logger.Warn("cleanup: begin delete for stopped sandbox failed",
+				slog.String("sandbox_id", sandboxID), slog.Any("error", err))
+			continue
+		}
+		if !started {
+			continue
+		}
+		deleteSandboxIDs = append(deleteSandboxIDs, sandboxID)
+	}
+	s.mu.Unlock()
+
+	for _, sandboxID := range deleteSandboxIDs {
+		go s.completeSandboxDelete(sandboxID, "cleanup_ttl")
+	}
+}
+
 func (s *Service) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.config.CleanupInterval)
 	defer ticker.Stop()
@@ -85,6 +129,7 @@ func (s *Service) cleanupLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.idleScanAndStop()
+			s.cleanupStoppedSandboxes()
 			if err := s.cleanupExpiredEvents(); err != nil {
 				s.config.Logger.Warn("cleanup expired sandbox events failed", slog.Any("error", err))
 			}

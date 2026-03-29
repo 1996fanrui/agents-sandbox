@@ -12,6 +12,19 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+func TestDefaultServiceConfig(t *testing.T) {
+	cfg := DefaultServiceConfig()
+	if cfg.IdleTTL != 10*time.Minute {
+		t.Fatalf("expected IdleTTL 10m, got %s", cfg.IdleTTL)
+	}
+	if cfg.CleanupTTL != 360*time.Hour {
+		t.Fatalf("expected CleanupTTL 360h, got %s", cfg.CleanupTTL)
+	}
+	if cfg.CleanupInterval != 2*time.Minute {
+		t.Fatalf("expected CleanupInterval 2m, got %s", cfg.CleanupInterval)
+	}
+}
+
 func TestSubscribeSandboxEventsReplayFromZeroSequence(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -459,6 +472,96 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 	if eventReason(lastEvent) != "idle_ttl" {
 		t.Fatalf("unexpected idle-stop reason: %#v", lastEvent)
 	}
+}
+
+func TestCleanupTTLDeletesStoppedSandbox(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		CleanupTTL:      1 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
+		Version:         "test",
+		DaemonName:      "agboxd-test",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-stop-delete", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	// Subscribe before stopping so we can observe the full event sequence.
+	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
+	})
+	if err != nil {
+		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
+	}
+
+	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
+		t.Fatalf("StopSandbox failed: %v", err)
+	}
+
+	// Wait for cleanup_ttl to trigger deletion via event stream.
+	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
+		for _, event := range items {
+			if event.GetEventType() == agboxv1.EventType_SANDBOX_DELETED {
+				return true
+			}
+		}
+		return false
+	})
+	var foundDeleteRequested bool
+	for _, event := range events {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_DELETE_REQUESTED && eventReason(event) == "cleanup_ttl" {
+			foundDeleteRequested = true
+		}
+	}
+	if !foundDeleteRequested {
+		t.Fatal("expected SANDBOX_DELETE_REQUESTED event with reason=cleanup_ttl")
+	}
+}
+
+func TestCleanupTTLPurgesDeletedSandbox(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		CleanupTTL:      1 * time.Millisecond,
+		CleanupInterval: 10 * time.Millisecond,
+		Version:         "test",
+		DaemonName:      "agboxd-test",
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-purge", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	if _, err := client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
+		t.Fatalf("DeleteSandbox failed: %v", err)
+	}
+
+	// Wait for cleanup_ttl to purge from memory. Poll ListSandboxes until it disappears.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{IncludeDeleted: true})
+		if err != nil {
+			t.Fatalf("ListSandboxes failed: %v", err)
+		}
+		found := false
+		for _, h := range resp.GetSandboxes() {
+			if h.GetSandboxId() == createResp.GetSandbox().GetSandboxId() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("sandbox was not purged from ListSandboxes(include_deleted=true) after cleanup_ttl")
 }
 
 func TestIdleTTLStopsReadySandboxWithoutExec(t *testing.T) {
