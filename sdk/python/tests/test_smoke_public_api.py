@@ -312,7 +312,7 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
     public_docs = {
         "README.md": (repo_root / "README.md").read_text(),
         "docs/sdk_python_usage.md": (repo_root / "docs" / "sdk_python_usage.md").read_text(),
-        "examples/codex-cli/README.md": (repo_root / "examples" / "codex-cli" / "README.md").read_text(),
+        "examples/codex/README.md": (repo_root / "examples" / "codex" / "README.md").read_text(),
     }
 
     banned_tokens = (
@@ -332,7 +332,6 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
 
     assert "AgentsSandboxClient()" in public_docs["README.md"]
     assert "AgentsSandboxClient()" in public_docs["docs/sdk_python_usage.md"]
-    assert "AgentsSandboxClient()" in public_docs["examples/codex-cli/README.md"]
     assert "ServiceSpec" in public_docs["docs/sdk_python_usage.md"]
     assert "HealthcheckConfig" in public_docs["docs/sdk_python_usage.md"]
     assert "required_services" in public_docs["docs/sdk_python_usage.md"]

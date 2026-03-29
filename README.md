@@ -106,10 +106,11 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-For a full one-command example that installs and runs Codex inside the sandbox, use:
+For full examples that run Codex or Claude inside the sandbox, see `examples/`:
 
 ```bash
-uv run python examples/codex-cli/main.py
+uv run --directory sdk/python python ../../examples/codex/main.py
+uv run --directory sdk/python python ../../examples/claude/main.py
 ```
 
 ## Repository Layout
