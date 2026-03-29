@@ -119,12 +119,11 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, args []string, 
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(
-		stdout,
-		"sandbox_id=%s initial_state=%s\n",
-		response.GetSandboxId(),
-		response.GetInitialState(),
-	)
+	text, err := formatSandboxHandleText(response.GetSandbox())
+	if err != nil {
+		return runtimeErrorf("format create sandbox response: %v", err)
+	}
+	_, _ = fmt.Fprint(stdout, text)
 	return nil
 }
 

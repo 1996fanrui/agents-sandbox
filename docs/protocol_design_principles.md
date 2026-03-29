@@ -145,3 +145,35 @@ Without that contract, an SDK cannot remove races by implementation detail alone
 - sandbox image selection is a request-time input
 - the daemon must not supply a hidden default primary image
 - quickstart and example image strings are documentation values only, not protocol fallbacks
+
+## SandboxEvent Envelope Model
+
+`SandboxEvent` uses an envelope + oneof model. Each event carries:
+
+- top-level fields: `event_id`, `sequence`, `sandbox_id`, `event_type`, `timestamp`
+- a `oneof details` discriminator with exactly one of:
+  - `SandboxPhaseDetails sandbox_phase` — sandbox lifecycle phase transitions (phase, error_code, error_message, reason); the sandbox state after the transition is carried on the top-level `sandbox_state` field of `SandboxEvent`
+  - `ExecEventDetails exec` — exec state changes (exec_id, exec_state, exit_code, error_code, error_message)
+  - `ServiceEventDetails service` — service container transitions (service_name, error_code, error_message)
+
+SDKs must dispatch on the active `details` field, not on `event_type` alone, to access structured event data.
+
+## Error Model
+
+All gRPC errors emitted by the daemon carry a `google.rpc.ErrorInfo` detail with:
+
+- `domain`: always `"agents-sandbox"`
+- `reason`: a machine-readable string constant (e.g. `SANDBOX_NOT_FOUND`, `EXEC_NOT_RUNNING`)
+- `metadata`: a `map<string, string>` carrying structured fields such as `sandbox_id` or `exec_id`
+
+SDKs translate `domain` + `reason` into typed exceptions rather than parsing the human-readable status message. This keeps error handling stable across message wording changes.
+
+## Public API Version Strategy
+
+The agents-sandbox public APIs are currently in pre-GA/preview status. Breaking changes may occur without a major version bump during this phase.
+
+Once APIs reach GA:
+
+- **Proto**: the current `agbox.v1` package serves as the baseline. Future breaking changes will use a new major namespace (e.g., `agbox.v2`).
+- **Go SDK**: breaking changes after `v1.0.0` will use Go module major version paths (e.g., `sdk/go/v2`).
+- **Python SDK**: breaking changes will be signaled via semver major version bumps.

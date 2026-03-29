@@ -88,9 +88,16 @@ func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
 		return "", err
 	}
 
+	createdAt := ""
+	if ts := handle.GetCreatedAt(); ts != nil {
+		createdAt = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
+	}
+
 	var builder strings.Builder
 	_, _ = fmt.Fprintf(&builder, "sandbox_id=%s\n", handle.GetSandboxId())
 	_, _ = fmt.Fprintf(&builder, "state=%s\n", handle.GetState())
+	_, _ = fmt.Fprintf(&builder, "image=%s\n", handle.GetImage())
+	_, _ = fmt.Fprintf(&builder, "created_at=%s\n", createdAt)
 	_, _ = fmt.Fprintf(&builder, "last_event_sequence=%d\n", handle.GetLastEventSequence())
 	_, _ = fmt.Fprintf(&builder, "labels=%s\n", formatStringMapJSON(handle.GetLabels()))
 	_, _ = fmt.Fprintf(&builder, "required_services=%s\n", requiredServices)

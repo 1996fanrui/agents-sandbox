@@ -32,7 +32,7 @@ envs:
 required_services:
   postgres:
     image: postgres:16-alpine
-    environment:
+    envs:
       POSTGRES_DB: app_local
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -90,20 +90,22 @@ Services use a map format where the YAML key becomes `ServiceSpec.name`:
 |---|---|---|
 | _(map key)_ | `ServiceSpec.name` | Service name |
 | `image` | `ServiceSpec.image` | Container image for the service |
-| `environment` | `ServiceSpec.environment` | Environment variables (YAML map → proto `repeated KeyValue`) |
+| `envs` | `ServiceSpec.envs` | Environment variables set on the service container (YAML map → proto `map<string, string>`) |
 | `healthcheck` | `ServiceSpec.healthcheck` | Healthcheck configuration |
 | `post_start_on_primary` | `ServiceSpec.post_start_on_primary` | Commands to run on the primary container after service starts |
 
 ### HealthcheckConfig Fields
 
+Duration fields (`interval`, `timeout`, `start_period`, `start_interval`) accept a duration string in YAML (e.g., `"5s"`, `"1m30s"`). The daemon parses this string into a `google.protobuf.Duration` before storing it.
+
 | YAML Key | Proto Field | Description |
 |---|---|---|
 | `test` | `HealthcheckConfig.test` | Healthcheck command (e.g., `["CMD-SHELL", "pg_isready"]`) |
-| `interval` | `HealthcheckConfig.interval` | Check interval (e.g., `5s`) |
-| `timeout` | `HealthcheckConfig.timeout` | Check timeout (e.g., `3s`) |
+| `interval` | `HealthcheckConfig.interval` | Check interval duration string (e.g., `"5s"`) |
+| `timeout` | `HealthcheckConfig.timeout` | Check timeout duration string (e.g., `"3s"`) |
 | `retries` | `HealthcheckConfig.retries` | Max retry count |
-| `start_period` | `HealthcheckConfig.start_period` | Grace period before checks count (e.g., `20s`) |
-| `start_interval` | `HealthcheckConfig.start_interval` | Check interval during start period (e.g., `1s`) |
+| `start_period` | `HealthcheckConfig.start_period` | Grace period duration string before checks count (e.g., `"20s"`) |
+| `start_interval` | `HealthcheckConfig.start_interval` | Check interval duration string during start period (e.g., `"1s"`) |
 
 ## SDK Usage
 

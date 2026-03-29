@@ -112,6 +112,76 @@ func main() {
 }
 ```
 
+## Key Types
+
+`CreateSandbox` returns a `SandboxHandle` directly (not wrapped in a response struct):
+
+```go
+type SandboxHandle struct {
+    SandboxID         string
+    State             SandboxState
+    LastEventSequence uint64
+    RequiredServices  []ServiceSpec
+    OptionalServices  []ServiceSpec
+    Labels            map[string]string
+    CreatedAt         time.Time   // zero if not set by daemon
+    Image             string
+}
+```
+
+`ServiceSpec` uses `Envs` (not `Environment`):
+
+```go
+type ServiceSpec struct {
+    Name               string
+    Image              string
+    Envs               map[string]string
+    Healthcheck        *HealthcheckConfig
+    PostStartOnPrimary []string
+}
+```
+
+`HealthcheckConfig` uses `*time.Duration` for duration fields:
+
+```go
+type HealthcheckConfig struct {
+    Test          []string
+    Interval      *time.Duration
+    Timeout       *time.Duration
+    Retries       *uint32
+    StartPeriod   *time.Duration
+    StartInterval *time.Duration
+}
+```
+
+`ExecHandle.Cwd` is `string` (not `*string`):
+
+```go
+type ExecHandle struct {
+    ExecID            string
+    SandboxID         string
+    State             ExecState
+    Command           []string
+    Cwd               string
+    EnvOverrides      map[string]string
+    ExitCode          *int32
+    Error             *string
+    LastEventSequence uint64
+    StdoutLogPath     *string
+    StderrLogPath     *string
+}
+```
+
+`ListActiveExecs` uses the option pattern. Pass `WithSandboxID` to filter by sandbox:
+
+```go
+// All active execs across all sandboxes
+execs, err := client.ListActiveExecs(ctx)
+
+// Active execs for one sandbox
+execs, err := client.ListActiveExecs(ctx, sdkclient.WithSandboxID("sandbox-abc"))
+```
+
 ## Stable Behavior
 
 The high-level Go SDK keeps the accepted async contract visible while adding language-appropriate convenience:
@@ -133,13 +203,13 @@ Wait paths use the daemon event stream plus authoritative reads:
 
 ## Error Handling
 
-Typed SDK errors live in `sdk/go/rawclient`, even when you use the high-level client.
+Typed SDK errors are defined in `sdk/go/rawclient` and also re-exported from `sdk/go/client` for convenience. When using the high-level client you can import only `sdk/go/client`.
 
 Common patterns:
 
-- use `var notFound *rawclient.SandboxNotFoundError` then `errors.As(err, &notFound)` for missing sandboxes
-- use `var notRunning *rawclient.ExecNotRunningError` then `errors.As(err, &notRunning)` for `CancelExec` invalid-state paths
-- use `var sdkErr *rawclient.SandboxClientError` then `errors.As(err, &sdkErr)` for generic SDK-level wait and stream failures
+- use `var notFound *client.SandboxNotFoundError` then `errors.As(err, &notFound)` for missing sandboxes
+- use `var notRunning *client.ExecNotRunningError` then `errors.As(err, &notRunning)` for `CancelExec` invalid-state paths
+- use `var sdkErr *client.SandboxClientError` then `errors.As(err, &sdkErr)` for generic SDK-level wait and stream failures
 
 ## Configuration Notes
 

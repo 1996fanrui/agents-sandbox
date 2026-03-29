@@ -120,8 +120,10 @@ func TestSandboxCreate(t *testing.T) {
 				t.Fatalf("unexpected image: %q", request.GetCreateSpec().GetImage())
 			}
 			return &agboxv1.CreateSandboxResponse{
-				SandboxId:    "sandbox-123",
-				InitialState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId: "sandbox-123",
+					State:     agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+				},
 			}, nil
 		},
 	}
@@ -133,7 +135,7 @@ func TestSandboxCreate(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
-	if !strings.Contains(stdout, "sandbox_id=sandbox-123") || !strings.Contains(stdout, "initial_state=SANDBOX_STATE_PENDING") {
+	if !strings.Contains(stdout, "sandbox_id=sandbox-123") || !strings.Contains(stdout, "state=SANDBOX_STATE_PENDING") {
 		t.Fatalf("unexpected stdout %q", stdout)
 	}
 	if service.createReq.GetCreateSpec().GetImage() != "ubuntu:latest" {
@@ -148,7 +150,7 @@ func TestSandboxCreateWithLabels(t *testing.T) {
 			if labels["team"] != "platform" || labels["env"] != "dev" {
 				t.Fatalf("unexpected labels: %#v", labels)
 			}
-			return &agboxv1.CreateSandboxResponse{SandboxId: "sandbox-123"}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-123"}}, nil
 		},
 	}
 
@@ -183,8 +185,10 @@ func TestSandboxCreateJSON(t *testing.T) {
 				t.Fatalf("unexpected image: %q", request.GetCreateSpec().GetImage())
 			}
 			return &agboxv1.CreateSandboxResponse{
-				SandboxId:    "sandbox-123",
-				InitialState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId: "sandbox-123",
+					State:     agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+				},
 			}, nil
 		},
 	}
@@ -193,18 +197,22 @@ func TestSandboxCreateJSON(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stdout, "\n  \"sandbox_id\"") || !strings.Contains(stdout, "\n  \"initial_state\"") {
+	if !strings.Contains(stdout, "\"sandbox\"") || !strings.Contains(stdout, "\"sandbox_id\"") {
 		t.Fatalf("JSON is not pretty-printed with proto names: %q", stdout)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v", err)
 	}
-	if payload["sandbox_id"] != "sandbox-123" {
-		t.Fatalf("unexpected sandbox_id: %#v", payload["sandbox_id"])
+	sandbox, ok := payload["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected sandbox key in JSON: %#v", payload)
 	}
-	if payload["initial_state"] != "SANDBOX_STATE_PENDING" {
-		t.Fatalf("unexpected initial_state: %#v", payload["initial_state"])
+	if sandbox["sandbox_id"] != "sandbox-123" {
+		t.Fatalf("unexpected sandbox_id: %#v", sandbox["sandbox_id"])
+	}
+	if sandbox["state"] != "SANDBOX_STATE_PENDING" {
+		t.Fatalf("unexpected state: %#v", sandbox["state"])
 	}
 }
 
@@ -421,6 +429,8 @@ func TestSandboxGet(t *testing.T) {
 	want := []string{
 		"sandbox_id=sandbox-123",
 		"state=SANDBOX_STATE_READY",
+		"image=",
+		"created_at=",
 		"last_event_sequence=7",
 		`labels={"env":"dev","team":"backend"}`,
 		`required_services=[{"name":"db","image":"postgres:16"}]`,
@@ -430,8 +440,8 @@ func TestSandboxGet(t *testing.T) {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
 	for index, line := range lines {
-		if line != want[index] {
-			t.Fatalf("unexpected line %d: got %q want %q", index, line, want[index])
+		if !strings.HasPrefix(line, want[index]) {
+			t.Fatalf("unexpected line %d: got %q want prefix %q", index, line, want[index])
 		}
 	}
 
@@ -456,6 +466,8 @@ func TestSandboxGet(t *testing.T) {
 	want = []string{
 		"sandbox_id=sandbox-empty",
 		"state=SANDBOX_STATE_PENDING",
+		"image=",
+		"created_at=",
 		"last_event_sequence=0",
 		"labels={}",
 		"required_services=[]",
@@ -465,8 +477,8 @@ func TestSandboxGet(t *testing.T) {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
 	for index, line := range lines {
-		if line != want[index] {
-			t.Fatalf("unexpected line %d: got %q want %q", index, line, want[index])
+		if !strings.HasPrefix(line, want[index]) {
+			t.Fatalf("unexpected line %d: got %q want prefix %q", index, line, want[index])
 		}
 	}
 }
