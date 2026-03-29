@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 func parseKeyValueAssignment(raw string, flagName string) (string, string, error) {
@@ -19,9 +20,10 @@ func parseLabelAssignment(raw string) (string, string, error) {
 }
 
 type sandboxCreateArgs struct {
-	image  string
-	labels map[string]string
-	json   bool
+	image   string
+	labels  map[string]string
+	idleTTL *time.Duration
+	json    bool
 }
 
 type sandboxListArgs struct {
@@ -69,6 +71,19 @@ func parseSandboxCreateArgs(args []string) (sandboxCreateArgs, error) {
 				return sandboxCreateArgs{}, err
 			}
 			parsed.labels[key] = value
+			index += 2
+		case "--idle-ttl":
+			if index+1 >= len(args) {
+				return sandboxCreateArgs{}, usageErrorf("sandbox create requires --idle-ttl <duration>")
+			}
+			d, err := time.ParseDuration(args[index+1])
+			if err != nil {
+				return sandboxCreateArgs{}, usageErrorf("--idle-ttl: invalid duration %q: %v", args[index+1], err)
+			}
+			if d < 0 {
+				return sandboxCreateArgs{}, usageErrorf("--idle-ttl must not be negative")
+			}
+			parsed.idleTTL = &d
 			index += 2
 		case "--json":
 			parsed.json = true

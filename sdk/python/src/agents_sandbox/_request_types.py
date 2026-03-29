@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -18,6 +19,7 @@ class CreateSandboxSpec:
     optional_services: tuple[ServiceSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
     envs: Mapping[str, str] = field(default_factory=dict)
+    idle_ttl: datetime.timedelta | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))

@@ -10,6 +10,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 const (
@@ -130,19 +131,23 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 		image = *options.image
 	}
 
+	createSpec := &agboxv1.CreateSpec{
+		Image:            image,
+		Mounts:           toProtoMounts(options.mounts),
+		Copies:           toProtoCopies(options.copies),
+		BuiltinTools:     slicesClone(options.builtinTools),
+		RequiredServices: toProtoServices(options.requiredServices),
+		OptionalServices: toProtoServices(options.optionalServices),
+		Labels:           cloneStringMap(options.labels),
+		Envs:             cloneStringMap(options.envs),
+	}
+	if options.idleTTL != nil {
+		createSpec.IdleTtl = durationpb.New(*options.idleTTL)
+	}
 	request := &agboxv1.CreateSandboxRequest{
 		SandboxId:  valueOrEmpty(options.sandboxID),
 		ConfigYaml: append([]byte(nil), options.configYAML...),
-		CreateSpec: &agboxv1.CreateSpec{
-			Image:            image,
-			Mounts:           toProtoMounts(options.mounts),
-			Copies:           toProtoCopies(options.copies),
-			BuiltinTools: slicesClone(options.builtinTools),
-			RequiredServices: toProtoServices(options.requiredServices),
-			OptionalServices: toProtoServices(options.optionalServices),
-			Labels:           cloneStringMap(options.labels),
-			Envs:             cloneStringMap(options.envs),
-		},
+		CreateSpec: createSpec,
 	}
 	response, err := c.rpcClient.CreateSandbox(ctx, request)
 	if err != nil {

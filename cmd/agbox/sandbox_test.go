@@ -650,6 +650,87 @@ func TestSandboxDeleteRejectsSingleDashArg(t *testing.T) {
 	}
 }
 
+func TestSandboxCreateIdleTTL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("five_minutes", func(t *testing.T) {
+		t.Parallel()
+		service := &fakeSandboxService{
+			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-1"}}, nil
+			},
+		}
+		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "5m")
+		if exitCode != exitCodeSuccess {
+			t.Fatalf("unexpected exit code %d", exitCode)
+		}
+		got := service.createReq.GetCreateSpec().GetIdleTtl()
+		if got == nil {
+			t.Fatal("expected idle_ttl to be set")
+		}
+		if got.GetSeconds() != 300 || got.GetNanos() != 0 {
+			t.Fatalf("unexpected idle_ttl: %v", got)
+		}
+	})
+
+	t.Run("zero_disables", func(t *testing.T) {
+		t.Parallel()
+		service := &fakeSandboxService{
+			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-2"}}, nil
+			},
+		}
+		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "0")
+		if exitCode != exitCodeSuccess {
+			t.Fatalf("unexpected exit code %d", exitCode)
+		}
+		got := service.createReq.GetCreateSpec().GetIdleTtl()
+		if got == nil {
+			t.Fatal("expected idle_ttl to be set")
+		}
+		if got.GetSeconds() != 0 || got.GetNanos() != 0 {
+			t.Fatalf("unexpected idle_ttl: %v", got)
+		}
+	})
+
+	t.Run("no_flag_leaves_nil", func(t *testing.T) {
+		t.Parallel()
+		service := &fakeSandboxService{
+			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-3"}}, nil
+			},
+		}
+		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest")
+		if exitCode != exitCodeSuccess {
+			t.Fatalf("unexpected exit code %d", exitCode)
+		}
+		if got := service.createReq.GetCreateSpec().GetIdleTtl(); got != nil {
+			t.Fatalf("expected idle_ttl nil, got %v", got)
+		}
+	})
+
+	t.Run("invalid_value", func(t *testing.T) {
+		t.Parallel()
+		_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "notaduration")
+		if exitCode != exitCodeUsageError {
+			t.Fatalf("unexpected exit code %d", exitCode)
+		}
+		if !strings.Contains(stderr, "--idle-ttl") {
+			t.Fatalf("unexpected stderr %q", stderr)
+		}
+	})
+}
+
+func TestSandboxCreateIdleTTLRejectsNegative(t *testing.T) {
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "-1s")
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stderr, "negative") {
+		t.Fatalf("unexpected stderr %q", stderr)
+	}
+}
+
 func runCLIWithSandboxServer(t *testing.T, service *fakeSandboxService, args ...string) (string, string, int) {
 	t.Helper()
 
