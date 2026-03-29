@@ -41,7 +41,7 @@ func (s *Service) scheduleIdleStop(sandboxID string) {
 }
 
 func (s *Service) cleanupExpiredEvents() error {
-	removedSandboxIDs, err := s.config.eventStore.Cleanup(s.config.EventRetentionTTL)
+	removedSandboxIDs, err := s.config.eventStore.Cleanup(s.config.CleanupTTL)
 	if err != nil {
 		return err
 	}

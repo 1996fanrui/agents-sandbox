@@ -25,7 +25,8 @@ type ServiceConfig struct {
 	TransitionDelay        time.Duration
 	PollInterval           time.Duration
 	IdleTTL                time.Duration
-	EventRetentionTTL      time.Duration
+	CleanupTTL             time.Duration
+	CleanupInterval        time.Duration
 	StateRoot              string
 	ArtifactOutputRoot     string
 	ArtifactOutputTemplate string
@@ -42,8 +43,9 @@ func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
 		TransitionDelay:        10 * time.Millisecond,
 		PollInterval:           10 * time.Millisecond,
-		IdleTTL:                30 * time.Minute,
-		EventRetentionTTL:      168 * time.Hour,
+		IdleTTL:                10 * time.Minute,
+		CleanupTTL:             360 * time.Hour,
+		CleanupInterval:        2 * time.Minute,
 		ArtifactOutputTemplate: "{sandbox_id}/{exec_id}",
 		Version:                version.Version,
 		DaemonName:             "agboxd",
@@ -114,8 +116,11 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 	if config.IdleTTL <= 0 {
 		config.IdleTTL = defaults.IdleTTL
 	}
-	if config.EventRetentionTTL <= 0 {
-		config.EventRetentionTTL = defaults.EventRetentionTTL
+	if config.CleanupTTL <= 0 {
+		config.CleanupTTL = defaults.CleanupTTL
+	}
+	if config.CleanupInterval <= 0 {
+		config.CleanupInterval = defaults.CleanupInterval
 	}
 	if config.ArtifactOutputTemplate == "" {
 		config.ArtifactOutputTemplate = defaults.ArtifactOutputTemplate

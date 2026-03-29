@@ -60,7 +60,7 @@ func runWithDeps(
 		slog.String("id_store_path", startup.idStorePath),
 		slog.String("state_root", startup.serviceConfig.StateRoot),
 		slog.String("idle_ttl", startup.serviceConfig.IdleTTL.String()),
-		slog.String("event_retention_ttl", startup.serviceConfig.EventRetentionTTL.String()),
+		slog.String("cleanup_ttl", startup.serviceConfig.CleanupTTL.String()),
 		slog.String("log_level", startup.serviceConfig.LogLevel),
 	)
 
