@@ -21,7 +21,7 @@ type startupConfig struct {
 type daemonFileConfig struct {
 	Runtime struct {
 		IdleTTL           string `toml:"idle_ttl"`
-		EventRetentionTTL string `toml:"event_retention_ttl"`
+		CleanupTTL string `toml:"cleanup_ttl"`
 		StateRoot         string `toml:"state_root"`
 		LogLevel          string `toml:"log_level"`
 	} `toml:"runtime"`
@@ -99,12 +99,12 @@ func applyFileConfig(
 		}
 		serviceConfig.IdleTTL = idleTTL
 	}
-	if fileConfig.Runtime.EventRetentionTTL != "" {
-		eventRetentionTTL, err := time.ParseDuration(fileConfig.Runtime.EventRetentionTTL)
+	if fileConfig.Runtime.CleanupTTL != "" {
+		cleanupTTL, err := time.ParseDuration(fileConfig.Runtime.CleanupTTL)
 		if err != nil {
-			return control.ServiceConfig{}, fmt.Errorf("parse runtime.event_retention_ttl from %s: %w", configPath, err)
+			return control.ServiceConfig{}, fmt.Errorf("parse runtime.cleanup_ttl from %s: %w", configPath, err)
 		}
-		serviceConfig.EventRetentionTTL = eventRetentionTTL
+		serviceConfig.CleanupTTL = cleanupTTL
 	}
 	if fileConfig.Runtime.StateRoot != "" {
 		serviceConfig.StateRoot = fileConfig.Runtime.StateRoot

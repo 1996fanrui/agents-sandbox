@@ -193,7 +193,7 @@ func TestDeletedSandboxEventsRetained(t *testing.T) {
 	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay:   5 * time.Millisecond,
 		PollInterval:      2 * time.Millisecond,
-		EventRetentionTTL: time.Hour,
+		CleanupTTL: time.Hour,
 	}, dbPath)
 	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("retain-delete", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
@@ -239,7 +239,7 @@ func TestExpiredEventsCleanedUp(t *testing.T) {
 	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay:   5 * time.Millisecond,
 		PollInterval:      2 * time.Millisecond,
-		EventRetentionTTL: time.Millisecond,
+		CleanupTTL: time.Millisecond,
 	}, dbPath)
 	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-expired", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {
@@ -481,7 +481,7 @@ func TestCleanupRemovesSandboxAndExecConfig(t *testing.T) {
 	harness := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay:   5 * time.Millisecond,
 		PollInterval:      2 * time.Millisecond,
-		EventRetentionTTL: time.Millisecond,
+		CleanupTTL: time.Millisecond,
 	}, dbPath)
 	createResp, err := harness.client.CreateSandbox(context.Background(), createSandboxRequest("cleanup-config", "ghcr.io/agents-sandbox/coding-runtime:test"))
 	if err != nil {

@@ -40,7 +40,7 @@ func TestRestoredSandboxFullOperations(t *testing.T) {
 		runtimeBackend: &scriptedRuntimeBackend{
 			inspectResult: ContainerInspectResult{Exists: true, Running: true},
 		},
-		EventRetentionTTL: time.Hour,
+		CleanupTTL: time.Hour,
 	}, dbPath)
 
 	// Verify sandbox is READY (not recoveredOnly).
