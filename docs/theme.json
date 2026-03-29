@@ -1,0 +1,45 @@
+{
+  "name": "Agents Sandbox",
+  "docsDir": "docs",
+  "base": "/",
+  "description": "Docker-backed sandbox control plane",
+  "accent": "#3B82F6",
+  "github": "https://github.com/1996fanrui/agents-sandbox",
+  "url": "https://docs.agents-sandbox.com",
+  "cfPagesProject": "agents-sandbox-docs",
+  "sidebar": [
+    {
+      "text": "Getting Started",
+      "items": [
+        { "text": "Architecture Overview", "link": "/architecture_overview" },
+        { "text": "Configuration Reference", "link": "/configuration_reference" }
+      ]
+    },
+    {
+      "text": "Design",
+      "items": [
+        { "text": "Container Dependency Strategy", "link": "/container_dependency_strategy" },
+        { "text": "Daemon State Management", "link": "/daemon_state_management" },
+        { "text": "Declarative YAML Config", "link": "/declarative_yaml_config" },
+        { "text": "Mount and Copy Strategy", "link": "/mount_and_copy_strategy" },
+        { "text": "Protocol Design Principles", "link": "/protocol_design_principles" },
+        { "text": "Sandbox Container Lifecycle", "link": "/sandbox_container_lifecycle" },
+        { "text": "Why Not Builtin Sandboxes", "link": "/why_not_builtin_sandboxes" }
+      ]
+    },
+    {
+      "text": "SDK",
+      "items": [
+        { "text": "Async Python SDK", "link": "/sdk_async_usage" },
+        { "text": "Go SDK", "link": "/sdk_go_usage" }
+      ]
+    },
+    {
+      "text": "Operations",
+      "items": [
+        { "text": "Development", "link": "/development" },
+        { "text": "Release", "link": "/release" }
+      ]
+    }
+  ]
+}
