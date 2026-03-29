@@ -45,6 +45,25 @@ agbox (CLI) is stateless — just rebuild and use it directly:
 go build -o .build/agbox ./cmd/agbox
 ```
 
+## Proto Generation
+
+Go and Python bindings are generated from `api/proto/service.proto` using pinned tool versions:
+
+| Tool | Version |
+|------|---------|
+| protoc | v6.31.1 (release tag v31.1) |
+| protoc-gen-go | v1.36.11 |
+| protoc-gen-go-grpc | v1.6.1 |
+| grpcio-tools | from `sdk/python` dev dependencies |
+
+Regenerate bindings:
+
+```bash
+bash scripts/generate_proto.sh
+```
+
+The script downloads and caches protoc in `.local/protoc/` (project-local, git-ignored) and installs Go plugins in `.local/go-bin/`. CI runs `scripts/lints/check_proto_consistency.sh` automatically through `run_test.sh lint` to ensure checked-in bindings stay in sync with the proto source.
+
 ## Tests
 
 ```bash
