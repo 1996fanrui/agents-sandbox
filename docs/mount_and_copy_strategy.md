@@ -48,7 +48,7 @@ Each mount entry must define:
 
 Rules:
 
-- `source` may be a file or directory.
+- `source` must be an absolute host path pointing to a file or directory.
 - `target` must be an absolute container path.
 - Conflicting targets must fail fast.
 - Invalid or unsafe sources must fail fast.
@@ -65,7 +65,7 @@ Each copy entry must define:
 
 Rules:
 
-- `source` may be a file or directory.
+- `source` must be an absolute host path pointing to a file or directory.
 - `target` must be an absolute container path.
 - `exclude_patterns` define which files or directories should be skipped during the copy.
 - Copied content becomes sandbox filesystem content rather than a live host bind mount.

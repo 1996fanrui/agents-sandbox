@@ -70,7 +70,7 @@ optional_services:
 
 | YAML Key | Proto Field | Description |
 |---|---|---|
-| `source` | `CopySpec.source` | Source path on the host |
+| `source` | `CopySpec.source` | Absolute source path on the host |
 | `target` | `CopySpec.target` | Target path in the container (must be absolute) |
 | `exclude_patterns` | `CopySpec.exclude_patterns` | Glob patterns to exclude from copy |
 
@@ -78,7 +78,7 @@ optional_services:
 
 | YAML Key | Proto Field | Description |
 |---|---|---|
-| `source` | `MountSpec.source` | Source path on the host |
+| `source` | `MountSpec.source` | Absolute source path on the host |
 | `target` | `MountSpec.target` | Target path in the container (must be absolute) |
 | `writable` | `MountSpec.writable` | Whether the mount is writable (default: false) |
 
