@@ -31,8 +31,8 @@ The host lock always lives next to the socket so the lock protects the exact run
 
 | Key | Type | Recommended Default | Override Scope | Purpose |
 |-----|------|---------------------|----------------|---------|
-| `runtime.idle_ttl` | duration string | `"30m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
-| `runtime.event_retention_ttl` | duration string | `"168h"` | Daemon config only | How long deleted sandbox event history remains queryable before cleanup removes it |
+| `runtime.idle_ttl` | duration string | `"10m"` | Daemon config only | Idle stop threshold based on `last_terminal_run_finished_at` |
+| `runtime.cleanup_ttl` | duration string | `"360h"` | Daemon config only | Time after which STOPPED sandboxes have their Docker resources cleaned up and DB records deleted, and DELETED sandbox event history is purged |
 | `runtime.log_level` | string | `"info"` | Daemon config only | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-tool shadow-copy state |
 | `artifacts.exec_output_root` | string | Platform default: Linux: `$XDG_DATA_HOME/agents-sandbox/exec-logs`; macOS: `~/Library/Application Support/agents-sandbox/exec-logs` | Daemon config only | Root directory for exec log files; bind-mounted into the primary container at `/var/log/agents-sandbox/` so exec output is written directly to the host |
@@ -53,10 +53,10 @@ The northbound API may override only a narrow subset of behavior:
 | `required_services` | Yes | Each sandbox declares the services that must become healthy before the primary is reported ready |
 | `optional_services` | Yes | Each sandbox declares the services whose initial startup result is reported without blocking readiness |
 | `runtime.idle_ttl` | No | Idle stop policy stays daemon-owned |
-| `runtime.event_retention_ttl` | No | Event retention policy stays daemon-owned |
+| `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |
 
-The daemon persists sandbox event history in `ids.db` and keeps deleted sandbox streams queryable until `runtime.event_retention_ttl` expires. Cleanup then removes the retained event history and its deletion metadata together.
+The daemon persists sandbox event history in `ids.db`. For STOPPED sandboxes, once `runtime.cleanup_ttl` elapses since the sandbox entered STOPPED state, the daemon automatically removes Docker resources (containers, network) and deletes the sandbox record from the database. For DELETED sandboxes, once `runtime.cleanup_ttl` elapses since deletion, the daemon purges the retained event history and deletion metadata.
 
 ## Singleton Deployment Rule
 
