@@ -207,11 +207,3 @@ func expandHomePath(path string) (string, error) {
 	}
 	return filepath.Abs(path)
 }
-
-func keyValuesToMap(items []*agboxv1.KeyValue) map[string]string {
-	result := make(map[string]string, len(items))
-	for _, item := range items {
-		result[item.GetKey()] = item.GetValue()
-	}
-	return result
-}

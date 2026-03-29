@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestDockerLabelsPassthrough(t *testing.T) {
@@ -246,11 +247,11 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 					Image: "postgres:16",
 					Healthcheck: &agboxv1.HealthcheckConfig{
 						Test:          []string{"CMD", "pg_isready", "-U", "postgres"},
-						Interval:      "2s",
-						Timeout:       "1s",
+						Interval:      durationpb.New(2 * time.Second),
+						Timeout:       durationpb.New(1 * time.Second),
 						Retries:       4,
-						StartPeriod:   "10s",
-						StartInterval: "2s",
+						StartPeriod:   durationpb.New(10 * time.Second),
+						StartInterval: durationpb.New(2 * time.Second),
 					},
 				},
 			},
@@ -273,7 +274,7 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 		t.Fatal("runtime did not receive create spec")
 	}
 	healthcheck := runtime.lastCreateSpec.GetRequiredServices()[0].GetHealthcheck()
-	if healthcheck.GetInterval() != "2s" || healthcheck.GetTimeout() != "1s" || healthcheck.GetRetries() != 4 || healthcheck.GetStartPeriod() != "10s" || healthcheck.GetStartInterval() != "2s" {
+	if healthcheck.GetInterval().AsDuration() != 2*time.Second || healthcheck.GetTimeout().AsDuration() != time.Second || healthcheck.GetRetries() != 4 || healthcheck.GetStartPeriod().AsDuration() != 10*time.Second || healthcheck.GetStartInterval().AsDuration() != 2*time.Second {
 		t.Fatalf("healthcheck was not passed through: %#v", healthcheck)
 	}
 
@@ -391,22 +392,22 @@ func TestServiceLifecycleForResumeStopAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("StopSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
 
-	if _, err := client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	if _, err := client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("ResumeSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	if _, err := client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	if _, err := client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_DELETED)
 }
 
 func TestBuiltinToolsForwardedToRuntime(t *testing.T) {
@@ -427,7 +428,7 @@ func TestBuiltinToolsForwardedToRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	if runtime.lastCreateSpec == nil || len(runtime.lastCreateSpec.GetBuiltinTools()) != 1 || runtime.lastCreateSpec.GetBuiltinTools()[0] != "claude" {
 		t.Fatalf("builtin_tools were not forwarded to runtime: %#v", runtime.lastCreateSpec)
@@ -475,6 +476,8 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"required_services",
 				"optional_services",
 				"labels",
+				"created_at",
+				"image",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"sandbox_id":          1,
@@ -483,6 +486,8 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"required_services":   4,
 				"optional_services":   5,
 				"labels":              6,
+				"created_at":          7,
+				"image":               8,
 			},
 		},
 		{
@@ -496,15 +501,10 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"occurred_at",
 				"replay",
 				"snapshot",
-				"phase",
-				"error_code",
-				"error_message",
-				"reason",
-				"exec_id",
-				"exit_code",
 				"sandbox_state",
-				"exec_state",
-				"service_name",
+				"sandbox_phase",
+				"exec",
+				"service",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"event_id":      1,
@@ -514,15 +514,10 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"occurred_at":   5,
 				"replay":        6,
 				"snapshot":      7,
-				"phase":         8,
-				"error_code":    9,
-				"error_message": 10,
-				"reason":        11,
-				"exec_id":       12,
-				"exit_code":     13,
-				"sandbox_state": 14,
-				"exec_state":    15,
-				"service_name":  16,
+				"sandbox_state": 8,
+				"sandbox_phase": 9,
+				"exec":          10,
+				"service":       11,
 			},
 		},
 		{

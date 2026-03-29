@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -120,10 +121,10 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -141,7 +142,7 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 	serviceReadyIndex := -1
 	sandboxReadyIndex := -1
 	for index, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && event.GetServiceName() == "db" {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "db" {
 			serviceReadyIndex = index
 		}
 		if event.GetEventType() == agboxv1.EventType_SANDBOX_READY {
@@ -155,7 +156,7 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 		t.Fatalf("service ready event must be emitted before SANDBOX_READY: %#v", events)
 	}
 
-	sandboxResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	sandboxResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -174,10 +175,10 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 			name: "with_start_interval",
 			health: &agboxv1.HealthcheckConfig{
 				Test:          []string{"CMD", "true"},
-				StartPeriod:   "20s",
-				StartInterval: "11s",
-				Interval:      "2s",
-				Timeout:       "7s",
+				StartPeriod:   durationpb.New(20 * time.Second),
+				StartInterval: durationpb.New(11 * time.Second),
+				Interval:      durationpb.New(2 * time.Second),
+				Timeout:       durationpb.New(7 * time.Second),
 				Retries:       2,
 			},
 			wantWindow: 52 * time.Second,
@@ -186,9 +187,9 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 			name: "default_start_interval_when_start_period_positive",
 			health: &agboxv1.HealthcheckConfig{
 				Test:        []string{"CMD", "true"},
-				StartPeriod: "12s",
-				Interval:    "2s",
-				Timeout:     "1s",
+				StartPeriod: durationpb.New(12 * time.Second),
+				Interval:    durationpb.New(2 * time.Second),
+				Timeout:     durationpb.New(1 * time.Second),
 				Retries:     2,
 			},
 			wantWindow: 23 * time.Second,
@@ -197,8 +198,8 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 			name: "default_retries",
 			health: &agboxv1.HealthcheckConfig{
 				Test:     []string{"CMD", "true"},
-				Interval: "4s",
-				Timeout:  "6s",
+				Interval: durationpb.New(4 * time.Second),
+				Timeout:  durationpb.New(6 * time.Second),
 			},
 			wantWindow: 24 * time.Second,
 		},
@@ -206,10 +207,10 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 			name: "cap_to_five_minutes",
 			health: &agboxv1.HealthcheckConfig{
 				Test:          []string{"CMD", "true"},
-				StartPeriod:   "10m",
-				StartInterval: "20s",
-				Interval:      "40s",
-				Timeout:       "10s",
+				StartPeriod:   durationpb.New(10 * time.Minute),
+				StartInterval: durationpb.New(20 * time.Second),
+				Interval:      durationpb.New(40 * time.Second),
+				Timeout:       durationpb.New(10 * time.Second),
 				Retries:       10,
 			},
 			wantWindow: 5 * time.Minute,
@@ -254,7 +255,7 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed unexpectedly: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 }
 
 func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
@@ -284,13 +285,13 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	optionalStatuses <- runtimeServiceStatus{Name: "cache", Required: false, Ready: false, Message: "image pull failed"}
 	optionalStatuses <- runtimeServiceStatus{Name: "queue", Required: false, Ready: true}
 	close(optionalStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -304,10 +305,10 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 			if item.GetEventType() == agboxv1.EventType_SANDBOX_READY {
 				sandboxReady = true
 			}
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && item.GetServiceName() == "queue" {
+			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(item) == "queue" {
 				optionalReady = true
 			}
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && item.GetServiceName() == "cache" {
+			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && eventServiceName(item) == "cache" {
 				optionalFailed = true
 			}
 		}
@@ -317,10 +318,10 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 	var optionalReady bool
 	var optionalFailed bool
 	for _, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && event.GetServiceName() == "queue" {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "queue" {
 			optionalReady = true
 		}
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && event.GetServiceName() == "cache" {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && eventServiceName(event) == "cache" {
 			optionalFailed = true
 		}
 	}
@@ -356,11 +357,11 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	close(optionalStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -370,7 +371,7 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 		var sawReady bool
 		var sawOptionalReady bool
 		for _, item := range items {
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && item.GetServiceName() == "cache" {
+			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(item) == "cache" {
 				sawOptionalReady = true
 			}
 			if item.GetEventType() == agboxv1.EventType_SANDBOX_READY {
@@ -385,7 +386,7 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 	optionalIndex := -1
 	readyIndex := -1
 	for index, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && event.GetServiceName() == "cache" {
+		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "cache" {
 			optionalIndex = index
 			if event.GetSandboxState() != agboxv1.SandboxState_SANDBOX_STATE_PENDING {
 				t.Fatalf("expected optional service event to keep pending sandbox state, got %#v", event)
@@ -499,11 +500,11 @@ func TestLatestHealthLogTimestampUsesNewestNonNilEntry(t *testing.T) {
 func TestToContainerHealthConfigMapsProtoFields(t *testing.T) {
 	config, err := toContainerHealthConfig(&agboxv1.HealthcheckConfig{
 		Test:          []string{"CMD", "pg_isready", "-U", "postgres"},
-		Interval:      "5s",
-		Timeout:       "2s",
+		Interval:      durationpb.New(5 * time.Second),
+		Timeout:       durationpb.New(2 * time.Second),
 		Retries:       3,
-		StartPeriod:   "10s",
-		StartInterval: "1s",
+		StartPeriod:   durationpb.New(10 * time.Second),
+		StartInterval: durationpb.New(1 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("toContainerHealthConfig failed: %v", err)
@@ -522,16 +523,6 @@ func TestToContainerHealthConfigMapsProtoFields(t *testing.T) {
 	}
 	if config.StartPeriod != 10*time.Second || config.StartInterval != time.Second {
 		t.Fatalf("unexpected start timing: start_period=%s start_interval=%s", config.StartPeriod, config.StartInterval)
-	}
-}
-
-func TestToContainerHealthConfigRejectsInvalidDuration(t *testing.T) {
-	_, err := toContainerHealthConfig(&agboxv1.HealthcheckConfig{
-		Test:     []string{"CMD", "true"},
-		Interval: "not-a-duration",
-	})
-	if err == nil || !strings.Contains(err.Error(), "parse healthcheck interval") {
-		t.Fatalf("expected invalid interval error, got %v", err)
 	}
 }
 

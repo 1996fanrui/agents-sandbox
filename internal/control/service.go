@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ServiceConfig struct {
@@ -163,7 +164,10 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid config_yaml: %v", err)
 		}
-		yamlSpec := yamlConfigToCreateSpec(yamlCfg)
+		yamlSpec, err := yamlConfigToCreateSpec(yamlCfg)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid config_yaml: %v", err)
+		}
 		override := req.GetCreateSpec()
 		if override == nil {
 			override = &agboxv1.CreateSpec{}
@@ -201,6 +205,8 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 			Labels:           cloneStringMap(req.GetCreateSpec().GetLabels()),
 			RequiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
 			OptionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
+			CreatedAt:        timestamppb.Now(),
+			Image:            req.GetCreateSpec().GetImage(),
 		},
 		createSpec:       cloneCreateSpec(req.GetCreateSpec()),
 		requiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
@@ -222,8 +228,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	s.config.Logger.Info("sandbox create accepted", slog.String("sandbox_id", sandboxID))
 
 	return &agboxv1.CreateSandboxResponse{
-		SandboxId:    sandboxID,
-		InitialState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+		Sandbox: cloneHandle(record.handle),
 	}, nil
 }
 
@@ -234,7 +239,7 @@ func (s *Service) GetSandbox(_ context.Context, req *agboxv1.GetSandboxRequest) 
 
 	record, ok := s.boxes[req.GetSandboxId()]
 	if !ok {
-		return nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", req.GetSandboxId())
+		return nil, newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s was not found", req.GetSandboxId())
 	}
 	return &agboxv1.GetSandboxResponse{Sandbox: cloneHandle(record.handle)}, nil
 }
@@ -269,7 +274,7 @@ func (s *Service) ResumeSandbox(_ context.Context, req *agboxv1.ResumeSandboxReq
 	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_STOPPED {
 		s.mu.Unlock()
-		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not stopped", req.GetSandboxId())
+		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s is not stopped", req.GetSandboxId())
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,
@@ -294,7 +299,7 @@ func (s *Service) StopSandbox(_ context.Context, req *agboxv1.StopSandboxRequest
 	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
 		s.mu.Unlock()
-		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, "sandbox %s is not ready", req.GetSandboxId())
+		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxInvalidState, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s is not ready", req.GetSandboxId())
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_STOP_REQUESTED, eventMutation{
 		reason: "stop_requested",
@@ -386,7 +391,7 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 	record, ok := s.boxes[req.GetSandboxId()]
 	if !ok {
 		s.mu.RUnlock()
-		return newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", req.GetSandboxId())
+		return newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s was not found", req.GetSandboxId())
 	}
 	if req.GetIncludeCurrentSnapshot() {
 		for _, event := range snapshotEvents(record) {
@@ -423,7 +428,7 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 			record, ok := s.boxes[req.GetSandboxId()]
 			if !ok {
 				s.mu.RUnlock()
-				return newStatusError(codes.NotFound, ReasonSandboxNotFound, "sandbox %s was not found", req.GetSandboxId())
+				return newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s was not found", req.GetSandboxId())
 			}
 			if err := validateSequenceNotExpired(record, nextSequence); err != nil {
 				s.mu.RUnlock()
@@ -451,7 +456,7 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		return nil, err
 	}
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
-		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxNotReady, "sandbox %s is not ready", req.GetSandboxId())
+		return nil, newStatusError(codes.FailedPrecondition, ReasonSandboxNotReady, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s is not ready", req.GetSandboxId())
 	}
 	if len(req.GetCommand()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "command must not be empty")
@@ -465,7 +470,7 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		ExecId:       execID,
 		Command:      slices.Clone(req.GetCommand()),
 		Cwd:          req.GetCwd(),
-		EnvOverrides: cloneKeyValues(req.GetEnvOverrides()),
+		EnvOverrides: cloneStringMap(req.GetEnvOverrides()),
 	}
 	if err := s.config.eventStore.SaveExecConfig(req.GetSandboxId(), execConfigCopy); err != nil {
 		cleanupErr := s.config.idRegistry.ReleaseExecID(execID)
@@ -484,7 +489,7 @@ func (s *Service) CreateExec(_ context.Context, req *agboxv1.CreateExecRequest) 
 		State:        agboxv1.ExecState_EXEC_STATE_RUNNING,
 		Command:      slices.Clone(req.GetCommand()),
 		Cwd:          req.GetCwd(),
-		EnvOverrides: cloneKeyValues(req.GetEnvOverrides()),
+		EnvOverrides: cloneStringMap(req.GetEnvOverrides()),
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_STARTED, eventMutation{
 		execID:    execID,
@@ -518,7 +523,7 @@ func (s *Service) CancelExec(_ context.Context, req *agboxv1.CancelExecRequest) 
 		return nil, err
 	}
 	if isExecTerminal(execRecord.GetState()) {
-		return nil, newStatusError(codes.FailedPrecondition, ReasonExecAlreadyTerminal, "exec %s is already terminal", req.GetExecId())
+		return nil, newStatusError(codes.FailedPrecondition, ReasonExecAlreadyTerminal, map[string]string{"exec_id": req.GetExecId()}, "exec %s is already terminal", req.GetExecId())
 	}
 	record := s.boxes[sandboxID]
 	if err := s.appendEventLocked(record, agboxv1.EventType_EXEC_CANCELLED, eventMutation{
@@ -582,7 +587,7 @@ func (s *Service) allocateID(
 		}
 		if err := reserve(requestedID, time.Now().UTC()); err != nil {
 			if errors.Is(err, errSandboxIDAlreadyExists) || errors.Is(err, errExecIDAlreadyExists) {
-				return "", newStatusError(codes.AlreadyExists, duplicateReason, "%s %s already exists", fieldName, requestedID)
+				return "", newStatusError(codes.AlreadyExists, duplicateReason, map[string]string{fieldName: requestedID}, "%s %s already exists", fieldName, requestedID)
 			}
 			return "", status.Errorf(codes.Internal, "reserve %s: %v", fieldName, err)
 		}
@@ -618,7 +623,7 @@ func (s *Service) ListActiveExecs(_ context.Context, req *agboxv1.ListActiveExec
 
 	var execs []*agboxv1.ExecStatus
 	for _, record := range s.boxes {
-		if req.GetSandboxId() != "" && record.handle.GetSandboxId() != req.GetSandboxId() {
+		if req.SandboxId != nil && record.handle.GetSandboxId() != req.GetSandboxId() {
 			continue
 		}
 		for _, execRecord := range record.execs {

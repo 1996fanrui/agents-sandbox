@@ -266,7 +266,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			NetworkName:  state.NetworkName,
 			NetworkAlias: service.GetName(),
 			Labels:       runtimedocker.ServiceLabels(record.handle.GetSandboxId(), service.GetName(), userLabels),
-			Environment:  keyValuesToMap(service.GetEnvironment()),
+			Environment:  service.GetEnvs(),
 			Healthcheck:  service.GetHealthcheck(),
 		}); err != nil {
 			return runtimeCreateResult{}, err
@@ -294,8 +294,8 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 
 	primaryEnv := primaryContainerEnvironment(mounts)
-	for _, kv := range record.createSpec.GetEnvs() {
-		primaryEnv[kv.GetKey()] = kv.GetValue()
+	for k, v := range record.createSpec.GetEnvs() {
+		primaryEnv[k] = v
 	}
 	if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
 		Name:        state.PrimaryContainerName,
@@ -324,7 +324,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			if _, err := backend.dockerExec(ctx, dockerExecSpec{
 				ContainerName: state.PrimaryContainerName,
 				Command:       []string{"sh", "-lc", hook},
-				Environment:   keyValuesToMap(service.GetEnvironment()),
+				Environment:   service.GetEnvs(),
 			}); err != nil {
 				return runtimeCreateResult{}, err
 			}
@@ -413,7 +413,7 @@ func startOptionalServicesAsync(
 				NetworkName:  networkName,
 				NetworkAlias: service.GetName(),
 				Labels:       runtimedocker.ServiceLabels(sandboxID, service.GetName(), userLabels),
-				Environment:  keyValuesToMap(service.GetEnvironment()),
+				Environment:  service.GetEnvs(),
 				Healthcheck:  service.GetHealthcheck(),
 			}); err != nil {
 				status.Ready = false
@@ -439,7 +439,7 @@ func startOptionalServicesAsync(
 						if _, err := backend.dockerExec(optionalCtx, dockerExecSpec{
 							ContainerName: primaryContainerName,
 							Command:       []string{"sh", "-lc", hook},
-							Environment:   keyValuesToMap(svc.GetEnvironment()),
+							Environment:   svc.GetEnvs(),
 						}); err != nil {
 							return
 						}
@@ -581,8 +581,11 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 	}
 	// Merge sandbox-level envs with exec-level overrides.
 	// Exec overrides take precedence over sandbox envs.
-	execEnv := keyValuesToMap(record.createSpec.GetEnvs())
-	for k, v := range keyValuesToMap(execRecord.GetEnvOverrides()) {
+	execEnv := make(map[string]string)
+	for k, v := range record.createSpec.GetEnvs() {
+		execEnv[k] = v
+	}
+	for k, v := range execRecord.GetEnvOverrides() {
 		execEnv[k] = v
 	}
 	exitCode, err := backend.dockerExec(ctx, dockerExecSpec{

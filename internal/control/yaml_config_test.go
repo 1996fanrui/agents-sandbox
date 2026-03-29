@@ -2,6 +2,7 @@ package control
 
 import (
 	"testing"
+	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 )
@@ -24,7 +25,7 @@ builtin_tools:
 required_services:
   db:
     image: postgres:16
-    environment:
+    envs:
       POSTGRES_USER: admin
       POSTGRES_DB: mydb
     healthcheck:
@@ -39,7 +40,7 @@ required_services:
 optional_services:
   cache:
     image: redis:7
-    environment:
+    envs:
       REDIS_MAX_MEMORY: "256mb"
 labels:
   owner: team-a
@@ -73,8 +74,8 @@ envs:
 	if db.Image != "postgres:16" {
 		t.Fatalf("unexpected db image: %s", db.Image)
 	}
-	if db.Environment["POSTGRES_USER"] != "admin" || db.Environment["POSTGRES_DB"] != "mydb" {
-		t.Fatalf("unexpected db environment: %v", db.Environment)
+	if db.Envs["POSTGRES_USER"] != "admin" || db.Envs["POSTGRES_DB"] != "mydb" {
+		t.Fatalf("unexpected db envs: %v", db.Envs)
 	}
 	if db.Healthcheck == nil || db.Healthcheck.Retries != 5 || db.Healthcheck.Interval != "2s" {
 		t.Fatalf("unexpected db healthcheck: %#v", db.Healthcheck)
@@ -121,7 +122,7 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		RequiredServices: map[string]YAMLServiceSpec{
 			"beta": {
 				Image: "beta:1",
-				Environment: map[string]string{
+				Envs: map[string]string{
 					"Z_KEY": "z_val",
 					"A_KEY": "a_val",
 				},
@@ -146,7 +147,10 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		Envs:   map[string]string{"Z_VAR": "z_val", "A_VAR": "a_val"},
 	}
 
-	spec := yamlConfigToCreateSpec(cfg)
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
 
 	if spec.GetImage() != "test:latest" {
 		t.Fatalf("unexpected image: %s", spec.GetImage())
@@ -170,21 +174,22 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		t.Fatalf("required services not sorted: %s, %s", required[0].GetName(), required[1].GetName())
 	}
 
-	// Beta's environment should be sorted: A_KEY before Z_KEY.
-	betaEnv := required[1].GetEnvironment()
-	if len(betaEnv) != 2 {
-		t.Fatalf("expected 2 env vars for beta, got %d", len(betaEnv))
+	// Beta's envs should contain A_KEY and Z_KEY.
+	betaEnvs := required[1].GetEnvs()
+	if len(betaEnvs) != 2 {
+		t.Fatalf("expected 2 env vars for beta, got %d", len(betaEnvs))
 	}
-	if betaEnv[0].GetKey() != "A_KEY" || betaEnv[1].GetKey() != "Z_KEY" {
-		t.Fatalf("environment not sorted: %s, %s", betaEnv[0].GetKey(), betaEnv[1].GetKey())
-	}
-	if betaEnv[0].GetValue() != "a_val" {
-		t.Fatalf("unexpected env value: %s", betaEnv[0].GetValue())
+	if betaEnvs["A_KEY"] != "a_val" || betaEnvs["Z_KEY"] != "z_val" {
+		t.Fatalf("unexpected beta envs: %v", betaEnvs)
 	}
 
-	// Verify healthcheck passthrough.
-	if required[1].GetHealthcheck().GetInterval() != "1s" || required[1].GetHealthcheck().GetRetries() != 3 {
-		t.Fatalf("unexpected healthcheck: %#v", required[1].GetHealthcheck())
+	// Verify healthcheck fields including parsed duration.
+	hc := required[1].GetHealthcheck()
+	if hc.GetRetries() != 3 {
+		t.Fatalf("unexpected healthcheck retries: %#v", hc)
+	}
+	if hc.GetInterval().AsDuration() != time.Second {
+		t.Fatalf("unexpected healthcheck interval: %v", hc.GetInterval())
 	}
 
 	// Verify post_start_on_primary.
@@ -203,16 +208,13 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		t.Fatalf("unexpected labels: %v", spec.GetLabels())
 	}
 
-	// Envs should be sorted: A_VAR before Z_VAR.
+	// Envs are a map.
 	envs := spec.GetEnvs()
 	if len(envs) != 2 {
 		t.Fatalf("expected 2 envs, got %d", len(envs))
 	}
-	if envs[0].GetKey() != "A_VAR" || envs[1].GetKey() != "Z_VAR" {
-		t.Fatalf("envs not sorted: %s, %s", envs[0].GetKey(), envs[1].GetKey())
-	}
-	if envs[0].GetValue() != "a_val" || envs[1].GetValue() != "z_val" {
-		t.Fatalf("unexpected env values: %s, %s", envs[0].GetValue(), envs[1].GetValue())
+	if envs["A_VAR"] != "a_val" || envs["Z_VAR"] != "z_val" {
+		t.Fatalf("unexpected env values: %v", envs)
 	}
 }
 
@@ -232,13 +234,73 @@ func TestYAMLConfigServiceTypes(t *testing.T) {
 		},
 	}
 
-	spec := yamlConfigToCreateSpec(cfg)
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
 
 	if len(spec.GetRequiredServices()) != 1 || spec.GetRequiredServices()[0].GetName() != "db" {
 		t.Fatalf("required services mismatch: %v", spec.GetRequiredServices())
 	}
 	if len(spec.GetOptionalServices()) != 1 || spec.GetOptionalServices()[0].GetName() != "cache" {
 		t.Fatalf("optional services mismatch: %v", spec.GetOptionalServices())
+	}
+}
+
+func TestYAMLInvalidDurationRejected(t *testing.T) {
+	cfg := &YAMLConfig{
+		Image: "test:latest",
+		RequiredServices: map[string]YAMLServiceSpec{
+			"db": {
+				Image: "postgres:16",
+				Healthcheck: &YAMLHealthcheckConfig{
+					Test:     []string{"CMD", "pg_isready"},
+					Interval: "invalid",
+				},
+			},
+		},
+	}
+
+	_, err := yamlConfigToCreateSpec(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid duration, got nil")
+	}
+}
+
+func TestYAMLAllDurationFieldsParsed(t *testing.T) {
+	cfg := &YAMLConfig{
+		Image: "test:latest",
+		RequiredServices: map[string]YAMLServiceSpec{
+			"db": {
+				Image: "postgres:16",
+				Healthcheck: &YAMLHealthcheckConfig{
+					Test:          []string{"CMD", "pg_isready"},
+					Interval:      "2s",
+					Timeout:       "500ms",
+					StartPeriod:   "30s",
+					StartInterval: "1s",
+				},
+			},
+		},
+	}
+
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+
+	hc := spec.GetRequiredServices()[0].GetHealthcheck()
+	if hc.GetInterval().AsDuration() != 2*time.Second {
+		t.Fatalf("unexpected interval: %v", hc.GetInterval())
+	}
+	if hc.GetTimeout().AsDuration() != 500*time.Millisecond {
+		t.Fatalf("unexpected timeout: %v", hc.GetTimeout())
+	}
+	if hc.GetStartPeriod().AsDuration() != 30*time.Second {
+		t.Fatalf("unexpected start_period: %v", hc.GetStartPeriod())
+	}
+	if hc.GetStartInterval().AsDuration() != time.Second {
+		t.Fatalf("unexpected start_interval: %v", hc.GetStartInterval())
 	}
 }
 
@@ -328,40 +390,29 @@ func TestMergeCreateSpecs(t *testing.T) {
 		{
 			name: "envs_merge",
 			base: &agboxv1.CreateSpec{
-				Envs: []*agboxv1.KeyValue{
-					{Key: "A", Value: "1"},
-					{Key: "B", Value: "2"},
-				},
+				Envs: map[string]string{"A": "1", "B": "2"},
 			},
 			override: &agboxv1.CreateSpec{
-				Envs: []*agboxv1.KeyValue{
-					{Key: "B", Value: "3"},
-					{Key: "C", Value: "4"},
-				},
+				Envs: map[string]string{"B": "3", "C": "4"},
 			},
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
-				envMap := make(map[string]string)
-				for _, kv := range result.GetEnvs() {
-					envMap[kv.GetKey()] = kv.GetValue()
+				envs := result.GetEnvs()
+				if envs["A"] != "1" || envs["B"] != "3" || envs["C"] != "4" {
+					t.Fatalf("unexpected merged envs: %v", envs)
 				}
-				if envMap["A"] != "1" || envMap["B"] != "3" || envMap["C"] != "4" {
-					t.Fatalf("unexpected merged envs: %v", envMap)
-				}
-				if len(envMap) != 3 {
-					t.Fatalf("expected 3 envs, got %d", len(envMap))
+				if len(envs) != 3 {
+					t.Fatalf("expected 3 envs, got %d", len(envs))
 				}
 			},
 		},
 		{
 			name: "envs_no_override",
 			base: &agboxv1.CreateSpec{
-				Envs: []*agboxv1.KeyValue{
-					{Key: "A", Value: "1"},
-				},
+				Envs: map[string]string{"A": "1"},
 			},
 			override: &agboxv1.CreateSpec{},
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
-				if len(result.GetEnvs()) != 1 || result.GetEnvs()[0].GetKey() != "A" {
+				if result.GetEnvs()["A"] != "1" {
 					t.Fatalf("expected base envs preserved, got %v", result.GetEnvs())
 				}
 			},

@@ -2,10 +2,13 @@ package control
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
+	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +42,7 @@ type YAMLCopySpec struct {
 // YAMLServiceSpec describes a sidecar service container.
 type YAMLServiceSpec struct {
 	Image              string                 `yaml:"image"`
-	Environment        map[string]string      `yaml:"environment"`
+	Envs               map[string]string      `yaml:"envs"`
 	Healthcheck        *YAMLHealthcheckConfig `yaml:"healthcheck"`
 	PostStartOnPrimary []string               `yaml:"post_start_on_primary"`
 }
@@ -68,11 +71,11 @@ func parseYAMLConfig(raw []byte) (*YAMLConfig, error) {
 }
 
 // yamlConfigToCreateSpec converts a parsed YAMLConfig into a proto CreateSpec.
-// Map keys for services and environment variables are sorted alphabetically
-// to produce deterministic output.
-func yamlConfigToCreateSpec(cfg *YAMLConfig) *agboxv1.CreateSpec {
+// Map keys for services are sorted alphabetically to produce deterministic output.
+// Returns an error if any duration field in a service healthcheck is unparseable.
+func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 	spec := &agboxv1.CreateSpec{
-		Image:            cfg.Image,
+		Image:        cfg.Image,
 		BuiltinTools: cfg.BuiltinTools,
 	}
 
@@ -92,8 +95,13 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) *agboxv1.CreateSpec {
 		})
 	}
 
-	spec.RequiredServices = convertServiceMap(cfg.RequiredServices)
-	spec.OptionalServices = convertServiceMap(cfg.OptionalServices)
+	var err error
+	if spec.RequiredServices, err = convertServiceMap(cfg.RequiredServices); err != nil {
+		return nil, err
+	}
+	if spec.OptionalServices, err = convertServiceMap(cfg.OptionalServices); err != nil {
+		return nil, err
+	}
 
 	if len(cfg.Labels) > 0 {
 		spec.Labels = make(map[string]string, len(cfg.Labels))
@@ -102,29 +110,22 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) *agboxv1.CreateSpec {
 		}
 	}
 
-	// Convert envs map to sorted KeyValue pairs.
 	if len(cfg.Envs) > 0 {
-		envKeys := make([]string, 0, len(cfg.Envs))
-		for k := range cfg.Envs {
-			envKeys = append(envKeys, k)
-		}
-		sort.Strings(envKeys)
-		for _, ek := range envKeys {
-			spec.Envs = append(spec.Envs, &agboxv1.KeyValue{
-				Key:   ek,
-				Value: cfg.Envs[ek],
-			})
+		spec.Envs = make(map[string]string, len(cfg.Envs))
+		for k, v := range cfg.Envs {
+			spec.Envs[k] = v
 		}
 	}
 
-	return spec
+	return spec, nil
 }
 
 // convertServiceMap converts a map of service name to YAMLServiceSpec into
 // a sorted slice of proto ServiceSpec. The map key becomes ServiceSpec.Name.
-func convertServiceMap(services map[string]YAMLServiceSpec) []*agboxv1.ServiceSpec {
+// Returns an error if any healthcheck duration field contains an unparseable value.
+func convertServiceMap(services map[string]YAMLServiceSpec) ([]*agboxv1.ServiceSpec, error) {
 	if len(services) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	keys := make([]string, 0, len(services))
@@ -142,53 +143,52 @@ func convertServiceMap(services map[string]YAMLServiceSpec) []*agboxv1.ServiceSp
 			PostStartOnPrimary: svc.PostStartOnPrimary,
 		}
 
-		// Convert environment map to sorted KeyValue pairs.
-		if len(svc.Environment) > 0 {
-			envKeys := make([]string, 0, len(svc.Environment))
-			for k := range svc.Environment {
-				envKeys = append(envKeys, k)
-			}
-			sort.Strings(envKeys)
-			for _, ek := range envKeys {
-				protoSvc.Environment = append(protoSvc.Environment, &agboxv1.KeyValue{
-					Key:   ek,
-					Value: svc.Environment[ek],
-				})
+		if len(svc.Envs) > 0 {
+			protoSvc.Envs = make(map[string]string, len(svc.Envs))
+			for k, v := range svc.Envs {
+				protoSvc.Envs[k] = v
 			}
 		}
 
 		if svc.Healthcheck != nil {
-			protoSvc.Healthcheck = &agboxv1.HealthcheckConfig{
-				Test:          svc.Healthcheck.Test,
-				Interval:      svc.Healthcheck.Interval,
-				Timeout:       svc.Healthcheck.Timeout,
-				Retries:       svc.Healthcheck.Retries,
-				StartPeriod:   svc.Healthcheck.StartPeriod,
-				StartInterval: svc.Healthcheck.StartInterval,
+			hc := &agboxv1.HealthcheckConfig{
+				Test:    svc.Healthcheck.Test,
+				Retries: svc.Healthcheck.Retries,
 			}
+			var err error
+			if hc.Interval, err = parseOptionalDuration("interval", svc.Healthcheck.Interval); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			if hc.Timeout, err = parseOptionalDuration("timeout", svc.Healthcheck.Timeout); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			if hc.StartPeriod, err = parseOptionalDuration("start_period", svc.Healthcheck.StartPeriod); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			if hc.StartInterval, err = parseOptionalDuration("start_interval", svc.Healthcheck.StartInterval); err != nil {
+				return nil, fmt.Errorf("service %q: %w", name, err)
+			}
+			protoSvc.Healthcheck = hc
 		}
 
 		result = append(result, protoSvc)
 	}
 
-	return result
+	return result, nil
 }
 
-// sortedKeyValues converts a map to a sorted slice of KeyValue pairs.
-func sortedKeyValues(m map[string]string) []*agboxv1.KeyValue {
-	if len(m) == 0 {
-		return nil
+// parseOptionalDuration parses a human-readable duration string (e.g., "10s", "1m30s")
+// into a proto Duration. Returns nil for empty strings.
+// Returns an error for non-empty but unparseable values.
+func parseOptionalDuration(field, value string) (*durationpb.Duration, error) {
+	if value == "" {
+		return nil, nil
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid duration for %s: %q: %w", field, value, err)
 	}
-	sort.Strings(keys)
-	result := make([]*agboxv1.KeyValue, 0, len(keys))
-	for _, k := range keys {
-		result = append(result, &agboxv1.KeyValue{Key: k, Value: m[k]})
-	}
-	return result
+	return durationpb.New(d), nil
 }
 
 // mergeCreateSpecs merges two CreateSpecs: base provides defaults, override
@@ -241,11 +241,12 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 
 	// Envs: key-level merge (same semantics as labels).
 	if len(override.GetEnvs()) > 0 {
-		merged := keyValuesToMap(result.GetEnvs())
-		for _, kv := range override.GetEnvs() {
-			merged[kv.GetKey()] = kv.GetValue()
+		if result.Envs == nil {
+			result.Envs = make(map[string]string)
 		}
-		result.Envs = sortedKeyValues(merged)
+		for k, v := range override.GetEnvs() {
+			result.Envs[k] = v
+		}
 	}
 
 	return result

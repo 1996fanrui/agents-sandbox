@@ -24,19 +24,19 @@ func TestSubscribeSandboxEventsReplayFromZeroSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("StopSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
-	if _, err := client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandboxId()}); err != nil {
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
+	if _, err := client.ResumeSandbox(context.Background(), &agboxv1.ResumeSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()}); err != nil {
 		t.Fatalf("ResumeSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	replay, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 0,
 	})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestSubscribeSandboxEventsReplayFromZeroSequence(t *testing.T) {
 	}
 
 	incremental, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: fullHistory[2].GetSequence(),
 	})
 	if err != nil {
@@ -90,10 +90,10 @@ func TestExpiredSequenceReturnsOutOfRangeError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:    createResp.GetSandboxId(),
+		SandboxId:    createResp.GetSandbox().GetSandboxId(),
 		FromSequence: 99,
 	})
 	if err != nil {
@@ -157,8 +157,8 @@ func TestCreateSandboxAcceptFailureReleasesSandboxID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox retry failed: %v", err)
 	}
-	if createResp.GetSandboxId() != "reusable-sandbox" {
-		t.Fatalf("unexpected sandbox id: %s", createResp.GetSandboxId())
+	if createResp.GetSandbox().GetSandboxId() != "reusable-sandbox" {
+		t.Fatalf("unexpected sandbox id: %s", createResp.GetSandbox().GetSandboxId())
 	}
 }
 
@@ -183,7 +183,7 @@ func TestSandboxStaysPendingWhenReadyEventAppendFails(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		resp, getErr := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+		resp, getErr := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 		if getErr != nil {
 			t.Fatalf("GetSandbox failed: %v", getErr)
 		}
@@ -193,7 +193,7 @@ func TestSandboxStaysPendingWhenReadyEventAppendFails(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	resp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandboxId()})
+	resp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestCreateExecStartFailureReleasesExecIDAndArtifactPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	client = newBufconnClient(t, ServiceConfig{
 		idRegistry:             registry,
@@ -273,9 +273,9 @@ func TestCreateExecStartFailureReleasesExecIDAndArtifactPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "retry-exec",
 		Command:   []string{"echo", "hello"},
 	})
@@ -284,7 +284,7 @@ func TestCreateExecStartFailureReleasesExecIDAndArtifactPath(t *testing.T) {
 	}
 	assertStatusCode(t, err, codes.Internal)
 
-	artifactPath := filepath.Join(outputRoot, createResp.GetSandboxId(), "retry-exec.log")
+	artifactPath := filepath.Join(outputRoot, createResp.GetSandbox().GetSandboxId(), "retry-exec.log")
 	if _, statErr := os.Stat(artifactPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("expected artifact path to be removed, got %v", statErr)
 	}
@@ -298,9 +298,9 @@ func TestCreateExecStartFailureReleasesExecIDAndArtifactPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "retry-exec",
 		Command:   []string{"echo", "hello"},
 	})
@@ -322,17 +322,17 @@ func TestCancelExecEmitsCancelledEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
 	}
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"sleep", "1"},
 	})
 	if err != nil {
@@ -353,7 +353,7 @@ func TestCancelExecEmitsCancelledEvent(t *testing.T) {
 		return false
 	})
 	cancelEvent := cancelEvents[len(cancelEvents)-1]
-	if cancelEvent.GetEventType() != agboxv1.EventType_EXEC_CANCELLED || cancelEvent.GetExecId() != execResp.GetExecId() {
+	if cancelEvent.GetEventType() != agboxv1.EventType_EXEC_CANCELLED || eventExecID(cancelEvent) != execResp.GetExecId() {
 		t.Fatalf("unexpected cancel event: %#v", cancelEvent)
 	}
 }
@@ -368,17 +368,17 @@ func TestStopAndDeleteSandboxEmitRequestAndTerminalEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
 	}
 
 	if _, err := client.StopSandbox(context.Background(), &agboxv1.StopSandboxRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	}); err != nil {
 		t.Fatalf("StopSandbox failed: %v", err)
 	}
@@ -390,12 +390,12 @@ func TestStopAndDeleteSandboxEmitRequestAndTerminalEvents(t *testing.T) {
 		}
 		return false
 	})
-	if stopEvents[len(stopEvents)-1].GetReason() != "stop_requested" {
+	if eventReason(stopEvents[len(stopEvents)-1]) != "stop_requested" {
 		t.Fatalf("unexpected stop reason: %#v", stopEvents[len(stopEvents)-1])
 	}
 
 	if _, err := client.DeleteSandbox(context.Background(), &agboxv1.DeleteSandboxRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestStopAndDeleteSandboxEmitRequestAndTerminalEvents(t *testing.T) {
 		}
 		return false
 	})
-	if deleteEvents[len(deleteEvents)-1].GetReason() != "delete_requested" {
+	if eventReason(deleteEvents[len(deleteEvents)-1]) != "delete_requested" {
 		t.Fatalf("unexpected delete reason: %#v", deleteEvents[len(deleteEvents)-1])
 	}
 }
@@ -425,17 +425,17 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
 	}
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "idle"},
 	})
 	if err != nil {
@@ -455,7 +455,7 @@ func TestIdleTTLStopsReadySandboxAfterTerminalExec(t *testing.T) {
 	if lastEvent.GetEventType() != agboxv1.EventType_SANDBOX_STOPPED {
 		t.Fatalf("unexpected idle-stop terminal event: %#v", lastEvent)
 	}
-	if lastEvent.GetReason() != "idle_ttl" {
+	if eventReason(lastEvent) != "idle_ttl" {
 		t.Fatalf("unexpected idle-stop reason: %#v", lastEvent)
 	}
 }

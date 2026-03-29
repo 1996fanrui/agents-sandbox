@@ -43,7 +43,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	}
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	})
 	if err != nil {
 		t.Fatalf("SubscribeSandboxEvents failed: %v", err)
@@ -65,7 +65,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	}
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "hello"},
 		Cwd:       "/workspace",
 	})
@@ -89,10 +89,10 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 			startEvent = event
 		}
 	}
-	if startEvent == nil || startEvent.GetExecId() != execResp.GetExecId() {
+	if startEvent == nil || eventExecID(startEvent) != execResp.GetExecId() {
 		t.Fatalf("missing exec started event: %#v", startEvent)
 	}
-	if last.GetEventType() != agboxv1.EventType_EXEC_FINISHED || last.GetExecId() != execResp.GetExecId() || last.GetExitCode() != 0 {
+	if last.GetEventType() != agboxv1.EventType_EXEC_FINISHED || eventExecID(last) != execResp.GetExecId() || eventExitCode(last) != 0 {
 		t.Fatalf("unexpected exec terminal event: %#v", last)
 	}
 }
@@ -110,10 +110,10 @@ func TestConfiguredArtifactOutputPathIsCreatedForExecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "hello"},
 	})
 	if err != nil {
@@ -185,10 +185,10 @@ func TestCreateExecResponseIncludesLogPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "hello"},
 		ExecId:    "exec-resp-test",
 	})
@@ -219,10 +219,10 @@ func TestCreateExecFailsFastWhenArtifactTemplateEscapesRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo"},
 	})
 	if status.Code(err) != codes.FailedPrecondition {
@@ -243,16 +243,16 @@ func TestExplicitErrorSemantics(t *testing.T) {
 	}
 
 	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo"},
 	}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("expected not-ready error, got %v", err)
 	}
 
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo"},
 	})
 	if err != nil {
@@ -267,7 +267,7 @@ func TestExplicitErrorSemantics(t *testing.T) {
 		t.Fatalf("expected not-found error, got %v", err)
 	}
 	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 	}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected invalid argument, got %v", err)
 	}
@@ -283,15 +283,15 @@ func TestCallerProvidedSandboxID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	if createResp.GetSandboxId() != "issue11-sandbox" {
-		t.Fatalf("unexpected sandbox id: %q", createResp.GetSandboxId())
+	if createResp.GetSandbox().GetSandboxId() != "issue11-sandbox" {
+		t.Fatalf("unexpected sandbox id: %q", createResp.GetSandbox().GetSandboxId())
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	eventCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	stream, err := client.SubscribeSandboxEvents(eventCtx, &agboxv1.SubscribeSandboxEventsRequest{
-		SandboxId:              createResp.GetSandboxId(),
+		SandboxId:              createResp.GetSandbox().GetSandboxId(),
 		IncludeCurrentSnapshot: true,
 	})
 	if err != nil {
@@ -391,13 +391,13 @@ func TestDaemonGeneratedSandboxIDUsesUUIDAndRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	if _, err := uuid.Parse(createResp.GetSandboxId()); err != nil {
-		t.Fatalf("expected UUIDv4 sandbox id, got %q: %v", createResp.GetSandboxId(), err)
+	if _, err := uuid.Parse(createResp.GetSandbox().GetSandboxId()); err != nil {
+		t.Fatalf("expected UUIDv4 sandbox id, got %q: %v", createResp.GetSandbox().GetSandboxId(), err)
 	}
-	if _, ok := registry.sandboxIDs[createResp.GetSandboxId()]; !ok {
-		t.Fatalf("sandbox id %q was not recorded in registry", createResp.GetSandboxId())
+	if _, ok := registry.sandboxIDs[createResp.GetSandbox().GetSandboxId()]; !ok {
+		t.Fatalf("sandbox id %q was not recorded in registry", createResp.GetSandbox().GetSandboxId())
 	}
-	if err := registry.ReserveSandboxID(createResp.GetSandboxId(), time.Now().UTC()); !errors.Is(err, errSandboxIDAlreadyExists) {
+	if err := registry.ReserveSandboxID(createResp.GetSandbox().GetSandboxId(), time.Now().UTC()); !errors.Is(err, errSandboxIDAlreadyExists) {
 		t.Fatalf("expected duplicate registry reservation to fail, got %v", err)
 	}
 }
@@ -412,10 +412,10 @@ func TestCallerProvidedExecID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "issue11-exec",
 		Command:   []string{"echo", "hello"},
 	})
@@ -446,12 +446,12 @@ func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
-	waitForSandboxState(t, client, createResp.GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
 	for _, execID := range []string{"-myexec", "ab", "exec/"} {
 		t.Run("invalid-"+execID, func(t *testing.T) {
 			_, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-				SandboxId: createResp.GetSandboxId(),
+				SandboxId: createResp.GetSandbox().GetSandboxId(),
 				ExecId:    execID,
 				Command:   []string{"echo"},
 			})
@@ -462,14 +462,14 @@ func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
 	}
 
 	if _, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "dup-exec",
 		Command:   []string{"echo"},
 	}); err != nil {
 		t.Fatalf("CreateExec(first) failed: %v", err)
 	}
 	_, err = client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		ExecId:    "dup-exec",
 		Command:   []string{"echo"},
 	})
@@ -479,7 +479,7 @@ func TestExecIDValidationDuplicateAndUUIDFallback(t *testing.T) {
 	assertErrorReason(t, err, ReasonExecIDAlreadyExists)
 
 	execResp, err := client.CreateExec(context.Background(), &agboxv1.CreateExecRequest{
-		SandboxId: createResp.GetSandboxId(),
+		SandboxId: createResp.GetSandbox().GetSandboxId(),
 		Command:   []string{"echo", "uuid"},
 	})
 	if err != nil {

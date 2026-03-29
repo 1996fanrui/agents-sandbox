@@ -10,6 +10,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 func cloneMounts(items []*agboxv1.MountSpec) []*agboxv1.MountSpec {
@@ -48,7 +49,7 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		BuiltinTools: slices.Clone(spec.GetBuiltinTools()),
 		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
 		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
-		Envs:             cloneKeyValues(spec.GetEnvs()),
+		Envs:             cloneStringMap(spec.GetEnvs()),
 	}
 }
 
@@ -63,26 +64,12 @@ func cloneStringMap(source map[string]string) map[string]string {
 	return cloned
 }
 
-func cloneKeyValues(items []*agboxv1.KeyValue) []*agboxv1.KeyValue {
-	result := make([]*agboxv1.KeyValue, 0, len(items))
-	for _, item := range items {
-		result = append(result, &agboxv1.KeyValue{Key: item.GetKey(), Value: item.GetValue()})
-	}
-	return result
-}
-
 func cloneHealthcheck(healthcheck *agboxv1.HealthcheckConfig) *agboxv1.HealthcheckConfig {
 	if healthcheck == nil {
 		return nil
 	}
-	return &agboxv1.HealthcheckConfig{
-		Test:          slices.Clone(healthcheck.GetTest()),
-		Interval:      healthcheck.GetInterval(),
-		Timeout:       healthcheck.GetTimeout(),
-		Retries:       healthcheck.GetRetries(),
-		StartPeriod:   healthcheck.GetStartPeriod(),
-		StartInterval: healthcheck.GetStartInterval(),
-	}
+	cloned := proto.Clone(healthcheck).(*agboxv1.HealthcheckConfig)
+	return cloned
 }
 
 func cloneServiceSpecs(items []*agboxv1.ServiceSpec) []*agboxv1.ServiceSpec {
@@ -91,7 +78,7 @@ func cloneServiceSpecs(items []*agboxv1.ServiceSpec) []*agboxv1.ServiceSpec {
 		result = append(result, &agboxv1.ServiceSpec{
 			Name:               item.GetName(),
 			Image:              item.GetImage(),
-			Environment:        cloneKeyValues(item.GetEnvironment()),
+			Envs:               cloneStringMap(item.GetEnvs()),
 			Healthcheck:        cloneHealthcheck(item.GetHealthcheck()),
 			PostStartOnPrimary: slices.Clone(item.GetPostStartOnPrimary()),
 		})
@@ -110,6 +97,8 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		Labels:            cloneStringMap(handle.GetLabels()),
 		RequiredServices:  cloneServiceSpecs(handle.GetRequiredServices()),
 		OptionalServices:  cloneServiceSpecs(handle.GetOptionalServices()),
+		CreatedAt:         handle.GetCreatedAt(),
+		Image:             handle.GetImage(),
 	}
 }
 
@@ -150,7 +139,7 @@ func cloneExec(execRecord *agboxv1.ExecStatus) *agboxv1.ExecStatus {
 		State:             execRecord.GetState(),
 		Command:           slices.Clone(execRecord.GetCommand()),
 		Cwd:               execRecord.GetCwd(),
-		EnvOverrides:      cloneKeyValues(execRecord.GetEnvOverrides()),
+		EnvOverrides:      cloneStringMap(execRecord.GetEnvOverrides()),
 		ExitCode:          execRecord.GetExitCode(),
 		Error:             execRecord.GetError(),
 		LastEventSequence: execRecord.GetLastEventSequence(),
@@ -161,7 +150,7 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 	if event == nil {
 		return nil
 	}
-	return &agboxv1.SandboxEvent{
+	cloned := &agboxv1.SandboxEvent{
 		EventId:      event.GetEventId(),
 		Sequence:     event.GetSequence(),
 		SandboxId:    event.GetSandboxId(),
@@ -169,16 +158,44 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 		OccurredAt:   event.GetOccurredAt(),
 		Replay:       event.GetReplay(),
 		Snapshot:     event.GetSnapshot(),
-		Phase:        event.GetPhase(),
-		ErrorCode:    event.GetErrorCode(),
-		ErrorMessage: event.GetErrorMessage(),
-		Reason:       event.GetReason(),
-		ExecId:       event.GetExecId(),
-		ExitCode:     event.GetExitCode(),
 		SandboxState: event.GetSandboxState(),
-		ExecState:    event.GetExecState(),
-		ServiceName:  event.GetServiceName(),
 	}
+	switch d := event.GetDetails().(type) {
+	case *agboxv1.SandboxEvent_SandboxPhase:
+		if d != nil && d.SandboxPhase != nil {
+			cloned.Details = &agboxv1.SandboxEvent_SandboxPhase{
+				SandboxPhase: &agboxv1.SandboxPhaseDetails{
+					Phase:        d.SandboxPhase.GetPhase(),
+					ErrorCode:    d.SandboxPhase.GetErrorCode(),
+					ErrorMessage: d.SandboxPhase.GetErrorMessage(),
+					Reason:       d.SandboxPhase.GetReason(),
+				},
+			}
+		}
+	case *agboxv1.SandboxEvent_Exec:
+		if d != nil && d.Exec != nil {
+			cloned.Details = &agboxv1.SandboxEvent_Exec{
+				Exec: &agboxv1.ExecEventDetails{
+					ExecId:       d.Exec.GetExecId(),
+					ExitCode:     d.Exec.GetExitCode(),
+					ExecState:    d.Exec.GetExecState(),
+					ErrorCode:    d.Exec.GetErrorCode(),
+					ErrorMessage: d.Exec.GetErrorMessage(),
+				},
+			}
+		}
+	case *agboxv1.SandboxEvent_Service:
+		if d != nil && d.Service != nil {
+			cloned.Details = &agboxv1.SandboxEvent_Service{
+				Service: &agboxv1.ServiceEventDetails{
+					ServiceName:  d.Service.GetServiceName(),
+					ErrorCode:    d.Service.GetErrorCode(),
+					ErrorMessage: d.Service.GetErrorMessage(),
+				},
+			}
+		}
+	}
+	return cloned
 }
 
 func ListenAndServe(ctx context.Context, socketPath string, service *Service, logger *slog.Logger) error {
