@@ -14,15 +14,16 @@ const (
 type MountID string
 
 const (
-	MountIDClaude   MountID = ".claude"
-	MountIDCodex    MountID = ".codex"
-	MountIDAgents   MountID = ".agents"
-	MountIDGHAuth   MountID = "gh-auth"
-	MountIDSSHAgent MountID = "ssh-agent"
-	MountIDUVCache  MountID = "uv-cache"
-	MountIDUVData   MountID = "uv-data"
-	MountIDNPM      MountID = "npm"
-	MountIDApt      MountID = "apt"
+	MountIDClaude     MountID = ".claude"
+	MountIDClaudeJSON MountID = ".claude.json"
+	MountIDCodex      MountID = ".codex"
+	MountIDAgents     MountID = ".agents"
+	MountIDGHAuth     MountID = "gh-auth"
+	MountIDSSHAgent   MountID = "ssh-agent"
+	MountIDUVCache    MountID = "uv-cache"
+	MountIDUVData     MountID = "uv-data"
+	MountIDNPM        MountID = "npm"
+	MountIDApt        MountID = "apt"
 )
 
 // ToolID is the canonical identifier for a tooling capability.
@@ -57,6 +58,12 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		ID:              MountIDClaude,
 		DefaultHostPath: "~/.claude",
 		ContainerTarget: "/home/agbox/.claude",
+		Mode:            CapabilityModeReadWrite,
+	},
+	{
+		ID:              MountIDClaudeJSON,
+		DefaultHostPath: "~/.claude.json",
+		ContainerTarget: "/home/agbox/.claude.json",
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
@@ -120,7 +127,7 @@ func buildMountIndex(mounts []CapabilityMount) map[MountID]CapabilityMount {
 }
 
 var builtInToolingCapabilities = map[ToolID]ToolingCapability{
-	ToolIDClaude: {MountIDs: []MountID{MountIDClaude}},
+	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON}},
 	// codex requires its own config dir and the shared agents state directory.
 	ToolIDCodex: {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
 	// git requires SSH key forwarding and GitHub CLI auth.
