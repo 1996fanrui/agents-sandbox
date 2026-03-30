@@ -20,8 +20,8 @@ import (
 
 const (
 	// defaultImage is the coding runtime image used for interactive agent sessions.
-	// agbox claude/codex are designed specifically for this image; the tools inside
-	// it may not be available in other images.
+	// Pre-registered agent tools are designed for this image; the tools inside it
+	// may not be available in other images.
 	defaultImage = "ghcr.io/agents-sandbox/coding-runtime:latest"
 
 	// deleteAndWaitTimeout is the maximum time to wait for sandbox deletion to complete.
@@ -63,10 +63,10 @@ func primaryContainerName(sandboxID string) string {
 	return "agbox-primary-" + sanitizeContainerName(sandboxID)
 }
 
-// runAgentSession implements the shared flow for `agbox claude` and `agbox codex`.
+// runAgentSession implements the shared flow for `agbox agent <tool>` and
+// `agbox agent --command "..."`.
 func runAgentSession(
 	ctx context.Context,
-	toolName string,
 	args []string,
 	stdout io.Writer,
 	stderr io.Writer,
@@ -76,7 +76,7 @@ func runAgentSession(
 	// docker to exit immediately with an error, and the interactive experience
 	// (echo, Ctrl+C, terminal size) would be broken anyway.
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return usageErrorf("stdin is not a TTY; %s requires an interactive terminal", toolName)
+		return usageErrorf("stdin is not a TTY; agbox agent requires an interactive terminal")
 	}
 
 	cwd, err := os.Getwd()
@@ -84,14 +84,16 @@ func runAgentSession(
 		return runtimeErrorf("resolve working directory: %v", err)
 	}
 
-	toolDef, ok := agentToolDefs[toolName]
-	if !ok {
-		return runtimeErrorf("unknown agent tool %q", toolName)
-	}
-
-	parsed, err := parseAgentSessionArgs(args, cwd, toolDef.builtinTools)
+	parsed, err := parseAgentSessionArgs(args, cwd)
 	if err != nil {
 		return err
+	}
+
+	// Derive label for sandbox metadata. For registered tools use the tool name;
+	// for custom commands use the basename of the first command token.
+	toolLabel := parsed.toolName
+	if toolLabel == "" {
+		toolLabel = parsed.command[0]
 	}
 
 	if _, err := os.Stat(parsed.mount); err != nil {
@@ -129,7 +131,7 @@ func runAgentSession(
 			},
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
-				"agent-tool": toolName,
+				"agent-tool": toolLabel,
 			},
 			IdleTtl: durationpb.New(0),
 		},
@@ -166,7 +168,7 @@ func runAgentSession(
 	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
 		return err
 	}
-	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, toolDef.command...)
+	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, parsed.command...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

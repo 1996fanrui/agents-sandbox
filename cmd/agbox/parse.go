@@ -241,21 +241,29 @@ func parseSandboxExecArgs(args []string) (sandboxExecArgs, error) {
 }
 
 type agentSessionArgs struct {
+	toolName     string   // pre-registered tool name (empty when --command is used)
+	command      []string // custom command (empty when a registered tool is used)
 	mount        string
 	builtinTools []string
 }
 
-func parseAgentSessionArgs(args []string, defaultMount string, defaultBuiltinTools []string) (agentSessionArgs, error) {
+func parseAgentSessionArgs(args []string, defaultMount string) (agentSessionArgs, error) {
 	parsed := agentSessionArgs{
-		mount:        defaultMount,
-		builtinTools: defaultBuiltinTools,
+		mount: defaultMount,
 	}
 	// Track whether --builtin-tool was specified at least once so we can
 	// replace the default list rather than append to it.
 	builtinToolsOverridden := false
+	var rawCommand string
 
 	for index := 0; index < len(args); {
 		switch args[index] {
+		case "--command":
+			if index+1 >= len(args) {
+				return agentSessionArgs{}, usageErrorf("--command requires an argument")
+			}
+			rawCommand = args[index+1]
+			index += 2
 		case "--mount":
 			if index+1 >= len(args) {
 				return agentSessionArgs{}, usageErrorf("--mount requires a path argument")
@@ -273,8 +281,41 @@ func parseAgentSessionArgs(args []string, defaultMount string, defaultBuiltinToo
 			parsed.builtinTools = append(parsed.builtinTools, args[index+1])
 			index += 2
 		default:
-			return agentSessionArgs{}, usageErrorf("unexpected argument %q", args[index])
+			if strings.HasPrefix(args[index], "-") {
+				return agentSessionArgs{}, usageErrorf("unexpected argument %q", args[index])
+			}
+			// Positional argument: registered tool name.
+			if parsed.toolName != "" {
+				return agentSessionArgs{}, usageErrorf("unexpected argument %q; tool name already set to %q", args[index], parsed.toolName)
+			}
+			parsed.toolName = args[index]
+			index++
 		}
+	}
+
+	// Validate mutual exclusion: tool name vs --command.
+	if parsed.toolName != "" && rawCommand != "" {
+		return agentSessionArgs{}, usageErrorf("cannot use --command with a registered tool name %q", parsed.toolName)
+	}
+
+	if parsed.toolName != "" {
+		// Registered tool: look up defaults from agentToolDefs.
+		toolDef, ok := agentToolDefs[parsed.toolName]
+		if !ok {
+			return agentSessionArgs{}, usageErrorf("unknown agent tool %q; use --command for custom agents", parsed.toolName)
+		}
+		parsed.command = toolDef.command
+		if !builtinToolsOverridden {
+			parsed.builtinTools = toolDef.builtinTools
+		}
+	} else if rawCommand != "" {
+		// Custom command: split the string into argv.
+		parsed.command = strings.Fields(rawCommand)
+		if len(parsed.command) == 0 {
+			return agentSessionArgs{}, usageErrorf("--command must not be empty")
+		}
+	} else {
+		return agentSessionArgs{}, usageErrorf("agbox agent requires a tool name or --command")
 	}
 
 	return parsed, nil
