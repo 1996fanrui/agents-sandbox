@@ -660,6 +660,31 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 	}
 }
 
+func TestMaterializeBuiltinToolsSkipsOptionalWhenHostPathMissing(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	backendWithoutState := &dockerRuntimeBackend{
+		config: ServiceConfig{},
+	}
+
+	// Request an optional tool (uv) whose host paths do not exist.
+	// materializeBuiltinTools should skip them silently instead of failing.
+	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-optional-skip", []string{"uv"}, &sandboxRuntimeState{})
+	if err != nil {
+		t.Fatalf("expected optional tool mounts to be skipped, got error: %v", err)
+	}
+	if len(mounts) != 0 {
+		t.Fatalf("expected zero mounts when optional host paths are missing, got %d", len(mounts))
+	}
+
+	// When mixing required and optional tools, the required tool must still fail
+	// if its path is missing.
+	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-mixed", []string{"uv", "claude"}, &sandboxRuntimeState{}); err == nil {
+		t.Fatal("expected error for required tool (claude) with missing host path, got nil")
+	}
+}
+
 func TestProtoEventTypesForServices(t *testing.T) {
 	values := agboxv1.EventType(0).Descriptor().Values()
 	sandboxReady := values.ByName("SANDBOX_READY")

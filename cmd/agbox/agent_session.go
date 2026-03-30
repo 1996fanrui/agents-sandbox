@@ -32,14 +32,22 @@ const (
 	sigtermGracePeriod = 10 * time.Second
 )
 
-// defaultBuiltinTools lists the tool names projected into every agent session sandbox.
-// This list is intentionally fixed; new tools are not added automatically.
-var defaultBuiltinTools = []string{"claude", "codex", "git", "uv", "npm", "apt"}
+// agentToolDef defines the container-internal command and the builtin tools for an agent.
+type agentToolDef struct {
+	command      []string
+	builtinTools []string
+}
 
-// agentToolCommand maps the top-level command name to the container-internal command and args.
-var agentToolCommand = map[string][]string{
-	"claude": {"claude", "--dangerously-skip-permissions"},
-	"codex":  {"codex", "--dangerously-bypass-approvals-and-sandbox"},
+// agentToolDefs maps the top-level command name to its full definition.
+var agentToolDefs = map[string]agentToolDef{
+	"claude": {
+		command:      []string{"claude", "--dangerously-skip-permissions"},
+		builtinTools: []string{"claude", "git", "uv", "npm", "apt"},
+	},
+	"codex": {
+		command:      []string{"codex", "--dangerously-bypass-approvals-and-sandbox"},
+		builtinTools: []string{"codex", "git", "uv", "npm", "apt"},
+	},
 }
 
 // sanitizeContainerName replicates the daemon's sanitizeRuntimeName rule so that
@@ -76,18 +84,18 @@ func runAgentSession(
 		return runtimeErrorf("resolve working directory: %v", err)
 	}
 
-	parsed, err := parseAgentSessionArgs(args, cwd, defaultBuiltinTools)
+	toolDef, ok := agentToolDefs[toolName]
+	if !ok {
+		return runtimeErrorf("unknown agent tool %q", toolName)
+	}
+
+	parsed, err := parseAgentSessionArgs(args, cwd, toolDef.builtinTools)
 	if err != nil {
 		return err
 	}
 
 	if _, err := os.Stat(parsed.mount); err != nil {
 		return usageErrorf("--mount path %q: %v", parsed.mount, err)
-	}
-
-	containerCmd := agentToolCommand[toolName]
-	if containerCmd == nil {
-		return runtimeErrorf("unknown agent tool %q", toolName)
 	}
 
 	socketPath, err := platform.SocketPath(lookupEnv)
@@ -158,7 +166,7 @@ func runAgentSession(
 	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
 		return err
 	}
-	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, containerCmd...)
+	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, toolDef.command...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
