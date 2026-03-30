@@ -71,12 +71,19 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 }
 
 func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
+	// Point to a non-existent runtime dir so the test never connects to a
+	// real running daemon, which would change the expected output.
+	isolatedEnv := func(key string) (string, bool) {
+		if key == "XDG_RUNTIME_DIR" {
+			return t.TempDir(), true
+		}
+		return "", false
+	}
+
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := run(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) {
-		return "", false
-	})
+	exitCode := run(context.Background(), nil, &stdout, &stderr, isolatedEnv)
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -90,9 +97,7 @@ func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	exitCode = run(context.Background(), []string{"version"}, &stdout, &stderr, func(string) (string, bool) {
-		return "", false
-	})
+	exitCode = run(context.Background(), []string{"version"}, &stdout, &stderr, isolatedEnv)
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}

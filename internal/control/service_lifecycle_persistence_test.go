@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -285,7 +286,13 @@ func TestJoinServiceClosersClosesRuntimeBeforeRegistry(t *testing.T) {
 }
 
 func TestNewServiceDoesNotRequireReachableDockerDaemonAtConstruction(t *testing.T) {
-	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "nonexistent-docker.sock"))
+	// Use a short temp path to stay under the macOS 104-char Unix socket limit.
+	shortDir, err := os.MkdirTemp("/tmp", "agbox-dock-")
+	if err != nil {
+		t.Fatalf("mkdtemp failed: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(shortDir) })
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(shortDir, "docker.sock"))
 
 	service, closer, err := NewService(ServiceConfig{Logger: slog.Default()})
 	if err != nil {

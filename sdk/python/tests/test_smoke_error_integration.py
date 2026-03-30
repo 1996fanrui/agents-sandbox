@@ -36,9 +36,9 @@ def test_sdk_maps_error_info_reasons_to_public_exceptions(
 ) -> None:
     servicer = _ErrorSandboxService(reason=reason)
 
-    with _running_server(tmp_path / f"{reason.lower()}.sock", servicer):
+    with _running_server(f"{reason.lower()}.sock", servicer) as socket_path:
         async def run_test() -> None:
-            client = _new_client(tmp_path / f"{reason.lower()}.sock")
+            client = _new_client(socket_path)
             if reason in {"EXEC_NOT_FOUND", "EXEC_ALREADY_TERMINAL"}:
                 await client.cancel_exec("exec-1")
             elif reason == "EXEC_ID_ALREADY_EXISTS":

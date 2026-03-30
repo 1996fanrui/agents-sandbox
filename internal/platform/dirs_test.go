@@ -9,9 +9,6 @@ import (
 )
 
 func TestDataDirUsesXDGDataHome(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("XDG not applicable on macOS")
-	}
 	dir := DataDir(func(key string) (string, bool) {
 		if key == "XDG_DATA_HOME" {
 			return "/custom/data", true
@@ -37,9 +34,6 @@ func TestDataDirFallsBackToHome(t *testing.T) {
 }
 
 func TestConfigDirUsesXDGConfigHome(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("XDG not applicable on macOS")
-	}
 	dir := ConfigDir(func(key string) (string, bool) {
 		if key == "XDG_CONFIG_HOME" {
 			return "/custom/config", true
@@ -52,9 +46,6 @@ func TestConfigDirUsesXDGConfigHome(t *testing.T) {
 }
 
 func TestRuntimeDirUsesXDGRuntimeDir(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("XDG not applicable on macOS")
-	}
 	dir := RuntimeDir(func(key string) (string, bool) {
 		if key == "XDG_RUNTIME_DIR" {
 			return "/run/user/1000", true
@@ -105,25 +96,16 @@ func TestFixedPlatformPaths(t *testing.T) {
 			wantStore: filepath.Join("/tmp/data", "agents-sandbox", "ids.db"),
 		},
 		{
+			// When lookupEnv provides XDG overrides, darwin also respects them.
 			goos:      "darwin",
-			wantSock:  filepath.Join("/home/fanrui", "Library", "Application Support", "agbox", "run", "agboxd.sock"),
-			wantLock:  filepath.Join("/home/fanrui", "Library", "Application Support", "agbox", "run", "agboxd.lock"),
-			wantCfg:   filepath.Join("/home/fanrui", "Library", "Application Support", "agents-sandbox", "config.toml"),
-			wantStore: filepath.Join("/home/fanrui", "Library", "Application Support", "agents-sandbox", "ids.db"),
+			wantSock:  filepath.Join("/run/user/1000", "agbox", "agboxd.sock"),
+			wantLock:  filepath.Join("/run/user/1000", "agbox", "agboxd.lock"),
+			wantCfg:   filepath.Join("/tmp/config", "agents-sandbox", "config.toml"),
+			wantStore: filepath.Join("/tmp/data", "agents-sandbox", "ids.db"),
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.goos, func(t *testing.T) {
-			if tc.goos == "darwin" {
-				homeDir, err := os.UserHomeDir()
-				if err != nil {
-					t.Fatalf("UserHomeDir returned error: %v", err)
-				}
-				tc.wantSock = filepath.Join(homeDir, "Library", "Application Support", "agbox", "run", "agboxd.sock")
-				tc.wantLock = filepath.Join(homeDir, "Library", "Application Support", "agbox", "run", "agboxd.lock")
-				tc.wantCfg = filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "config.toml")
-				tc.wantStore = filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "ids.db")
-			}
 			socketPath, err := socketPathForGOOS(tc.goos, lookupEnv)
 			if err != nil {
 				t.Fatalf("socketPathForGOOS returned error: %v", err)
@@ -186,13 +168,26 @@ func TestExecLogRootFallsBackToHome(t *testing.T) {
 	}
 }
 
-func TestExecLogRootDarwin(t *testing.T) {
+func TestExecLogRootDarwinDefault(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("UserHomeDir returned error: %v", err)
 	}
 	root := execLogRootForGOOS("darwin", func(string) (string, bool) { return "", false })
 	want := filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "exec-logs")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
+	}
+}
+
+func TestExecLogRootDarwinWithOverride(t *testing.T) {
+	root := execLogRootForGOOS("darwin", func(key string) (string, bool) {
+		if key == "XDG_DATA_HOME" {
+			return "/custom/data", true
+		}
+		return "", false
+	})
+	want := filepath.Join("/custom/data", "agents-sandbox", "exec-logs")
 	if root != want {
 		t.Fatalf("expected %q, got %q", want, root)
 	}
