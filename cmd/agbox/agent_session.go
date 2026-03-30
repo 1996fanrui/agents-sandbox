@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,12 +16,11 @@ import (
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"strings"
 )
 
 const (
 	// defaultImage is the coding runtime image used for interactive agent sessions.
-	// Pre-registered agent tools are designed for this image; the tools inside it
+	// Pre-registered agent types are designed for this image; the commands inside it
 	// may not be available in other images.
 	defaultImage = "ghcr.io/agents-sandbox/coding-runtime:latest"
 
@@ -32,14 +32,14 @@ const (
 	sigtermGracePeriod = 10 * time.Second
 )
 
-// agentToolDef defines the container-internal command and the builtin tools for an agent.
-type agentToolDef struct {
+// agentTypeDef defines the container-internal command and the builtin tools for an agent type.
+type agentTypeDef struct {
 	command      []string
 	builtinTools []string
 }
 
-// agentToolDefs maps the top-level command name to its full definition.
-var agentToolDefs = map[string]agentToolDef{
+// agentTypeDefs maps agent type names to their full definitions.
+var agentTypeDefs = map[string]agentTypeDef{
 	"claude": {
 		command:      []string{"claude", "--dangerously-skip-permissions"},
 		builtinTools: []string{"claude", "git", "uv", "npm", "apt"},
@@ -67,7 +67,7 @@ func primaryContainerName(sandboxID string) string {
 // `agbox agent --command "..."`.
 func runAgentSession(
 	ctx context.Context,
-	args []string,
+	parsed agentSessionArgs,
 	stdout io.Writer,
 	stderr io.Writer,
 	lookupEnv func(string) (string, bool),
@@ -79,25 +79,15 @@ func runAgentSession(
 		return usageErrorf("stdin is not a TTY; agbox agent requires an interactive terminal")
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return runtimeErrorf("resolve working directory: %v", err)
-	}
-
-	parsed, err := parseAgentSessionArgs(args, cwd)
-	if err != nil {
-		return err
-	}
-
-	// Derive label for sandbox metadata. For registered tools use the tool name;
-	// for custom commands use the basename of the first command token.
-	toolLabel := parsed.toolName
-	if toolLabel == "" {
-		toolLabel = parsed.command[0]
-	}
-
 	if _, err := os.Stat(parsed.mount); err != nil {
 		return usageErrorf("--mount path %q: %v", parsed.mount, err)
+	}
+
+	// Derive label for sandbox metadata. For registered agent types use the type name;
+	// for custom commands use the basename of the first command token.
+	agentLabel := parsed.agentType
+	if agentLabel == "" {
+		agentLabel = parsed.command[0]
 	}
 
 	socketPath, err := platform.SocketPath(lookupEnv)
@@ -131,7 +121,7 @@ func runAgentSession(
 			},
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
-				"agent-tool": toolLabel,
+				"agent-type": agentLabel,
 			},
 			IdleTtl: durationpb.New(0),
 		},

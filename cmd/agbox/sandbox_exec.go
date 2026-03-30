@@ -10,30 +10,42 @@ import (
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
+	"github.com/spf13/cobra"
 )
 
 const execCancelTimeout = time.Second
 
-func runSandboxExec(ctx context.Context, client sandboxExecClient, args []string) error {
+// runSandboxExec is the entry point called from the cobra command. It sets up
+// signal handling and delegates to runSandboxExecWithSignals.
+func runSandboxExec(ctx context.Context, cmd *cobra.Command, parsed sandboxExecArgs) error {
+	lookupEnv := lookupEnvFromCmd(cmd)
+
+	socketPath, err := platform.SocketPath(lookupEnv)
+	if err != nil {
+		return runtimeErrorf("resolve daemon socket: %v", err)
+	}
+
+	client, err := rawclient.New(socketPath, rawclient.WithTimeout(0))
+	if err != nil {
+		return runtimeErrorf("connect daemon: %v", err)
+	}
+	defer client.Close()
+
 	signalCh := make(chan os.Signal, 2)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signalCh)
 
-	return runSandboxExecWithSignals(ctx, client, args, signalCh)
+	return runSandboxExecWithSignals(ctx, client, parsed, signalCh)
 }
 
 func runSandboxExecWithSignals(
 	ctx context.Context,
 	client sandboxExecClient,
-	args []string,
+	parsed sandboxExecArgs,
 	signalCh <-chan os.Signal,
 ) error {
-	parsed, err := parseSandboxExecArgs(args)
-	if err != nil {
-		return err
-	}
-
 	request := &agboxv1.CreateExecRequest{
 		SandboxId:    parsed.sandboxID,
 		Command:      parsed.command,

@@ -221,7 +221,7 @@ func TestSandboxCreateMissingImage(t *testing.T) {
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "--image") {
+	if !strings.Contains(stderr, "image") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
@@ -536,17 +536,17 @@ func TestSandboxGetMissingSandboxID(t *testing.T) {
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "sandbox_id") {
+	if !strings.Contains(stderr, "accepts 1 arg(s)") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
 
-func TestSandboxGetRejectsSingleDashArg(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "get", "-h")
+func TestSandboxGetRejectsUnknownFlag(t *testing.T) {
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "get", "--unknown")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "does not accept argument") {
+	if !strings.Contains(stderr, "unknown flag: --unknown") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
@@ -640,12 +640,12 @@ func TestSandboxDeleteRejectsJSON(t *testing.T) {
 	}
 }
 
-func TestSandboxDeleteRejectsSingleDashArg(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "-h")
+func TestSandboxDeleteRejectsUnknownFlag(t *testing.T) {
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "--unknown")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "does not accept argument") {
+	if !strings.Contains(stderr, "unknown flag: --unknown") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }

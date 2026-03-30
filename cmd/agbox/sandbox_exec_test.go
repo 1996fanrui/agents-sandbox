@@ -254,7 +254,7 @@ func TestSandboxExecRejectsDeprecatedEnvFlag(t *testing.T) {
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if !strings.Contains(stderr, "--env") {
+	if !strings.Contains(stderr, "unknown flag: --env") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
@@ -400,7 +400,11 @@ func runSandboxExecSignalTest(
 		resultCh <- exitCodeForError(runSandboxExecWithSignals(
 			context.Background(),
 			client,
-			[]string{"sandbox-123", "--", "sleep", "1"},
+			sandboxExecArgs{
+				sandboxID:    "sandbox-123",
+				command:      []string{"sleep", "1"},
+				envOverrides: make(map[string]string),
+			},
 			signalCh,
 		))
 	}()
