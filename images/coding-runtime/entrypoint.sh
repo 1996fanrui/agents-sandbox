@@ -49,4 +49,10 @@ done
 export HOME="$USER_HOME"
 export USER="$USERNAME"
 
+# Docker Desktop's magic SSH agent socket is owned by root:root (srw-rw----).
+# Make it accessible to the non-root runtime user.
+if [ -S "/ssh-agent" ]; then
+    chmod 666 /ssh-agent
+fi
+
 exec gosu "$HOST_UID:$HOST_GID" "$@"
