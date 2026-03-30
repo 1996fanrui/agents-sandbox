@@ -3,6 +3,7 @@ package control
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,9 +106,14 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	if len(resources) == 0 {
 		return nil, nil
 	}
-	// Collect unique mount IDs across all requested tools, preserving first-seen order.
+
+	// Resolve each tool into its mount IDs, tracking which mounts belong to optional tools.
+	type mountEntry struct {
+		mountID  profile.MountID
+		optional bool
+	}
 	seen := make(map[profile.MountID]struct{})
-	var mountIDs []profile.MountID
+	var entries []mountEntry
 	for _, resource := range resources {
 		capability, ok := profile.CapabilityByID(resource)
 		if !ok {
@@ -116,24 +122,41 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 		for _, mountID := range capability.MountIDs {
 			if _, exists := seen[mountID]; !exists {
 				seen[mountID] = struct{}{}
-				mountIDs = append(mountIDs, mountID)
+				entries = append(entries, mountEntry{mountID: mountID, optional: capability.Optional})
 			}
 		}
 	}
 
-	mounts := make([]dockerMount, 0, len(mountIDs))
-	for _, mountID := range mountIDs {
-		mount, ok := profile.MountByID(mountID)
+	logger := backend.config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	mounts := make([]dockerMount, 0, len(entries))
+	for _, entry := range entries {
+		mount, ok := profile.MountByID(entry.mountID)
 		if !ok {
-			return nil, fmt.Errorf("unknown capability mount %q", mountID)
+			return nil, fmt.Errorf("unknown capability mount %q", entry.mountID)
 		}
 		sourcePath, err := resolveCapabilityMountSource(mount)
 		if err != nil {
+			if entry.optional {
+				logger.Info("skipping optional builtin mount: host path not available",
+					slog.String("mount", string(entry.mountID)),
+					slog.String("error", err.Error()))
+				continue
+			}
 			return nil, err
 		}
 		switch mount.Mode {
 		case profile.CapabilityModeSocket:
 			if err := requireSocketPath(sourcePath); err != nil {
+				if entry.optional {
+					logger.Info("skipping optional builtin mount: socket not available",
+						slog.String("mount", string(entry.mountID)),
+						slog.String("error", err.Error()))
+					continue
+				}
 				return nil, err
 			}
 			mounts = append(mounts, dockerMount{
@@ -145,6 +168,12 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 			writable := mount.Mode == profile.CapabilityModeReadWrite
 			actualSource, readOnly, err := backend.materializeBuiltinToolPath(sourcePath, writable, state)
 			if err != nil {
+				if entry.optional {
+					logger.Info("skipping optional builtin mount: host path not available",
+						slog.String("mount", string(entry.mountID)),
+						slog.String("error", err.Error()))
+					continue
+				}
 				return nil, err
 			}
 			mounts = append(mounts, dockerMount{

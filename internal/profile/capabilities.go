@@ -49,8 +49,10 @@ type CapabilityMount struct {
 
 // ToolingCapability is a user-facing tool name that maps to one or more mount IDs.
 // Users request tools by name; the daemon resolves and deduplicates the underlying mounts.
+// Optional tools are silently skipped when their host paths do not exist.
 type ToolingCapability struct {
 	MountIDs []MountID
+	Optional bool
 }
 
 var capabilityMounts = buildMountIndex([]CapabilityMount{
@@ -130,12 +132,13 @@ var builtInToolingCapabilities = map[ToolID]ToolingCapability{
 	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON}},
 	// codex requires its own config dir and the shared agents state directory.
 	ToolIDCodex: {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
-	// git requires SSH key forwarding and GitHub CLI auth.
-	ToolIDGit: {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth}},
-	// uv requires both the package cache and the data directory (Python interpreters + global tools).
-	ToolIDUV:  {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
-	ToolIDNPM: {MountIDs: []MountID{MountIDNPM}},
-	ToolIDApt: {MountIDs: []MountID{MountIDApt}},
+	// git mounts are optional: SSH agent may not be running and gh CLI may not be configured.
+	// Each mount is independently skipped if its host path is unavailable.
+	ToolIDGit: {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth}, Optional: true},
+	// uv, npm, apt are cache/acceleration mounts; the host may not have them installed.
+	ToolIDUV:  {MountIDs: []MountID{MountIDUVCache, MountIDUVData}, Optional: true},
+	ToolIDNPM: {MountIDs: []MountID{MountIDNPM}, Optional: true},
+	ToolIDApt: {MountIDs: []MountID{MountIDApt}, Optional: true},
 }
 
 func BuiltInToolingCapabilities() []ToolingCapability {
