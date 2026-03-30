@@ -12,6 +12,8 @@ if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
 fi
 
 echo "==> Stopping agboxd..."
+# Use kill + stop to prevent auto-restart during cleanup
+systemctl --user kill agboxd 2>/dev/null || true
 systemctl --user stop agboxd 2>/dev/null || true
 
 echo "==> Removing Docker containers..."
@@ -40,6 +42,10 @@ if [ -d "$DATA_DIR/state" ]; then
     sudo rm -rf "$DATA_DIR/state"
 fi
 rm -rf "$RUNTIME_DIR"
+# Recreate runtime directory with correct ownership so agboxd can start cleanly.
+# Without this, systemd auto-restart may race and the directory could end up
+# root-owned if sudo was used earlier in this script.
+mkdir -p "$RUNTIME_DIR"
 
 echo ""
 echo "Done. Preserved exec logs: $DATA_DIR/exec-logs"
