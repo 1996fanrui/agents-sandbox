@@ -38,6 +38,20 @@ const (
 	ToolIDApt    ToolID = "apt"
 )
 
+// MacOSKeychainCredential declares that a credential file may be absent from
+// the host mount directory because macOS stores it in Keychain instead.
+//
+// Contract: if RelPath does not exist under the mount's DefaultHostPath, the
+// daemon reads the credential from Keychain and writes it to that path before
+// bind-mounting. On non-macOS platforms this is a no-op (the file already exists).
+type MacOSKeychainCredential struct {
+	// ServiceName is the Keychain service name used to read the credential
+	// via `security find-generic-password -s <service> -w`.
+	ServiceName string
+	// RelPath is the credential file path relative to the mount's DefaultHostPath.
+	RelPath string
+}
+
 // CapabilityMount is a named host-to-container mount unit.
 // Multiple tools may reference the same mount; the daemon deduplicates by ID.
 type CapabilityMount struct {
@@ -45,6 +59,9 @@ type CapabilityMount struct {
 	DefaultHostPath string
 	ContainerTarget string
 	Mode            CapabilityMode
+	// MacOSKeychain, when non-nil, triggers credential projection from macOS
+	// Keychain before bind-mounting. See MacOSKeychainCredential for the full contract.
+	MacOSKeychain *MacOSKeychainCredential
 }
 
 // ToolingCapability is a user-facing tool name that maps to one or more mount IDs.
@@ -61,6 +78,10 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		DefaultHostPath: "~/.claude",
 		ContainerTarget: "/home/agbox/.claude",
 		Mode:            CapabilityModeReadWrite,
+		MacOSKeychain: &MacOSKeychainCredential{
+			ServiceName: "Claude Code-credentials",
+			RelPath:     ".credentials.json",
+		},
 	},
 	{
 		ID:              MountIDClaudeJSON,

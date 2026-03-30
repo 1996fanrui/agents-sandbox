@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -146,6 +147,17 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 			}
 			return nil, err
 		}
+
+		// Project credentials from macOS Keychain into the host mount directory
+		// before bind-mounting. On non-macOS platforms this is a no-op.
+		if mount.MacOSKeychain != nil {
+			if err := projectMacOSKeychainCredential(logger, sourcePath, mount.MacOSKeychain); err != nil {
+				logger.Warn("failed to project macOS Keychain credential",
+					slog.String("mount", string(entry.mountID)),
+					slog.String("error", err.Error()))
+			}
+		}
+
 		switch mount.Mode {
 		case profile.CapabilityModeSocket:
 			// Docker Desktop magic paths (e.g. /run/host-services/ssh-auth.sock)
@@ -228,6 +240,30 @@ func requireSocketPath(path string) error {
 	if info.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("%s is not a Unix socket", path)
 	}
+	return nil
+}
+
+// projectMacOSKeychainCredential extracts a credential from macOS Keychain and
+// writes it to the host filesystem so that bind-mounting picks it up.
+// On non-macOS platforms this is a no-op.
+func projectMacOSKeychainCredential(logger *slog.Logger, mountSourceDir string, cred *profile.MacOSKeychainCredential) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	targetFile := filepath.Join(mountSourceDir, cred.RelPath)
+	if _, err := os.Stat(targetFile); err == nil {
+		return nil // already exists on the host filesystem
+	}
+	out, err := exec.Command("security", "find-generic-password", "-s", cred.ServiceName, "-w").Output()
+	if err != nil {
+		return fmt.Errorf("read credential from macOS Keychain (service=%s): %w", cred.ServiceName, err)
+	}
+	if err := os.WriteFile(targetFile, out, 0600); err != nil {
+		return fmt.Errorf("write credential file %s: %w", targetFile, err)
+	}
+	logger.Info("projected credential from macOS Keychain",
+		slog.String("service", cred.ServiceName),
+		slog.String("target", targetFile))
 	return nil
 }
 
