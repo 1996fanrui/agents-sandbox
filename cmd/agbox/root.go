@@ -34,8 +34,9 @@ func run(
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), `Run "agbox --help" for usage information.`)
 			return nil
 		},
-		SilenceErrors: true,
-		SilenceUsage:  true,
+		SilenceErrors:     true,
+		SilenceUsage:      true,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
 
 	rootCmd.SetArgs(args)
