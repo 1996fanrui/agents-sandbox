@@ -126,7 +126,7 @@
 function closeMobileMenu() { document.getElementById('mobileMenu').classList.remove('open'); }
 function copyCommands() {
   navigator.clipboard.writeText(
-    'docker pull ghcr.io/agents-sandbox/coding-runtime:latest\npip install agents-sandbox'
+    'curl -fsSL https://agents-sandbox.com/install.sh | bash\nagbox agent claude'
   ).then(function() {
     var btn = document.querySelector('.copy-btn');
     btn.textContent = 'Copied!';

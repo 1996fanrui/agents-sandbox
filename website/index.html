@@ -325,7 +325,7 @@
 <section class="quickstart" id="quickstart">
   <div class="container">
     <h2 class="section-title reveal">Quick Start</h2>
-    <p class="section-sub reveal">Pull the runtime image and start sandboxing your agents in minutes</p>
+    <p class="section-sub reveal">Install and start sandboxing your agents in seconds</p>
     <div class="quickstart-terminal reveal">
       <div class="qs-bar">
         <div style="display:flex;gap:6px;">
@@ -333,22 +333,14 @@
         </div>
         <button class="copy-btn" onclick="copyCommands()">Copy</button>
       </div>
-      <div class="qs-body"><span class="cmd-prefix">$ </span>docker pull ghcr.io/agents-sandbox/coding-runtime:latest
-<span class="cmd-prefix">$ </span>pip install agents-sandbox
-<span class="cmd-prefix">$ </span>python -c "
-import asyncio
-from agents_sandbox import AgentsSandboxClient
+      <div class="qs-body"><span class="cmd-comment"># Install agents-sandbox (daemon starts automatically)</span>
+<span class="cmd-prefix">$ </span>curl -fsSL https://agents-sandbox.com/install.sh | bash
 
-async def main():
-    async with AgentsSandboxClient() as client:
-        sb = await client.create_sandbox(
-            image='ghcr.io/agents-sandbox/coding-runtime:latest',
-        )
-        result = await client.run(sb.sandbox_id,
-            ('python', '-c', 'print(\"hello from sandbox\")'))
-        print(result.stdout)
+<span class="cmd-comment"># Run Claude Code in an isolated sandbox</span>
+<span class="cmd-prefix">$ </span>agbox agent claude
 
-asyncio.run(main())"</div>
+<span class="cmd-comment"># Or run Codex</span>
+<span class="cmd-prefix">$ </span>agbox agent codex</div>
     </div>
     <a href="https://docs.agents-sandbox.com" class="link-arrow">View full documentation &rarr;</a>
   </div>

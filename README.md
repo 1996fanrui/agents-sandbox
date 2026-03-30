@@ -86,19 +86,26 @@ curl -fsSL https://agents-sandbox.com/install.sh | bash -s -- --pre     # latest
 
 ## Quickstart
 
-The official recommended runtime image for coding workloads is:
+Install and start Claude Code in a sandbox with two commands:
 
-- quickstart alias: `ghcr.io/agents-sandbox/coding-runtime:latest`
-- release tag form: `ghcr.io/agents-sandbox/coding-runtime:<release-version>`
+```bash
+# Install agents-sandbox (daemon starts automatically)
+curl -fsSL https://agents-sandbox.com/install.sh | bash
 
-This image is only a recommended example value. It is not a daemon default, and every sandbox
-request must still pass `image` explicitly.
+# Run interactive Claude Code in an isolated sandbox with full permissions.
+# Equivalent to running: claude --dangerously-skip-permissions
+agbox agent claude
 
-Python SDK example:
+# Run interactive Codex in an isolated sandbox with full permissions.
+# Equivalent to running: codex --dangerously-bypass-approvals-and-sandbox
+agbox agent codex
+```
 
-On Linux, `AgentsSandboxClient()` resolves the daemon socket from the fixed
-`$XDG_RUNTIME_DIR/agbox/agboxd.sock` path. Run the example from a session where
-`XDG_RUNTIME_DIR` is set and the daemon uses the same runtime directory.
+That's it. The agent has full unrestricted permissions inside the sandbox while your host stays completely untouched. See [CLI Reference](docs/cli_reference.md) for all available commands and options.
+
+### Programmatic Access (Python SDK)
+
+For programmatic control, use the Python SDK:
 
 ```python
 import asyncio
@@ -123,12 +130,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-For full examples that run Codex or Claude inside the sandbox, see `examples/`:
-
-```bash
-uv run --directory sdk/python python ../../examples/codex/main.py
-uv run --directory sdk/python python ../../examples/claude/main.py
-```
+For full examples, see `examples/`.
 
 ## Repository Layout
 
