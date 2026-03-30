@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -78,7 +77,8 @@ func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if stdout.String() != "agbox "+version.Version+"\n" {
+	wantLines := "agbox " + version.Version + "\n" + "Run \"agbox --help\" for usage information.\n"
+	if stdout.String() != wantLines {
 		t.Fatalf("unexpected stdout %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -134,7 +134,7 @@ func TestPingRejectsLegacySocketOverride(t *testing.T) {
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if !strings.Contains(stderr.String(), "does not accept arguments") {
+	if !strings.Contains(stderr.String(), "unknown flag: --socket") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
 }
@@ -165,7 +165,7 @@ func TestSandboxCommandRejectsUnknownSubcommand(t *testing.T) {
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if !strings.Contains(stderr.String(), `unknown sandbox command "unknown"`) {
+	if !strings.Contains(stderr.String(), "unknown command") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
 }
@@ -184,6 +184,101 @@ func TestUnknownTopLevelCommandReturnsUsageError(t *testing.T) {
 	}
 }
 
+func TestHelpFlag(t *testing.T) {
+	for _, flag := range []string{"--help", "-h"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := run(context.Background(), []string{flag}, &stdout, &stderr, func(string) (string, bool) {
+			return "", false
+		})
+		if exitCode != exitCodeSuccess {
+			t.Fatalf("unexpected exit code %d for %s", exitCode, flag)
+		}
+		output := stdout.String()
+		for _, want := range []string{"sandbox", "agent", "ping", "version"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("help output missing %q for %s: %q", want, flag, output)
+			}
+		}
+	}
+}
+
+func TestSandboxHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	output := stdout.String()
+	for _, want := range []string{"create", "list", "get", "delete", "exec"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("sandbox help output missing %q: %q", want, output)
+		}
+	}
+}
+
+func TestSandboxCreateHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox", "create", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "--image") {
+		t.Fatalf("sandbox create help output missing --image: %q", stdout.String())
+	}
+}
+
+func TestSandboxListHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox", "list", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "--include-deleted") {
+		t.Fatalf("sandbox list help output missing --include-deleted: %q", stdout.String())
+	}
+}
+
+func TestSandboxExecHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"sandbox", "exec", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "--cwd") {
+		t.Fatalf("sandbox exec help output missing --cwd: %q", stdout.String())
+	}
+}
+
+func TestAgentHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"agent", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+	output := stdout.String()
+	for _, want := range []string{"--command", "--mount"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("agent help output missing %q: %q", want, output)
+		}
+	}
+}
+
 func waitForSocket(t *testing.T, lookupEnv func(string) (string, bool)) {
 	t.Helper()
 
@@ -193,9 +288,10 @@ func waitForSocket(t *testing.T, lookupEnv func(string) (string, bool)) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := runPing(context.Background(), nil, io.Discard, func(key string) (string, bool) {
-			return lookupEnv(key)
-		}); err == nil {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := run(context.Background(), []string{"ping"}, &stdout, &stderr, lookupEnv)
+		if exitCode == 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

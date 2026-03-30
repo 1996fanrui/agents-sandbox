@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
+	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
-	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -28,79 +27,38 @@ type sandboxExecClient interface {
 	CancelExec(context.Context, string) (*agboxv1.AcceptedResponse, error)
 }
 
-func runSandbox(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, lookupEnv func(string) (string, bool)) error {
-	subcommand, err := sandboxSubcommand(args)
-	if err != nil {
-		return err
-	}
-
-	socketPath, err := platform.SocketPath(lookupEnv)
-	if err != nil {
-		return runtimeErrorf("resolve daemon socket: %v", err)
-	}
-
-	var client *rawclient.RawClient
-	if subcommand == "exec" {
-		client, err = rawclient.New(socketPath, rawclient.WithTimeout(0))
-	} else {
-		client, err = rawclient.New(socketPath)
-	}
-	if err != nil {
-		return runtimeErrorf("connect daemon: %v", err)
-	}
-	defer client.Close()
-
-	return runSandboxWithClient(ctx, client, args, stdout, stderr)
+type sandboxCreateArgs struct {
+	image   string
+	labels  map[string]string
+	idleTTL *time.Duration
+	json    bool
 }
 
-func runSandboxWithClient(ctx context.Context, client sandboxExecClient, args []string, stdout io.Writer, stderr io.Writer) error {
-	subcommand, err := sandboxSubcommand(args)
-	if err != nil {
-		return err
-	}
-
-	switch subcommand {
-	case "create":
-		return runSandboxCreate(ctx, client, args[1:], stdout)
-	case "list":
-		return runSandboxList(ctx, client, args[1:], stdout)
-	case "get":
-		return runSandboxGet(ctx, client, args[1:], stdout)
-	case "delete":
-		return runSandboxDelete(ctx, client, args[1:], stdout)
-	case "exec":
-		return runSandboxExec(ctx, client, args[1:])
-	default:
-		return usageErrorf("sandbox command dispatcher reached unknown subcommand %q", subcommand)
-	}
+type sandboxListArgs struct {
+	includeDeleted bool
+	labels         map[string]string
+	json           bool
 }
 
-func sandboxSubcommand(args []string) (string, error) {
-	if len(args) == 0 {
-		return "", usageErrorf(
-			"sandbox command requires a subcommand\navailable subcommands: %s",
-			strings.Join(sandboxSubcommands, ", "),
-		)
-	}
-
-	switch args[0] {
-	case "create", "list", "get", "delete", "exec":
-		return args[0], nil
-	default:
-		return "", usageErrorf(
-			"unknown sandbox command %q\navailable subcommands: %s",
-			args[0],
-			strings.Join(sandboxSubcommands, ", "),
-		)
-	}
+type sandboxGetArgs struct {
+	sandboxID string
+	json      bool
 }
 
-func runSandboxCreate(ctx context.Context, client sandboxClient, args []string, stdout io.Writer) error {
-	parsed, err := parseSandboxCreateArgs(args)
-	if err != nil {
-		return err
-	}
+type sandboxDeleteArgs struct {
+	sandboxID string
+	labels    map[string]string
+	json      bool
+}
 
+type sandboxExecArgs struct {
+	sandboxID    string
+	cwd          string
+	envOverrides map[string]string
+	command      []string
+}
+
+func runSandboxCreate(ctx context.Context, client sandboxClient, parsed sandboxCreateArgs, stdout io.Writer) error {
 	createSpec := &agboxv1.CreateSpec{
 		Image:  parsed.image,
 		Labels: parsed.labels,
@@ -132,12 +90,7 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, args []string, 
 	return nil
 }
 
-func runSandboxList(ctx context.Context, client sandboxClient, args []string, stdout io.Writer) error {
-	parsed, err := parseSandboxListArgs(args)
-	if err != nil {
-		return err
-	}
-
+func runSandboxList(ctx context.Context, client sandboxClient, parsed sandboxListArgs, stdout io.Writer) error {
 	response, err := client.ListSandboxes(ctx, &agboxv1.ListSandboxesRequest{
 		IncludeDeleted: parsed.includeDeleted,
 		LabelSelector:  parsed.labels,
@@ -159,12 +112,7 @@ func runSandboxList(ctx context.Context, client sandboxClient, args []string, st
 	return nil
 }
 
-func runSandboxGet(ctx context.Context, client sandboxClient, args []string, stdout io.Writer) error {
-	parsed, err := parseSandboxGetArgs(args)
-	if err != nil {
-		return err
-	}
-
+func runSandboxGet(ctx context.Context, client sandboxClient, parsed sandboxGetArgs, stdout io.Writer) error {
 	response, err := client.GetSandbox(ctx, parsed.sandboxID)
 	if err != nil {
 		return runtimeErrorf("get sandbox: %v", err)
@@ -187,11 +135,7 @@ func runSandboxGet(ctx context.Context, client sandboxClient, args []string, std
 	return nil
 }
 
-func runSandboxDelete(ctx context.Context, client sandboxClient, args []string, stdout io.Writer) error {
-	parsed, err := parseSandboxDeleteArgs(args)
-	if err != nil {
-		return err
-	}
+func runSandboxDelete(ctx context.Context, client sandboxClient, parsed sandboxDeleteArgs, stdout io.Writer) error {
 	if parsed.json {
 		return usageErrorf("sandbox delete does not support --json")
 	}
