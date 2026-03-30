@@ -80,7 +80,7 @@ jobs:
           VERSION: ${{ needs.resolve-version.outputs.go_version }}
         run: |
           set -e
-          ldflags="-X github.com/1996fanrui/agents-sandbox/internal/version.Version=${VERSION}"
+          ldflags="-s -w -X github.com/1996fanrui/agents-sandbox/internal/version.Version=${VERSION}"
           suffix="${GOOS}_${GOARCH}"
 
           go build -ldflags "${ldflags}" -o "agboxd_${suffix}" ./cmd/agboxd
