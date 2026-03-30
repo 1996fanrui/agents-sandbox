@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+/agbox
 /agboxd
 /.build/
 /logs/

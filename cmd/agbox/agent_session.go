@@ -119,6 +119,10 @@ func runAgentSession(
 			Mounts: []*agboxv1.MountSpec{
 				{Source: parsed.mount, Target: "/workspace", Writable: true},
 			},
+			Labels: map[string]string{
+				"created-by": "agbox-cli",
+				"agent-tool": toolName,
+			},
 			IdleTtl: durationpb.New(0),
 		},
 	})
@@ -134,6 +138,7 @@ func runAgentSession(
 	defer func() {
 		// Allow a second Ctrl+C during cleanup to force-exit the process.
 		signal.Reset(syscall.SIGINT)
+		_, _ = fmt.Fprintf(stderr, "Cleaning up sandbox %s...\n", sandboxID)
 		deleteAndWait(client, sandboxID, stderr)
 	}()
 
@@ -146,13 +151,14 @@ func runAgentSession(
 	default:
 	}
 
+	containerName := primaryContainerName(sandboxID)
+
 	_, _ = fmt.Fprintf(stdout, "Waiting for sandbox %s to be ready...\n", sandboxID)
+	_, _ = fmt.Fprintf(stdout, "Tip: open another shell into this sandbox with:\n  docker exec -it --user agbox %s bash\n", containerName)
 	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
 		return err
 	}
-
-	containerName := primaryContainerName(sandboxID)
-	dockerArgs := append([]string{"exec", "-it", containerName}, containerCmd...)
+	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, containerCmd...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -313,6 +319,7 @@ func deleteAndWait(client sandboxExecClient, sandboxID string, stderr io.Writer)
 	sandbox := getResp.GetSandbox()
 	switch sandbox.GetState() {
 	case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+		_, _ = fmt.Fprintf(stderr, "Sandbox %s cleaned up.\n", sandboxID)
 		return
 	case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
 		_, _ = fmt.Fprintf(stderr, "warning: sandbox %s is in FAILED state after delete\n", sandboxID)
@@ -343,6 +350,7 @@ func deleteAndWait(client sandboxExecClient, sandboxID string, stderr io.Writer)
 			}
 			switch result.event.GetSandboxState() {
 			case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+				_, _ = fmt.Fprintf(stderr, "Sandbox %s cleaned up.\n", sandboxID)
 				return
 			case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
 				_, _ = fmt.Fprintf(stderr, "warning: sandbox %s entered FAILED state during cleanup\n", sandboxID)
