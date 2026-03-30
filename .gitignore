@@ -37,7 +37,6 @@ go.work.sum
 requirements/
 CLAUDE.md
 AGENTS.md
-scripts/lints/check_no_ignored_files.sh
 
 # Python
 __pycache__/

@@ -20,10 +20,11 @@ repos:
       - id: debug-statements
 
   - repo: https://github.com/1996fanrui/agent-guardrails
-    rev: ec190582ef95eb8a011f3b8f5aa27db365da43f3
+    rev: de227ff7ee36d8e955916a50abe3f02f20f17583
     hooks:
       - id: lint-file-line-count
       - id: lint-no-chinese
         exclude: '(^|/)requirements(/|$)|(^|/)(AGENTS|CLAUDE)\.md$'
       - id: lint-shell-portability
       - id: lint-enum-redundant-string
+      - id: lint-no-ignored-files
