@@ -20,6 +20,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/service.sh"
+
 GITHUB_REPO="1996fanrui/agents-sandbox"
 INSTALL_DIR="${HOME}/.local/bin"
 
@@ -119,124 +122,13 @@ if [[ "${NEED_DOWNLOAD}" == true ]]; then
   echo "Installed: ${INSTALL_DIR}/agboxd"
   echo "Installed: ${INSTALL_DIR}/agbox"
 
-  # Also update any other copies of agboxd/agbox that exist under ~/bin/,
-  # which on some systems precedes ~/.local/bin/ in PATH.
-  if [[ "${INSTALL_DIR}" != "${HOME}/bin" && -d "${HOME}/bin" ]]; then
-    for bin in agboxd agbox; do
-      if [[ -f "${HOME}/bin/${bin}" ]]; then
-        install -m 755 "${TMP_DIR}/${bin}_${SUFFIX}" "${HOME}/bin/${bin}"
-        echo "Updated  : ${HOME}/bin/${bin}"
-      fi
-    done
-  fi
+  sync_bin_copies "${INSTALL_DIR}"
 fi
 
 # ---------------------------------------------------------------------------
-# Linux: systemd user service
+# Setup service for the current OS (shared helper from lib/service.sh)
 # ---------------------------------------------------------------------------
-_setup_systemd() {
-  local service_dir="${HOME}/.config/systemd/user"
-  local service_file="${service_dir}/agboxd.service"
-
-  mkdir -p "${service_dir}"
-
-  # Replace symlink or regular file with the managed service unit.
-  cat > "${service_file}.tmp" <<EOF
-[Unit]
-Description=Agents Sandbox Daemon
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=${INSTALL_DIR}/agboxd
-SuccessExitStatus=143
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=default.target
-EOF
-
-  # Atomically replace (handles symlink case: unlink then rename).
-  rm -f "${service_file}"
-  mv "${service_file}.tmp" "${service_file}"
-
-  # Kill any agboxd process not managed by this service (e.g. from a previous
-  # source-build startup) so it releases the host lock before we restart.
-  pkill -x agboxd 2>/dev/null || true
-  sleep 1
-
-  systemctl --user daemon-reload
-  systemctl --user enable agboxd
-  systemctl --user restart agboxd
-
-  echo ""
-  echo "agboxd service restarted."
-  echo "  Status : systemctl --user status agboxd"
-  echo "  Logs   : journalctl --user -u agboxd -f"
-}
-
-# ---------------------------------------------------------------------------
-# macOS: launchd user agent
-# ---------------------------------------------------------------------------
-_setup_launchd() {
-  local agents_dir="${HOME}/Library/LaunchAgents"
-  local plist_label="io.github.agents-sandbox.agboxd"
-  local plist_file="${agents_dir}/${plist_label}.plist"
-
-  mkdir -p "${agents_dir}"
-
-  cat > "${plist_file}" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${plist_label}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${INSTALL_DIR}/agboxd</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>${HOME}/Library/Logs/agboxd.log</string>
-  <key>StandardErrorPath</key>
-  <string>${HOME}/Library/Logs/agboxd.log</string>
-</dict>
-</plist>
-EOF
-
-  # Unload existing agent if running, then reload.
-  launchctl unload "${plist_file}" 2>/dev/null || true
-  launchctl load -w "${plist_file}"
-
-  echo ""
-  echo "agboxd launchd agent loaded."
-  echo "  Status : launchctl list | grep agboxd"
-  echo "  Logs   : tail -f ${HOME}/Library/Logs/agboxd.log"
-}
-
-# ---------------------------------------------------------------------------
-# Setup service for the current OS
-# ---------------------------------------------------------------------------
-echo ""
-echo "Setting up agboxd service..."
-if [[ "${OS}" == "linux" ]]; then
-  _setup_systemd
-elif [[ "${OS}" == "darwin" ]]; then
-  _setup_launchd
-fi
+setup_agboxd_service "${INSTALL_DIR}/agboxd"
 
 echo ""
 echo "Installation complete. agents-sandbox ${VERSION} is ready."
