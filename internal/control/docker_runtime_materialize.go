@@ -6,11 +6,18 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
 )
+
+// dockerDesktopSSHAgentSocket is the magic path provided by Docker Desktop
+// for Mac (and Docker Desktop for Linux) to proxy the host SSH agent into
+// containers. Direct bind-mounting of macOS launchd sockets is not supported
+// by Docker Desktop's LinuxKit VM, so this synthetic socket must be used instead.
+const dockerDesktopSSHAgentSocket = "/run/host-services/ssh-auth.sock"
 
 func (backend *dockerRuntimeBackend) materializeGenericMounts(
 	requests []*agboxv1.MountSpec,
@@ -141,14 +148,19 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 		}
 		switch mount.Mode {
 		case profile.CapabilityModeSocket:
-			if err := requireSocketPath(sourcePath); err != nil {
-				if entry.optional {
-					logger.Info("skipping optional builtin mount: socket not available",
-						slog.String("mount", string(entry.mountID)),
-						slog.String("error", err.Error()))
-					continue
+			// Docker Desktop magic paths (e.g. /run/host-services/ssh-auth.sock)
+			// exist only inside the Docker VM, not on the host filesystem.
+			// Skip the host-side stat check for these paths.
+			if sourcePath != dockerDesktopSSHAgentSocket {
+				if err := requireSocketPath(sourcePath); err != nil {
+					if entry.optional {
+						logger.Info("skipping optional builtin mount: socket not available",
+							slog.String("mount", string(entry.mountID)),
+							slog.String("error", err.Error()))
+						continue
+					}
+					return nil, err
 				}
-				return nil, err
 			}
 			mounts = append(mounts, dockerMount{
 				Source:   sourcePath,
@@ -194,6 +206,11 @@ func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 
 func resolveCapabilityMountSource(mount profile.CapabilityMount) (string, error) {
 	if mount.ID == profile.MountIDSSHAgent {
+		// On macOS, Docker Desktop cannot bind-mount the native launchd SSH agent
+		// socket. Use Docker Desktop's built-in magic path instead.
+		if runtime.GOOS == "darwin" {
+			return dockerDesktopSSHAgentSocket, nil
+		}
 		socketPath := os.Getenv("SSH_AUTH_SOCK")
 		if socketPath == "" {
 			return "", errors.New("SSH_AUTH_SOCK is required for ssh-agent tooling projection")
