@@ -7,10 +7,8 @@ The AgentsSandbox CLI (`agbox`) communicates with the daemon via gRPC over a Uni
 ```bash
 # Print version and help hint
 agbox
-# Print version string
+# Print agbox and agboxd versions
 agbox version
-# Check daemon reachability
-agbox ping
 # Create a sandbox (see flags below)
 agbox sandbox create
 # List sandboxes

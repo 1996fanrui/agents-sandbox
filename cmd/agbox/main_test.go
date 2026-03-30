@@ -58,11 +58,14 @@ func TestCLIUsesFixedSocketPath(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := run(context.Background(), []string{"ping"}, &stdout, &stderr, lookupEnv)
+	exitCode := run(context.Background(), []string{"version"}, &stdout, &stderr, lookupEnv)
 	if exitCode != 0 {
 		t.Fatalf("run returned %d stderr=%q", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "daemon=agboxd") {
+	if !strings.Contains(stdout.String(), "agbox: "+version.Version) {
+		t.Fatalf("unexpected stdout %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "agboxd: "+version.Version) {
 		t.Fatalf("unexpected stdout %q", stdout.String())
 	}
 }
@@ -93,48 +96,14 @@ func TestVersionCommandsPreserveExistingOutput(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if stdout.String() != version.Version+"\n" {
+	// When daemon is unavailable, version shows agbox version + "agboxd: unavailable".
+	if !strings.Contains(stdout.String(), "agbox: "+version.Version) {
+		t.Fatalf("unexpected stdout %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "agboxd: unavailable") {
 		t.Fatalf("unexpected stdout %q", stdout.String())
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("unexpected stderr %q", stderr.String())
-	}
-}
-
-func TestPingFailsWhenDaemonIsUnavailable(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS uses a shared fixed home-directory socket path")
-	}
-	tempDir := t.TempDir()
-	lookupEnv := func(key string) (string, bool) {
-		switch key {
-		case "XDG_RUNTIME_DIR":
-			return tempDir, true
-		default:
-			return "", false
-		}
-	}
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := run(context.Background(), []string{"ping"}, &stdout, &stderr, lookupEnv)
-	if exitCode != 1 {
-		t.Fatalf("unexpected exit code %d", exitCode)
-	}
-	if !strings.Contains(stderr.String(), "ping daemon") {
-		t.Fatalf("unexpected stderr %q", stderr.String())
-	}
-}
-
-func TestPingRejectsLegacySocketOverride(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := run(context.Background(), []string{"ping", "--socket", filepath.Join(t.TempDir(), "socket.sock")}, &stdout, &stderr, func(string) (string, bool) {
-		return "", false
-	})
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d", exitCode)
-	}
-	if !strings.Contains(stderr.String(), "unknown flag: --socket") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
 }
@@ -195,7 +164,7 @@ func TestHelpFlag(t *testing.T) {
 			t.Fatalf("unexpected exit code %d for %s", exitCode, flag)
 		}
 		output := stdout.String()
-		for _, want := range []string{"sandbox", "agent", "ping", "version"} {
+		for _, want := range []string{"sandbox", "agent", "version"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("help output missing %q for %s: %q", want, flag, output)
 			}
@@ -290,7 +259,7 @@ func waitForSocket(t *testing.T, lookupEnv func(string) (string, bool)) {
 	for time.Now().Before(deadline) {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		exitCode := run(context.Background(), []string{"ping"}, &stdout, &stderr, lookupEnv)
+		exitCode := run(context.Background(), []string{"version"}, &stdout, &stderr, lookupEnv)
 		if exitCode == 0 {
 			return
 		}
