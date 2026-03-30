@@ -174,7 +174,13 @@ func prepareExecOutputPrefix(root string, template string, fields map[string]str
 	if err := os.MkdirAll(rootAbs, 0o755); err != nil {
 		return "", err
 	}
-	targetPrefix := filepath.Join(rootAbs, cleanRelative)
+	// Resolve symlinks on the root so that the containment check compares
+	// real paths on both sides (e.g. macOS /var -> /private/var).
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", err
+	}
+	targetPrefix := filepath.Join(rootReal, cleanRelative)
 	parentPath := filepath.Dir(targetPrefix)
 	if err := os.MkdirAll(parentPath, 0o755); err != nil {
 		return "", err
@@ -183,7 +189,7 @@ func prepareExecOutputPrefix(root string, template string, fields map[string]str
 	if err != nil {
 		return "", err
 	}
-	if !pathWithinRoot(rootAbs, parentRealPath) {
+	if !pathWithinRoot(rootReal, parentRealPath) {
 		return "", errArtifactPathEscapesRoot
 	}
 	return targetPrefix, nil

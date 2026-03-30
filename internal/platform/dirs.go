@@ -27,13 +27,14 @@ func ConfigDir(lookupEnv LookupEnv) string {
 }
 
 func configDirForGOOS(goos string, lookupEnv LookupEnv) string {
+	// Explicit override via lookupEnv takes precedence on all platforms.
+	if v, ok := lookupEnvValue(lookupEnv, "XDG_CONFIG_HOME"); ok && v != "" {
+		return v
+	}
 	switch goos {
 	case "darwin":
 		return macAppSupportDir()
 	default:
-		if v, ok := lookupEnvValue(lookupEnv, "XDG_CONFIG_HOME"); ok && v != "" {
-			return v
-		}
 		if home := homeDir(); home != "" {
 			return filepath.Join(home, ".config")
 		}
@@ -50,13 +51,14 @@ func DataDir(lookupEnv LookupEnv) string {
 }
 
 func dataDirForGOOS(goos string, lookupEnv LookupEnv) string {
+	// Explicit override via lookupEnv takes precedence on all platforms.
+	if v, ok := lookupEnvValue(lookupEnv, "XDG_DATA_HOME"); ok && v != "" {
+		return v
+	}
 	switch goos {
 	case "darwin":
 		return macAppSupportDir()
 	default:
-		if v, ok := lookupEnvValue(lookupEnv, "XDG_DATA_HOME"); ok && v != "" {
-			return v
-		}
 		if home := homeDir(); home != "" {
 			return filepath.Join(home, ".local", "share")
 		}
@@ -73,13 +75,14 @@ func RuntimeDir(lookupEnv LookupEnv) string {
 }
 
 func runtimeDirForGOOS(goos string, lookupEnv LookupEnv) string {
+	// Explicit override via lookupEnv takes precedence on all platforms.
+	if v, ok := lookupEnvValue(lookupEnv, "XDG_RUNTIME_DIR"); ok && v != "" {
+		return v
+	}
 	switch goos {
 	case "darwin":
 		return macAppSupportDir()
 	default:
-		if v, ok := lookupEnvValue(lookupEnv, "XDG_RUNTIME_DIR"); ok && v != "" {
-			return v
-		}
 		return ""
 	}
 }
@@ -154,18 +157,13 @@ func execLogRootForGOOS(goos string, lookupEnv LookupEnv) string {
 
 func runtimeRootPathForGOOS(goos string, lookupEnv LookupEnv) (string, error) {
 	runtimeDir := runtimeDirForGOOS(goos, lookupEnv)
-	switch goos {
-	case "darwin":
-		if runtimeDir == "" {
+	if runtimeDir == "" {
+		if goos == "darwin" {
 			return "", fmt.Errorf("resolve runtime path: application support directory is unavailable on %s", goos)
 		}
-		return filepath.Join(runtimeDir, RuntimeDirName, "run"), nil
-	default:
-		if runtimeDir == "" {
-			return "", fmt.Errorf("resolve runtime path: XDG_RUNTIME_DIR is required on %s", goos)
-		}
-		return filepath.Join(runtimeDir, RuntimeDirName), nil
+		return "", fmt.Errorf("resolve runtime path: XDG_RUNTIME_DIR is required on %s", goos)
 	}
+	return filepath.Join(runtimeDir, RuntimeDirName), nil
 }
 
 func lookupEnvValue(lookupEnv LookupEnv, key string) (string, bool) {

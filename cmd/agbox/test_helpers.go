@@ -15,7 +15,14 @@ import (
 func startSandboxTestServer(t *testing.T, service agboxv1.SandboxServiceServer) (string, func(string) (string, bool)) {
 	t.Helper()
 
-	tempDir := t.TempDir()
+	// Use a short temp dir to keep the Unix socket path under the 104-char
+	// macOS limit. t.TempDir() produces paths too long for socket binding.
+	tempDir, err := os.MkdirTemp("/tmp", "agbox-test-")
+	if err != nil {
+		t.Fatalf("mkdtemp failed: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
 	lookupEnv := func(key string) (string, bool) {
 		switch key {
 		case "XDG_RUNTIME_DIR":

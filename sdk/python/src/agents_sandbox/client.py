@@ -52,6 +52,10 @@ def _resolve_default_socket_path(
 ) -> str:
     lookup = os.environ.get if lookup_env is None else lookup_env
     resolved_system = platform.system() if system is None else system
+    # Explicit XDG_RUNTIME_DIR override takes precedence on all platforms.
+    runtime_dir = lookup("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        return os.path.join(runtime_dir, "agbox", "agboxd.sock")
     if resolved_system == "Darwin":
         resolved_home = home_dir or os.path.expanduser("~")
         if resolved_home:
@@ -60,14 +64,9 @@ def _resolve_default_socket_path(
                 "Library",
                 "Application Support",
                 "agbox",
-                "run",
                 "agboxd.sock",
             )
-    else:
-        runtime_dir = lookup("XDG_RUNTIME_DIR")
-        if runtime_dir:
-            return os.path.join(runtime_dir, "agbox", "agboxd.sock")
-        raise RuntimeError("XDG_RUNTIME_DIR is required to resolve the AgentsSandbox socket path on Linux")
+    raise RuntimeError("XDG_RUNTIME_DIR is required to resolve the AgentsSandbox socket path on Linux")
 
 
 def _validate_optional_id(field_name: str, value: str | None) -> str | None:

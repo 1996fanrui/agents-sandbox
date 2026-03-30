@@ -8,6 +8,7 @@ import os
 import signal
 import shutil
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -18,6 +19,8 @@ from agents_sandbox import (
     SandboxClientError,
 )
 from agents_sandbox._grpc_client import SandboxGrpcClient
+from tests.smoke_support import daemon_socket_path
+
 
 RUNTIME_IMAGE_REPOSITORY = "ghcr.io/agents-sandbox/coding-runtime"
 CODING_RUNTIME_VERSION_TAG = os.environ.get("CODING_RUNTIME_VERSION_TAG", "0.1.0")
@@ -38,23 +41,26 @@ def test_sdk_can_create_real_sandbox_and_exec(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_dir = Path(tempfile.mkdtemp(prefix="agbox-"))
+    socket_path = daemon_socket_path(runtime_dir)
     _ensure_runtime_image(repo_root)
     _cleanup_runtime_resources("real-runtime-exec")
 
     sandbox_id = ""
-    with _running_test_daemon(repo_root, socket_path):
-        try:
-            sandbox_id = asyncio.run(
-                _run_real_runtime_exec_flow(
-                    socket_path=socket_path,
-                    workspace=workspace,
+    try:
+        with _running_test_daemon(repo_root, runtime_dir):
+            try:
+                sandbox_id = asyncio.run(
+                    _run_real_runtime_exec_flow(
+                        socket_path=socket_path,
+                        workspace=workspace,
+                    )
                 )
-            )
-            _wait_for_container_absent(_primary_container_name(sandbox_id))
-        finally:
-            _cleanup_runtime_resources(sandbox_id or "real-runtime-exec")
+                _wait_for_container_absent(_primary_container_name(sandbox_id))
+            finally:
+                _cleanup_runtime_resources(sandbox_id or "real-runtime-exec")
+    finally:
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 def test_sdk_rejects_empty_image_in_real_runtime(tmp_path: Path) -> None:
@@ -66,19 +72,22 @@ def test_sdk_rejects_empty_image_in_real_runtime(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_dir = Path(tempfile.mkdtemp(prefix="agbox-"))
+    socket_path = daemon_socket_path(runtime_dir)
     _cleanup_runtime_resources("real-runtime-empty-image")
 
-    with _running_test_daemon(repo_root, socket_path):
-        with pytest.raises(SandboxClientError):
-            asyncio.run(
-                _run_real_runtime_create_with_image(
-                    socket_path=socket_path,
-                    workspace=workspace,
-                    image="",
+    try:
+        with _running_test_daemon(repo_root, runtime_dir):
+            with pytest.raises(SandboxClientError):
+                asyncio.run(
+                    _run_real_runtime_create_with_image(
+                        socket_path=socket_path,
+                        workspace=workspace,
+                        image="",
+                    )
                 )
-            )
+    finally:
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
@@ -97,28 +106,31 @@ def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    socket_path = tmp_path / "runtime" / "agbox" / "agboxd.sock"
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_dir = Path(tempfile.mkdtemp(prefix="agbox-"))
+    socket_path = daemon_socket_path(runtime_dir)
     go_cache = tmp_path / "go-cache"
     go_cache.mkdir()
     _ensure_runtime_image(repo_root)
     _cleanup_runtime_resources("real-runtime-claude")
 
     sandbox_id = ""
-    with _running_test_daemon(
-        repo_root,
-        socket_path,
-        env={"HOME": str(fake_home), "GOCACHE": str(go_cache)},
-    ):
-        try:
-            sandbox_id = asyncio.run(
-                _run_real_runtime_projection_flow(
-                    socket_path=socket_path,
-                    workspace=workspace,
+    try:
+        with _running_test_daemon(
+            repo_root,
+            runtime_dir,
+            env={"HOME": str(fake_home), "GOCACHE": str(go_cache)},
+        ):
+            try:
+                sandbox_id = asyncio.run(
+                    _run_real_runtime_projection_flow(
+                        socket_path=socket_path,
+                        workspace=workspace,
+                    )
                 )
-            )
-        finally:
-            _cleanup_runtime_resources(sandbox_id or "real-runtime-claude")
+            finally:
+                _cleanup_runtime_resources(sandbox_id or "real-runtime-claude")
+    finally:
+        shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 async def _run_real_runtime_exec_flow(*, socket_path: Path, workspace: Path) -> str:
@@ -225,14 +237,15 @@ def _new_client(socket_path: str | Path, **kwargs: object) -> AgentsSandboxClien
 @contextmanager
 def _running_test_daemon(
     repo_root: Path,
-    socket_path: Path,
+    runtime_dir: Path,
     *,
     env: dict[str, str] | None = None,
 ) -> Iterator[None]:
-    runtime_dir = socket_path.parent.parent if socket_path.parent.name == "agbox" else socket_path.parent
     merged_env = os.environ.copy()
     merged_env["XDG_RUNTIME_DIR"] = str(runtime_dir)
-    merged_env["HOME"] = str(runtime_dir.parent)
+    merged_env["XDG_DATA_HOME"] = str(runtime_dir)
+    merged_env["XDG_CONFIG_HOME"] = str(runtime_dir)
+    merged_env["HOME"] = str(runtime_dir)
     if env is not None:
         merged_env.update(env)
     daemon_path = runtime_dir / "agboxd-test"

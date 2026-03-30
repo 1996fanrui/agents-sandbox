@@ -20,8 +20,8 @@ The AgentsSandbox daemon always derives its runtime paths internally and then au
 
 | Resource | Linux | macOS |
 |----------|-------|-------|
-| Socket | `$XDG_RUNTIME_DIR/agbox/agboxd.sock` | `~/Library/Application Support/agbox/run/agboxd.sock` |
-| Host lock | `$XDG_RUNTIME_DIR/agbox/agboxd.lock` | `~/Library/Application Support/agbox/run/agboxd.lock` |
+| Socket | `$XDG_RUNTIME_DIR/agbox/agboxd.sock` | `~/Library/Application Support/agbox/agboxd.sock` |
+| Host lock | `$XDG_RUNTIME_DIR/agbox/agboxd.lock` | `~/Library/Application Support/agbox/agboxd.lock` |
 | Config | `$XDG_CONFIG_HOME/agents-sandbox/config.toml`, or `~/.config/agents-sandbox/config.toml` when `XDG_CONFIG_HOME` is unset | `~/Library/Application Support/agents-sandbox/config.toml` |
 | Historical ID store | `$XDG_DATA_HOME/agents-sandbox/ids.db`, or `~/.local/share/agents-sandbox/ids.db` when `XDG_DATA_HOME` is unset | `~/Library/Application Support/agents-sandbox/ids.db` |
 

@@ -225,7 +225,7 @@ def test_default_socket_path_resolution_matches_daemon_rules(monkeypatch: pytest
         system="Darwin",
         lookup_env=lambda _key: None,
         home_dir="/Users/tester",
-    ) == "/Users/tester/Library/Application Support/agbox/run/agboxd.sock"
+    ) == "/Users/tester/Library/Application Support/agbox/agboxd.sock"
     with pytest.raises(RuntimeError, match="XDG_RUNTIME_DIR"):
         _resolve_default_socket_path(
             system="Linux",
@@ -347,8 +347,8 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
 def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> None:
     servicer = _RecordingSandboxService()
 
-    with _running_server(tmp_path / "sandbox.sock", servicer):
-        result = asyncio.run(_exercise_public_client(tmp_path / "sandbox.sock"))
+    with _running_server("sandbox.sock", servicer) as socket_path:
+        result = asyncio.run(_exercise_public_client(socket_path))
 
     assert result["ping"].daemon == "agboxd"
     # create_sandbox with wait=False returns state from CreateSandboxResponse (PENDING).

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import tempfile
 import time
 
 import grpc
@@ -127,14 +128,22 @@ def _new_client(socket_path: str | Path, **kwargs: object) -> AgentsSandboxClien
     return client
 
 
+def daemon_socket_path(runtime_dir: Path) -> Path:
+    """Compute the daemon socket path for a given XDG_RUNTIME_DIR.
+
+    Mirrors Go's platform.SocketPath: <runtime_dir>/agbox/agboxd.sock
+    (unified across all platforms).
+    """
+    return runtime_dir / "agbox" / "agboxd.sock"
+
+
 @contextmanager
 def _running_test_daemon(
     repo_root: Path,
-    socket_path: Path,
+    runtime_dir: Path,
     *,
     env: dict[str, str] | None = None,
 ) -> Iterator[subprocess.Popen[str]]:
-    runtime_dir = socket_path.parent.parent
     merged_env = os.environ.copy()
     merged_env["XDG_RUNTIME_DIR"] = str(runtime_dir)
     merged_env["HOME"] = str(runtime_dir.parent)
@@ -194,19 +203,29 @@ async def _wait_for_ping(socket_path: Path) -> None:
 
 @contextmanager
 def _running_server(
-    socket_path: Path,
+    socket_name: str,
     servicer: service_pb2_grpc.SandboxServiceServicer,
-) -> Iterator[None]:
+) -> Iterator[Path]:
+    """Start a gRPC server on a Unix socket and yield the socket path.
+
+    Uses a short temp directory to stay under the macOS 104-char socket path limit.
+    """
+    short_dir = tempfile.mkdtemp(prefix="agbox-")
+    actual_socket = Path(short_dir) / socket_name
+
     server = grpc.server(ThreadPoolExecutor(max_workers=4))
     service_pb2_grpc.add_SandboxServiceServicer_to_server(servicer, server)
-    bound = server.add_insecure_port(f"unix://{socket_path}")
+    bound = server.add_insecure_port(f"unix://{actual_socket}")
     if bound == 0:
-        raise AssertionError(f"failed to bind unix socket: {socket_path}")
+        raise AssertionError(f"failed to bind unix socket: {actual_socket}")
     server.start()
     try:
-        yield
+        yield actual_socket
     finally:
         server.stop(grace=0).wait()
+        import shutil
+
+        shutil.rmtree(short_dir, ignore_errors=True)
 
 
 class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
