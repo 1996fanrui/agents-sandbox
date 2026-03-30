@@ -17,33 +17,21 @@ go build ./cmd/...
 
 ## Running the Daemon
 
-agboxd runs as a systemd user service. The service file uses
-`scripts/agboxd_start.sh`, which builds and starts the daemon automatically.
+Build from source, install to `~/.local/bin/`, and start the systemd user service (Linux) or launchd agent (macOS):
 
 ```bash
-# Start / stop / restart
-systemctl --user start agboxd
-systemctl --user stop agboxd
-systemctl --user restart agboxd
+./scripts/install_local.sh
+```
 
-# Status and logs
+Service management:
+
+```bash
 systemctl --user status agboxd
+systemctl --user restart agboxd
 journalctl --user -u agboxd -f
 ```
 
-## Rebuilding and Redeploying
-
-One-liner to rebuild agboxd and restart the service:
-
-```bash
-go build -o .build/agboxd ./cmd/agboxd && systemctl --user restart agboxd
-```
-
-agbox (CLI) is stateless — just rebuild and use it directly:
-
-```bash
-go build -o .build/agbox ./cmd/agbox
-```
+After code changes, re-run `./scripts/install_local.sh` to rebuild and restart.
 
 ## Proto Generation
 
