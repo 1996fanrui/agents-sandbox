@@ -47,10 +47,10 @@ echo "Building agboxd and agbox from source..."
 cd "${PROJECT_ROOT}"
 mkdir -p "${INSTALL_DIR}"
 
-"${GO_BIN}" build -o "${INSTALL_DIR}/agboxd" ./cmd/agboxd
+"${GO_BIN}" build -ldflags="-s -w" -o "${INSTALL_DIR}/agboxd" ./cmd/agboxd
 echo "Installed: ${INSTALL_DIR}/agboxd"
 
-"${GO_BIN}" build -o "${INSTALL_DIR}/agbox" ./cmd/agbox
+"${GO_BIN}" build -ldflags="-s -w" -o "${INSTALL_DIR}/agbox" ./cmd/agbox
 echo "Installed: ${INSTALL_DIR}/agbox"
 
 # Sync stale copies in ~/bin/ if they exist and we installed elsewhere.
