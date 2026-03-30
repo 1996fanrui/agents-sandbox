@@ -37,13 +37,18 @@ jobs:
             raw_version="${{ inputs.version }}"
           fi
 
-          version="${raw_version#v}"
+          version="${raw_version#image-coding-v}"
+          # Also strip a bare "v" prefix for manual workflow_dispatch input.
+          version="${version#v}"
           if [ -z "${version}" ]; then
             echo "Release version cannot be empty." >&2
             exit 1
           fi
 
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,6 +66,7 @@ jobs:
           context: images/coding-runtime
           file: images/coding-runtime/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
