@@ -46,22 +46,20 @@ func (backend *dockerRuntimeBackend) materializeGenericMounts(
 	return mounts, nil
 }
 
-func (backend *dockerRuntimeBackend) materializeGenericCopies(
-	sandboxID string,
-	requests []*agboxv1.CopySpec,
-	state *sandboxRuntimeState,
-) ([]dockerMount, error) {
+// deferredCopy represents a validated copy request that will be applied via
+// CopyToContainer after the container is created but before it is started.
+type deferredCopy struct {
+	SourcePath      string
+	ContainerTarget string
+	ExcludePatterns []string
+}
+
+func validateGenericCopies(requests []*agboxv1.CopySpec) ([]deferredCopy, error) {
 	if len(requests) == 0 {
 		return nil, nil
 	}
-	if backend.config.StateRoot == "" {
-		return nil, errors.New("runtime.state_root is required for generic copy inputs")
-	}
-	if state.ShadowRoot == "" {
-		state.ShadowRoot = filepath.Join(backend.config.StateRoot, "sandboxes", sandboxID, "shadow")
-	}
-	mounts := make([]dockerMount, 0, len(requests))
-	for index, request := range requests {
+	copies := make([]deferredCopy, 0, len(requests))
+	for _, request := range requests {
 		if request.GetSource() == "" {
 			return nil, errors.New("copy source is required")
 		}
@@ -82,20 +80,13 @@ func (backend *dockerRuntimeBackend) materializeGenericCopies(
 		if !sourceInfo.Mode().IsRegular() && !sourceInfo.IsDir() {
 			return nil, fmt.Errorf("copy source must be a file or directory: %s", sourcePath)
 		}
-		copyRoot := filepath.Join(state.ShadowRoot, "copies", fmt.Sprintf("%02d-%s", index, sanitizeRuntimeName(request.GetTarget())))
-		if err := os.RemoveAll(copyRoot); err != nil {
-			return nil, err
-		}
-		if err := copyTreeWithPatterns(sourcePath, copyRoot, request.GetExcludePatterns()); err != nil {
-			return nil, err
-		}
-		mounts = append(mounts, dockerMount{
-			Source:   copyRoot,
-			Target:   request.GetTarget(),
-			ReadOnly: false,
+		copies = append(copies, deferredCopy{
+			SourcePath:      sourcePath,
+			ContainerTarget: request.GetTarget(),
+			ExcludePatterns: request.GetExcludePatterns(),
 		})
 	}
-	return mounts, nil
+	return copies, nil
 }
 
 func (backend *dockerRuntimeBackend) materializeBuiltinTools(
@@ -192,7 +183,7 @@ func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 	state *sandboxRuntimeState,
 ) (string, bool, error) {
 	// Builtin tools are always bind-mounted as-is, including any symlinks.
-	// Shadow-copy logic is intentionally skipped: these are trusted host directories
+	// Builtin tools are always bind-mounted as-is, including any symlinks. These are trusted host directories
 	// (tool configs, caches) that may contain symlinks to arbitrary host paths,
 	// and the container is expected to see them exactly as they appear on the host.
 	if _, err := os.Stat(sourcePath); err != nil {

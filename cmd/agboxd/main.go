@@ -58,7 +58,6 @@ func runWithDeps(
 	logger.Info("starting",
 		slog.String("socket_path", startup.socketPath),
 		slog.String("id_store_path", startup.idStorePath),
-		slog.String("state_root", startup.serviceConfig.StateRoot),
 		slog.String("idle_ttl", startup.serviceConfig.IdleTTL.String()),
 		slog.String("cleanup_ttl", startup.serviceConfig.CleanupTTL.String()),
 		slog.String("log_level", startup.serviceConfig.LogLevel),

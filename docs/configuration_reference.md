@@ -34,7 +34,6 @@ The host lock always lives next to the socket so the lock protects the exact run
 | `runtime.idle_ttl` | duration string | `"10m"` | Daemon config only | Global idle stop threshold based on `last_terminal_run_finished_at`. Set to `"0"` to disable idle detection globally. |
 | `runtime.cleanup_ttl` | duration string | `"360h"` | Daemon config only | Time after which STOPPED sandboxes have their Docker resources cleaned up and DB records deleted, and DELETED sandbox event history is purged |
 | `runtime.log_level` | string | `"info"` | Daemon config only | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `runtime.state_root` | string | unset | Daemon config only | Root for generic copy inputs and builtin-tool shadow-copy state |
 | `artifacts.exec_output_root` | string | Platform default: Linux: `$XDG_DATA_HOME/agents-sandbox/exec-logs`; macOS: `~/Library/Application Support/agents-sandbox/exec-logs` | Daemon config only | Root directory for exec log files; bind-mounted into the primary container at `/var/log/agents-sandbox/` so exec output is written directly to the host |
 | `artifacts.exec_output_template` | string | `"{sandbox_id}/{exec_id}"` | Daemon config only | Relative path prefix expanded against `artifacts.exec_output_root`; supported fields are `sandbox_id` and `exec_id`; daemon appends `.stdout.log` and `.stderr.log` suffixes |
 

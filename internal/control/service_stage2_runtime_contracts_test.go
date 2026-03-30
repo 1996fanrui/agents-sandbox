@@ -594,20 +594,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 	}
 }
 
-func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
-	sourceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sourceRoot, "keep.txt"), []byte("keep"), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
-	if _, err := backendWithoutState.materializeGenericCopies(
-		"sandbox-copy",
-		[]*agboxv1.CopySpec{{Source: sourceRoot, Target: "/workspace/project"}},
-		&sandboxRuntimeState{},
-	); err == nil || !strings.Contains(err.Error(), "runtime.state_root is required for generic copy inputs") {
-		t.Fatalf("expected generic copy state_root error, got %v", err)
-	}
-
+func TestBuiltinToolMountsPreserveSymlinks(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	builtinSource := filepath.Join(homeDir, ".claude")
@@ -627,9 +614,9 @@ func TestStateRootOnlyServesCopiesAndBuiltinShadowCopy(t *testing.T) {
 		t.Fatalf("Symlink failed: %v", err)
 	}
 
-	// Builtin resources are mounted directly from the host path without shadow
-	// copies; StateRoot is not required and symlinks are preserved as-is.
+	// Builtin resources are mounted directly from the host path; symlinks are preserved as-is.
 	runtimeState := &sandboxRuntimeState{}
+	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
 	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, runtimeState)
 	if err != nil {
 		t.Fatalf("materializeBuiltinTools failed: %v", err)

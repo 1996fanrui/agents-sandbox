@@ -1,6 +1,7 @@
 package control
 
 import (
+	"archive/tar"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,111 +10,6 @@ import (
 
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
 )
-
-func copyTree(sourceRoot string, targetRoot string) error {
-	return copyTreeWithOptions(sourceRoot, targetRoot, nil, false)
-}
-
-func copyTreeAllowExternalSymlinks(sourceRoot string, targetRoot string) error {
-	return copyTreeWithOptions(sourceRoot, targetRoot, nil, true)
-}
-
-func copyTreeWithPatterns(sourceRoot string, targetRoot string, excludePatterns []string) error {
-	return copyTreeWithOptions(sourceRoot, targetRoot, excludePatterns, false)
-}
-
-func copyTreeWithOptions(sourceRoot string, targetRoot string, excludePatterns []string, allowExternalSymlinks bool) error {
-	sourceInfo, err := os.Stat(sourceRoot)
-	if err != nil {
-		return err
-	}
-	if !sourceInfo.IsDir() {
-		return copyFile(sourceRoot, targetRoot, sourceInfo.Mode())
-	}
-	rootAbs, err := filepath.Abs(sourceRoot)
-	if err != nil {
-		return err
-	}
-	return filepath.WalkDir(sourceRoot, func(currentSource string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		relativePath, err := filepath.Rel(sourceRoot, currentSource)
-		if err != nil {
-			return err
-		}
-		currentTarget := targetRoot
-		if relativePath != "." {
-			currentTarget = filepath.Join(targetRoot, relativePath)
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if relativePath != "." && matchesExcludePattern(relativePath, excludePatterns) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() {
-			return os.MkdirAll(currentTarget, info.Mode())
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			target, copyResolved, resolvedTarget, err := rewriteCopiedSymlink(rootAbs, targetRoot, currentSource, currentTarget, allowExternalSymlinks)
-			if err != nil {
-				return err
-			}
-			if copyResolved {
-				resolvedInfo, err := os.Stat(resolvedTarget)
-				if err != nil {
-					return err
-				}
-				if resolvedInfo.IsDir() {
-					return copyTreeWithOptions(resolvedTarget, currentTarget, nil, allowExternalSymlinks)
-				}
-				return copyFile(resolvedTarget, currentTarget, resolvedInfo.Mode())
-			}
-			if err := os.MkdirAll(filepath.Dir(currentTarget), 0o755); err != nil {
-				return err
-			}
-			return os.Symlink(target, currentTarget)
-		}
-		return copyFile(currentSource, currentTarget, info.Mode())
-	})
-}
-
-func rewriteCopiedSymlink(
-	sourceRoot string,
-	targetRoot string,
-	currentSource string,
-	currentTarget string,
-	allowExternalSymlinks bool,
-) (string, bool, string, error) {
-	target, err := os.Readlink(currentSource)
-	if err != nil {
-		return "", false, "", err
-	}
-	resolvedTarget, err := runtimedocker.ResolveLinkTarget(currentSource)
-	if err != nil {
-		return "", false, "", err
-	}
-	if !pathWithinRoot(sourceRoot, resolvedTarget) {
-		if !allowExternalSymlinks {
-			return "", false, "", fmt.Errorf("copy source contains external symlink: %s", currentSource)
-		}
-		return "", true, resolvedTarget, nil
-	}
-	if filepath.IsAbs(target) {
-		relativeTarget, err := filepath.Rel(sourceRoot, resolvedTarget)
-		if err != nil {
-			return "", false, "", err
-		}
-		rewrittenTarget, err := filepath.Rel(filepath.Dir(currentTarget), filepath.Join(targetRoot, relativeTarget))
-		return rewrittenTarget, false, "", err
-	}
-	return target, false, "", nil
-}
 
 func matchesExcludePattern(relativePath string, patterns []string) bool {
 	base := filepath.Base(relativePath)
@@ -131,22 +27,115 @@ func matchesExcludePattern(relativePath string, patterns []string) bool {
 	return false
 }
 
-func copyFile(sourcePath string, targetPath string, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return err
+// buildCopyTar writes a tar archive of sourceRoot to w, applying exclude patterns
+// and preserving symlinks. The archive paths are relative so that CopyToContainer
+// extracts them under the target directory. The writer is always closed.
+func buildCopyTar(w io.WriteCloser, sourceRoot string, excludePatterns []string) error {
+	tw := tar.NewWriter(w)
+	closeAll := func(tarErr error) error {
+		twErr := tw.Close()
+		wErr := w.Close()
+		if tarErr != nil {
+			return tarErr
+		}
+		if twErr != nil {
+			return twErr
+		}
+		return wErr
 	}
-	sourceFile, err := os.Open(sourcePath)
+
+	rootAbs, err := filepath.Abs(sourceRoot)
+	if err != nil {
+		return closeAll(err)
+	}
+
+	sourceInfo, err := os.Lstat(sourceRoot)
+	if err != nil {
+		return closeAll(err)
+	}
+	if !sourceInfo.IsDir() {
+		// Single file: write it as the base name.
+		err := writeTarFile(tw, sourceRoot, sourceInfo.Name(), sourceInfo)
+		return closeAll(err)
+	}
+
+	err = filepath.WalkDir(sourceRoot, func(currentPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relPath, err := filepath.Rel(sourceRoot, currentPath)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+		if matchesExcludePattern(relPath, excludePatterns) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return writeTarSymlink(tw, currentPath, relPath, rootAbs)
+		}
+		if entry.IsDir() {
+			header, headerErr := tar.FileInfoHeader(info, "")
+			if headerErr != nil {
+				return headerErr
+			}
+			header.Name = relPath + "/"
+			return tw.WriteHeader(header)
+		}
+		return writeTarFile(tw, currentPath, relPath, info)
+	})
+	return closeAll(err)
+}
+
+func writeTarFile(tw *tar.Writer, sourcePath string, archiveName string, info fs.FileInfo) error {
+	header, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
-	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode.Perm())
+	header.Name = archiveName
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+	f, err := os.Open(sourcePath)
 	if err != nil {
 		return err
 	}
-	defer targetFile.Close()
-	if _, err := io.Copy(targetFile, sourceFile); err != nil {
+	defer f.Close()
+	_, err = io.Copy(tw, f)
+	return err
+}
+
+func writeTarSymlink(tw *tar.Writer, sourcePath string, archiveName string, sourceRootAbs string) error {
+	linkTarget, err := os.Readlink(sourcePath)
+	if err != nil {
 		return err
 	}
-	return nil
+	// Reject external symlinks (those resolving outside the source tree).
+	resolvedTarget, err := runtimedocker.ResolveLinkTarget(sourcePath)
+	if err != nil {
+		return err
+	}
+	if !pathWithinRoot(sourceRootAbs, resolvedTarget) {
+		return fmt.Errorf("copy source contains external symlink: %s", sourcePath)
+	}
+	info, err := os.Lstat(sourcePath)
+	if err != nil {
+		return err
+	}
+	header, err := tar.FileInfoHeader(info, linkTarget)
+	if err != nil {
+		return err
+	}
+	header.Name = archiveName
+	header.Linkname = linkTarget
+	return tw.WriteHeader(header)
 }

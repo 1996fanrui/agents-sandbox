@@ -37,14 +37,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agents-sandbox"
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agbox"
 
 rm -f "$DATA_DIR/ids.db"
-# state/ may contain root-owned files from container shadow copies
-if [ -d "$DATA_DIR/state" ]; then
-    sudo rm -rf "$DATA_DIR/state"
-fi
 rm -rf "$RUNTIME_DIR"
-# Recreate runtime directory with correct ownership so agboxd can start cleanly.
-# Without this, systemd auto-restart may race and the directory could end up
-# root-owned if sudo was used earlier in this script.
 mkdir -p "$RUNTIME_DIR"
 
 echo ""

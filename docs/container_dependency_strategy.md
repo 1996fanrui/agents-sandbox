@@ -55,14 +55,15 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 ### Generic copies
 
 - The copy source must be a real file or directory, not a symlink.
-- `exclude_patterns` are applied while populating the copied tree (see [Declarative YAML Config](declarative_yaml_config.md) for the YAML field reference).
-- Project-internal symlinks are preserved as symlinks; absolute host paths are rewritten to relative targets when needed.
+- Copies are injected into the container via Docker's `CopyToContainer` API (tar stream) between container create and start — no host-side shadow directories are needed.
+- `exclude_patterns` are applied while building the tar stream (see [Declarative YAML Config](declarative_yaml_config.md) for the YAML field reference).
+- Project-internal symlinks are preserved as symlinks in the tar archive.
 - Project-external or unreadable symlink targets are rejected instead of being auto-imported.
 
 ### Built-in resources
 
 - Regular directories use bind mounts when safe.
-- Directory trees with escaping symlinks fall back to daemon-owned shadow copies.
+- Directory trees with escaping symlinks are bind-mounted directly from the host path.
 - Socket resources such as `ssh-agent` are forwarded only when the host path is a real Unix socket.
 
 ## Service Model
@@ -106,7 +107,7 @@ The runtime must execute under a non-root user inside the sandbox. Bind-mounted 
 
 ## Cleanup and Ownership
 
-`agents-sandbox` owns cleanup for resources carrying the `io.github.1996fanrui.agents-sandbox.*` label namespace: primary containers, service containers, dedicated networks, shadow-copy trees, and event/artifact files.
+`agents-sandbox` owns cleanup for resources carrying the `io.github.1996fanrui.agents-sandbox.*` label namespace: primary containers, service containers, dedicated networks, and event/artifact files.
 
 Docker objects without these labels are never inspected, stopped, or removed by the daemon. Ownership must be derivable from runtime state plus namespaced labels without requiring an external product database snapshot. Cleanup continues on daemon-owned contexts rather than request-scoped cancellation.
 
