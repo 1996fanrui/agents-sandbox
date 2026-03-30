@@ -328,6 +328,7 @@ section { padding: 96px 0; }
   color: var(--text); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.8;
 }
 .cmd-prefix { color: var(--muted); }
+.cmd-comment { color: var(--muted); opacity: 0.7; }
 .qs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); opacity: 0.5; }
 .copy-btn {
   background: transparent; border: 1px solid var(--border); border-radius: 6px;
