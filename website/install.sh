@@ -17,7 +17,7 @@
 # What this script does:
 #   1. Checks that Docker is installed and the daemon is running.
 #   2. Downloads agboxd and agbox binaries for your OS/arch from GitHub Releases.
-#   3. Installs binaries to the best available directory already in PATH.
+#   3. Installs binaries to ~/.local/bin.
 #   4. Linux : creates/updates ~/.config/systemd/user/agboxd.service and restarts it.
 #   5. macOS : creates/updates ~/Library/LaunchAgents/io.github.agents-sandbox.agboxd.plist
 #              and restarts the launchd agent.
@@ -28,19 +28,6 @@ set -e
 # Inline service helpers (so the script works standalone via curl|bash).
 # Self-contained so the script works standalone via curl|bash.
 # ---------------------------------------------------------------------------
-
-sync_bin_copies() {
-  local install_dir="$1"
-  if [[ "${install_dir}" != "${HOME}/bin" && -d "${HOME}/bin" ]]; then
-    for bin in agboxd agbox; do
-      if [[ -f "${HOME}/bin/${bin}" ]]; then
-        cp "${install_dir}/${bin}" "${HOME}/bin/${bin}"
-        chmod 755 "${HOME}/bin/${bin}"
-        echo "Updated  : ${HOME}/bin/${bin}"
-      fi
-    done
-  fi
-}
 
 _setup_systemd() {
   local agboxd_bin="$1"
@@ -172,35 +159,9 @@ check_docker() {
 }
 
 # ---------------------------------------------------------------------------
-# Detect best install directory already in PATH.
-# Priority: ~/.local/bin (if in PATH) > ~/bin (if in PATH)
-#           > /usr/local/bin (if writable) > ~/.local/bin (fallback)
+# Install directory: ~/.local/bin (XDG standard, same convention as uv, pipx, etc.)
 # ---------------------------------------------------------------------------
 detect_install_dir() {
-  # Check if a directory is in PATH.
-  _in_path() {
-    case ":${PATH}:" in
-      *":$1:"*) return 0 ;;
-      *)        return 1 ;;
-    esac
-  }
-
-  if _in_path "${HOME}/.local/bin"; then
-    echo "${HOME}/.local/bin"
-    return
-  fi
-
-  if _in_path "${HOME}/bin"; then
-    echo "${HOME}/bin"
-    return
-  fi
-
-  if [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
-    echo "/usr/local/bin"
-    return
-  fi
-
-  # Fallback: use ~/.local/bin and warn about PATH.
   echo "${HOME}/.local/bin"
 }
 
@@ -274,39 +235,18 @@ echo "OS/Arch : ${OS}/${ARCH}"
 echo "Install : ${INSTALL_DIR}"
 
 # ---------------------------------------------------------------------------
-# Check if already up-to-date across all known install locations.
+# Check if already up-to-date.
 # ---------------------------------------------------------------------------
 WANT_VERSION="${VERSION#v}"
+NEED_DOWNLOAD=true
 
-_agbox_version() {
-  local bin="$1"
-  [[ -x "${bin}" ]] && "${bin}" version 2>/dev/null || true
-}
-
-NEED_DOWNLOAD=false
-for _loc in "${INSTALL_DIR}/agbox" "${HOME}/.local/bin/agbox" "${HOME}/bin/agbox"; do
-  _ver=$(_agbox_version "${_loc}")
-  if [[ -z "${_ver}" ]]; then
-    continue
+if [[ -x "${INSTALL_DIR}/agbox" ]]; then
+  CURRENT_VERSION=$("${INSTALL_DIR}/agbox" version 2>/dev/null || true)
+  if [[ "${CURRENT_VERSION}" == "${WANT_VERSION}" ]]; then
+    NEED_DOWNLOAD=false
+    echo ""
+    echo "Already at version ${VERSION}, skipping download."
   fi
-  if [[ "${_ver}" != "${WANT_VERSION}" ]]; then
-    NEED_DOWNLOAD=true
-    break
-  fi
-done
-
-# If no existing installation found at any location, we must download.
-if [[ "${NEED_DOWNLOAD}" == false ]]; then
-  _any_found=false
-  for _loc in "${INSTALL_DIR}/agbox" "${HOME}/.local/bin/agbox" "${HOME}/bin/agbox"; do
-    [[ -x "${_loc}" ]] && _any_found=true && break
-  done
-  [[ "${_any_found}" == false ]] && NEED_DOWNLOAD=true
-fi
-
-if [[ "${NEED_DOWNLOAD}" == false ]]; then
-  echo ""
-  echo "Already at version ${VERSION}, skipping download."
 fi
 
 # ---------------------------------------------------------------------------
@@ -332,27 +272,49 @@ if [[ "${NEED_DOWNLOAD}" == true ]]; then
   echo ""
   echo "Installed: ${INSTALL_DIR}/agboxd"
   echo "Installed: ${INSTALL_DIR}/agbox"
-
-  sync_bin_copies "${INSTALL_DIR}"
 fi
 
 # ---------------------------------------------------------------------------
-# Warn if install directory is not in PATH
+# Ensure install directory is in PATH.
+# Auto-adds to shell profile unless AGBOX_NO_MODIFY_PATH=1.
 # ---------------------------------------------------------------------------
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *)
-    echo ""
-    echo "WARNING: ${INSTALL_DIR} is not in your PATH."
-    echo "  Add it by running:"
-    SHELL_NAME=$(basename "${SHELL:-/bin/bash}")
-    case "${SHELL_NAME}" in
-      zsh)  echo "    echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc" ;;
-      fish) echo "    fish_add_path ${INSTALL_DIR}" ;;
-      *)    echo "    echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;;
-    esac
-    ;;
-esac
+_ensure_path() {
+  case ":${PATH}:" in
+    *":${INSTALL_DIR}:"*) return ;;
+  esac
+
+  local path_line="export PATH=\"${INSTALL_DIR}:\$PATH\""
+  local shell_name
+  shell_name=$(basename "${SHELL:-/bin/bash}")
+
+  local profile=""
+  case "${shell_name}" in
+    zsh)  profile="${HOME}/.zshrc" ;;
+    bash)
+      # On macOS, bash reads .bash_profile for login shells; on Linux, .bashrc.
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        profile="${HOME}/.bash_profile"
+      else
+        profile="${HOME}/.bashrc"
+      fi
+      ;;
+    *)    profile="${HOME}/.profile" ;;
+  esac
+
+  if [[ -n "${profile}" ]]; then
+    # Avoid duplicate entries.
+    if ! grep -qF "${INSTALL_DIR}" "${profile}" 2>/dev/null; then
+      echo "" >> "${profile}"
+      echo "# Added by agents-sandbox installer" >> "${profile}"
+      echo "${path_line}" >> "${profile}"
+      echo "Added ${INSTALL_DIR} to PATH in ${profile}"
+    fi
+    # Make it available in the current process for the rest of this script.
+    export PATH="${INSTALL_DIR}:${PATH}"
+  fi
+}
+
+_ensure_path
 
 # ---------------------------------------------------------------------------
 # Setup service for the current OS

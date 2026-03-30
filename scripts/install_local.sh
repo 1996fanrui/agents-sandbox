@@ -19,26 +19,9 @@ if ! command -v "${GO_BIN}" >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Detect best install directory already in PATH.
-# Priority: ~/.local/bin (if in PATH) > ~/bin (if in PATH)
-#           > /usr/local/bin (if writable) > ~/.local/bin (fallback)
+# Install directory: ~/.local/bin (XDG standard, same convention as uv, pipx, etc.)
 # ---------------------------------------------------------------------------
-_in_path() {
-  case ":${PATH}:" in
-    *":$1:"*) return 0 ;;
-    *)        return 1 ;;
-  esac
-}
-
-if _in_path "${HOME}/.local/bin"; then
-  INSTALL_DIR="${HOME}/.local/bin"
-elif _in_path "${HOME}/bin"; then
-  INSTALL_DIR="${HOME}/bin"
-elif [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
-  INSTALL_DIR="/usr/local/bin"
-else
-  INSTALL_DIR="${HOME}/.local/bin"
-fi
+INSTALL_DIR="${HOME}/.local/bin"
 
 # ---------------------------------------------------------------------------
 # Build both binaries
@@ -53,34 +36,44 @@ echo "Installed: ${INSTALL_DIR}/agboxd"
 "${GO_BIN}" build -ldflags="-s -w" -o "${INSTALL_DIR}/agbox" ./cmd/agbox
 echo "Installed: ${INSTALL_DIR}/agbox"
 
-# Sync stale copies in ~/bin/ if they exist and we installed elsewhere.
-if [[ "${INSTALL_DIR}" != "${HOME}/bin" && -d "${HOME}/bin" ]]; then
-  for bin in agboxd agbox; do
-    if [[ -f "${HOME}/bin/${bin}" ]]; then
-      cp "${INSTALL_DIR}/${bin}" "${HOME}/bin/${bin}"
-      chmod 755 "${HOME}/bin/${bin}"
-      echo "Updated  : ${HOME}/bin/${bin}"
-    fi
-  done
-fi
+# ---------------------------------------------------------------------------
+# Ensure install directory is in PATH.
+# Auto-adds to shell profile unless AGBOX_NO_MODIFY_PATH=1.
+# ---------------------------------------------------------------------------
+_ensure_path() {
+  case ":${PATH}:" in
+    *":${INSTALL_DIR}:"*) return ;;
+  esac
 
-# ---------------------------------------------------------------------------
-# Warn if install directory is not in PATH
-# ---------------------------------------------------------------------------
-case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *)
-    echo ""
-    echo "WARNING: ${INSTALL_DIR} is not in your PATH."
-    echo "  Add it by running:"
-    SHELL_NAME=$(basename "${SHELL:-/bin/bash}")
-    case "${SHELL_NAME}" in
-      zsh)  echo "    echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc" ;;
-      fish) echo "    fish_add_path ${INSTALL_DIR}" ;;
-      *)    echo "    echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;;
-    esac
-    ;;
-esac
+  local path_line="export PATH=\"${INSTALL_DIR}:\$PATH\""
+  local shell_name
+  shell_name=$(basename "${SHELL:-/bin/bash}")
+
+  local profile=""
+  case "${shell_name}" in
+    zsh)  profile="${HOME}/.zshrc" ;;
+    bash)
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        profile="${HOME}/.bash_profile"
+      else
+        profile="${HOME}/.bashrc"
+      fi
+      ;;
+    *)    profile="${HOME}/.profile" ;;
+  esac
+
+  if [[ -n "${profile}" ]]; then
+    if ! grep -qF "${INSTALL_DIR}" "${profile}" 2>/dev/null; then
+      echo "" >> "${profile}"
+      echo "# Added by agents-sandbox installer" >> "${profile}"
+      echo "${path_line}" >> "${profile}"
+      echo "Added ${INSTALL_DIR} to PATH in ${profile}"
+    fi
+    export PATH="${INSTALL_DIR}:${PATH}"
+  fi
+}
+
+_ensure_path
 
 # ---------------------------------------------------------------------------
 # Set up and restart the agboxd service
