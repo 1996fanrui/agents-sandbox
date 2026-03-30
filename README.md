@@ -67,6 +67,23 @@ A remote VPS gives you isolation too — but with tradeoffs. agents-sandbox runs
 
 **Local-first, cloud-optional.** The same daemon and SDK work in cloud deployments when you need to scale.
 
+## Installation
+
+**One-line install** (Linux and macOS — requires Docker and curl):
+
+```bash
+curl -fsSL https://agents-sandbox.com/install.sh | bash
+```
+
+This downloads the latest stable release, installs `agboxd` and `agbox` to a directory in your `PATH`, and starts the daemon as a user service (systemd on Linux, launchd on macOS).
+
+To install a specific version or include pre-releases:
+
+```bash
+curl -fsSL https://agents-sandbox.com/install.sh | bash -s -- v0.1.1   # specific version
+curl -fsSL https://agents-sandbox.com/install.sh | bash -s -- --pre     # latest including pre-releases
+```
+
 ## Quickstart
 
 The official recommended runtime image for coding workloads is:
