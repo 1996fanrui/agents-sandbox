@@ -41,37 +41,3 @@ func TestValidateWorkspaceTreeRejectsSymlinksEscapingWorkspaceRoot(t *testing.T)
 		t.Fatalf("expected ErrArtifactPathEscapesRoot, got %v", err)
 	}
 }
-
-func TestResolveProjectionModeFallsBackToShadowCopyForEscapingSymlink(t *testing.T) {
-	projectionRoot := t.TempDir()
-	insideRoot := filepath.Join(projectionRoot, "inside")
-	outsideRoot := t.TempDir()
-	insideTarget := filepath.Join(insideRoot, "kept.txt")
-	outsideTarget := filepath.Join(outsideRoot, "secret.txt")
-	if err := os.MkdirAll(insideRoot, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(insideTarget, []byte("inside"), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-	if err := os.WriteFile(outsideTarget, []byte("outside"), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-	if err := os.Symlink(filepath.Join("inside", "kept.txt"), filepath.Join(projectionRoot, "inside-link")); err != nil {
-		t.Fatalf("Symlink failed: %v", err)
-	}
-	if err := os.Symlink(outsideTarget, filepath.Join(projectionRoot, "outside-link")); err != nil {
-		t.Fatalf("Symlink failed: %v", err)
-	}
-
-	resolution, err := ResolveProjectionMode(projectionRoot, []string{projectionRoot}, true)
-	if err != nil {
-		t.Fatalf("ResolveProjectionMode failed: %v", err)
-	}
-	if resolution.Mode != ProjectionModeShadowCopy {
-		t.Fatalf("unexpected projection mode: got %s want %s", resolution.Mode, ProjectionModeShadowCopy)
-	}
-	if resolution.WriteBack {
-		t.Fatalf("shadow copy projection must disable write-back")
-	}
-}

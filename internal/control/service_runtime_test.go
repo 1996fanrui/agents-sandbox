@@ -1,7 +1,9 @@
 package control
 
 import (
+	"archive/tar"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +49,7 @@ func TestExecStatusCarriesExitCode(t *testing.T) {
 	}
 }
 
-func TestMaterializeGenericCopiesRejectsExternalSymlink(t *testing.T) {
+func TestBuildCopyTarRejectsExternalSymlink(t *testing.T) {
 	sourceRoot := t.TempDir()
 	externalRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(externalRoot, "secret.txt"), []byte("secret"), 0o644); err != nil {
@@ -57,17 +59,15 @@ func TestMaterializeGenericCopiesRejectsExternalSymlink(t *testing.T) {
 		t.Fatalf("Symlink failed: %v", err)
 	}
 
-	backend := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
-	state := &sandboxRuntimeState{}
-	_, err := backend.materializeGenericCopies("sandbox-1", []*agboxv1.CopySpec{
-		{Source: sourceRoot, Target: "/workspace/project"},
-	}, state)
+	pr, pw := io.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+	err := buildCopyTar(pw, sourceRoot, nil)
 	if err == nil || !strings.Contains(err.Error(), "external symlink") {
 		t.Fatalf("expected external symlink failure, got %v", err)
 	}
 }
 
-func TestMaterializeGenericCopiesAppliesExcludePatterns(t *testing.T) {
+func TestBuildCopyTarAppliesExcludePatterns(t *testing.T) {
 	sourceRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(sourceRoot, "keep.txt"), []byte("keep"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -76,22 +76,59 @@ func TestMaterializeGenericCopiesAppliesExcludePatterns(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	backend := &dockerRuntimeBackend{config: ServiceConfig{StateRoot: t.TempDir()}}
-	state := &sandboxRuntimeState{}
-	mounts, err := backend.materializeGenericCopies("sandbox-1", []*agboxv1.CopySpec{
-		{Source: sourceRoot, Target: "/workspace/project", ExcludePatterns: []string{".git"}},
-	}, state)
-	if err != nil {
-		t.Fatalf("materializeGenericCopies failed: %v", err)
+	pr, pw := io.Pipe()
+	go func() {
+		_ = buildCopyTar(pw, sourceRoot, []string{".git"})
+	}()
+	tr := tar.NewReader(pr)
+	names := make(map[string]bool)
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			break
+		}
+		names[header.Name] = true
 	}
-	if len(mounts) != 1 {
-		t.Fatalf("expected one mount, got %d", len(mounts))
+	if !names["keep.txt"] {
+		t.Fatal("expected keep.txt in tar archive")
 	}
-	if _, err := os.Stat(filepath.Join(mounts[0].Source, "keep.txt")); err != nil {
-		t.Fatalf("expected keep.txt to be copied: %v", err)
+	if names[".git"] {
+		t.Fatal("expected .git to be excluded from tar archive")
 	}
-	if _, err := os.Stat(filepath.Join(mounts[0].Source, ".git")); !os.IsNotExist(err) {
-		t.Fatalf("expected excluded file to be absent, got %v", err)
+}
+
+func TestBuildCopyTarPreservesSymlinks(t *testing.T) {
+	sourceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceRoot, "real.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := os.Symlink("real.txt", filepath.Join(sourceRoot, "link.txt")); err != nil {
+		t.Fatalf("Symlink failed: %v", err)
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		_ = buildCopyTar(pw, sourceRoot, nil)
+	}()
+	tr := tar.NewReader(pr)
+	var found bool
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			break
+		}
+		if header.Name == "link.txt" {
+			found = true
+			if header.Typeflag != tar.TypeSymlink {
+				t.Fatalf("expected symlink type, got %d", header.Typeflag)
+			}
+			if header.Linkname != "real.txt" {
+				t.Fatalf("expected linkname real.txt, got %s", header.Linkname)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected link.txt in tar archive")
 	}
 }
 

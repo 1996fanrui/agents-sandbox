@@ -80,7 +80,7 @@ The repository exposes three integration styles: a raw transport Go client, a hi
 
 - Unsafe or invalid create inputs are rejected at the RPC boundary instead of accepted and failing later in the background.
 - `mounts` and `copies` require absolute container targets and real host sources.
-- `copies` and builtin-tool shadow copies require a configured state root because the daemon materializes content into daemon-owned filesystem state.
+- `copies` are injected into the container via `CopyToContainer` (tar stream) between create and start, eliminating host-side shadow state.
 - Runtime exec assumes a non-root sandbox user model.
 - Built-in resources are daemon-defined; callers cannot replace them with arbitrary host paths.
 

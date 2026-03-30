@@ -391,6 +391,31 @@ func envMapToSlice(environment map[string]string) []string {
 	return values
 }
 
+// dockerCopyToContainer copies the source tree into the container at the given target path,
+// applying exclude patterns. The container must be created but may or may not be started.
+// Symlinks within the source tree are preserved in the tar stream.
+func (backend *dockerRuntimeBackend) dockerCopyToContainer(ctx context.Context, containerName string, copy deferredCopy) error {
+	if backend == nil || backend.dockerClient == nil {
+		return errors.New("docker client is not initialized")
+	}
+
+	pipeReader, pipeWriter := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- buildCopyTar(pipeWriter, copy.SourcePath, copy.ExcludePatterns)
+	}()
+
+	err := backend.dockerClient.CopyToContainer(ctx, containerName, copy.ContainerTarget, pipeReader, container.CopyToContainerOptions{})
+	tarErr := <-errCh
+	if err != nil {
+		return fmt.Errorf("copy to container %s at %s: %w", containerName, copy.ContainerTarget, err)
+	}
+	if tarErr != nil {
+		return fmt.Errorf("build tar for %s: %w", copy.SourcePath, tarErr)
+	}
+	return nil
+}
+
 func ptrTo[T any](value T) *T {
 	return &value
 }

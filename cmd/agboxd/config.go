@@ -22,7 +22,6 @@ type daemonFileConfig struct {
 	Runtime struct {
 		IdleTTL           string `toml:"idle_ttl"`
 		CleanupTTL string `toml:"cleanup_ttl"`
-		StateRoot         string `toml:"state_root"`
 		LogLevel          string `toml:"log_level"`
 	} `toml:"runtime"`
 	Artifacts struct {
@@ -105,9 +104,6 @@ func applyFileConfig(
 			return control.ServiceConfig{}, fmt.Errorf("parse runtime.cleanup_ttl from %s: %w", configPath, err)
 		}
 		serviceConfig.CleanupTTL = cleanupTTL
-	}
-	if fileConfig.Runtime.StateRoot != "" {
-		serviceConfig.StateRoot = fileConfig.Runtime.StateRoot
 	}
 	if fileConfig.Runtime.LogLevel != "" {
 		serviceConfig.LogLevel = fileConfig.Runtime.LogLevel

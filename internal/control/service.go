@@ -27,7 +27,6 @@ type ServiceConfig struct {
 	IdleTTL                time.Duration
 	CleanupTTL             time.Duration
 	CleanupInterval        time.Duration
-	StateRoot              string
 	ArtifactOutputRoot     string
 	ArtifactOutputTemplate string
 	Version                string

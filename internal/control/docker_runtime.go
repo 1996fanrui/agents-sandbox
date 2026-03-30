@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -85,7 +84,6 @@ type sandboxRuntimeState struct {
 	NetworkName           string
 	PrimaryContainerName  string
 	ServiceContainers     []runtimeServiceContainer
-	ShadowRoot            string
 	OptionalServiceStarts optionalServiceStarts
 }
 
@@ -213,11 +211,10 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 	mounts = append(mounts, genericMounts...)
-	copyMounts, err := backend.materializeGenericCopies(record.handle.GetSandboxId(), record.createSpec.GetCopies(), state)
+	deferredCopies, err := validateGenericCopies(record.createSpec.GetCopies())
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
-	mounts = append(mounts, copyMounts...)
 	// Bind-mount exec log directory into the primary container so exec output is written directly to the host.
 	// The directory is pre-created by the service layer before calling this function.
 	if backend.config.ArtifactOutputRoot != "" {
@@ -312,6 +309,11 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		},
 	}); err != nil {
 		return runtimeCreateResult{}, err
+	}
+	for _, copy := range deferredCopies {
+		if err := backend.dockerCopyToContainer(ctx, state.PrimaryContainerName, copy); err != nil {
+			return runtimeCreateResult{}, err
+		}
 	}
 	if err := backend.dockerContainerStart(ctx, state.PrimaryContainerName); err != nil {
 		return runtimeCreateResult{}, err
@@ -505,9 +507,6 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 	}
 	if state.NetworkName != "" {
 		joined = append(joined, backend.dockerNetworkRemove(ctx, state.NetworkName))
-	}
-	if state.ShadowRoot != "" {
-		joined = append(joined, os.RemoveAll(state.ShadowRoot))
 	}
 	return errors.Join(joined...)
 }
