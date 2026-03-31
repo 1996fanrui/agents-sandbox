@@ -255,65 +255,65 @@
         <thead>
           <tr>
             <th></th>
-            <th class="col-bad">Codex<br><span style="font-weight:400;opacity:.7">danger-full-access</span></th>
-            <th class="col-bad2">Claude Code<br><span style="font-weight:400;opacity:.7">--dangerously-skip-permissions</span></th>
-            <th class="col-us">agents-sandbox</th>
+            <th class="col-bad">Restricted mode<br><span style="font-weight:400;opacity:.7">Codex workspace-write /<br>Claude Code default</span></th>
+            <th class="col-bad2">Unrestricted mode<br><span style="font-weight:400;opacity:.7">Codex danger-full-access /<br>Claude Code --dangerously-skip-permissions</span></th>
+            <th class="col-us">Agents Sandbox</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>git commit / push</td>
-            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-bad">&#10007; Blocked or needs approval</span></td>
             <td><span class="cmp-val-ok">&#10003; Works</span></td>
             <td><span class="cmp-val-ok">&#10003; Works</span></td>
           </tr>
           <tr>
             <td>Install deps, build, test</td>
-            <td><span class="cmp-val-ok">&#10003; Works</span></td>
+            <td><span class="cmp-val-bad">Partial — may trigger approval</span></td>
             <td><span class="cmp-val-ok">&#10003; Works</span></td>
             <td><span class="cmp-val-ok">&#10003; Works</span></td>
           </tr>
           <tr>
+            <td>Network access</td>
+            <td><span class="cmp-val-bad">All (host exposed) or nothing</span></td>
+            <td><span class="cmp-val-bad">All (host exposed)</span></td>
+            <td><span class="cmp-val-ok">Internet yes, host blocked</span></td>
+          </tr>
+          <tr>
             <td>Approval prompts</td>
-            <td><span class="cmp-val-bad">&#10007; None — all bypassed</span></td>
+            <td><span class="cmp-val-bad">Frequent</span></td>
             <td><span class="cmp-val-bad">&#10007; None — all bypassed</span></td>
             <td><span class="cmp-val-ok">&#10003; None needed</span></td>
           </tr>
           <tr>
             <td>Host filesystem</td>
-            <td><span class="cmp-val-bad">Fully read &amp; writable</span></td>
+            <td><span class="cmp-val-bad">Full-disk readable</span></td>
             <td><span class="cmp-val-bad">Fully read &amp; writable</span></td>
             <td><span class="cmp-val-ok">Invisible — declared mounts only</span></td>
           </tr>
           <tr>
             <td>Other projects on machine</td>
-            <td><span class="cmp-val-bad">Readable &amp; writable</span></td>
+            <td><span class="cmp-val-bad">Readable</span></td>
             <td><span class="cmp-val-bad">Readable &amp; writable</span></td>
             <td><span class="cmp-val-ok">Invisible</span></td>
           </tr>
           <tr>
             <td>Credential exposure</td>
-            <td><span class="cmp-val-bad">Inherits full host env</span></td>
-            <td><span class="cmp-val-bad">Inherits full host env</span></td>
-            <td><span class="cmp-val-ok">SSH agent &amp; gh CLI only</span></td>
-          </tr>
-          <tr>
-            <td>Host network</td>
-            <td><span class="cmp-val-bad">Fully exposed</span></td>
-            <td><span class="cmp-val-bad">Fully exposed</span></td>
-            <td><span class="cmp-val-ok">Blocked — internet open</span></td>
-          </tr>
-          <tr>
-            <td>Blast radius of a bad command</td>
-            <td><span class="cmp-val-bad">Entire host machine</span></td>
-            <td><span class="cmp-val-bad">Entire host machine</span></td>
-            <td><span class="cmp-val-ok">Disposable sandbox only</span></td>
+            <td><span class="cmp-val-bad">Inherits host environment</span></td>
+            <td><span class="cmp-val-bad">Inherits host environment</span></td>
+            <td><span class="cmp-val-ok">Only explicit projections (SSH agent, gh auth)</span></td>
           </tr>
           <tr>
             <td>Host safety</td>
-            <td><span class="cmp-val-bad">None</span></td>
+            <td><span class="cmp-val-bad">Partial</span></td>
             <td><span class="cmp-val-bad">None</span></td>
             <td><span class="cmp-val-ok">Full — host untouched</span></td>
+          </tr>
+          <tr>
+            <td>Blast radius of a bad command</td>
+            <td><span class="cmp-val-bad">Limited writes, but host readable</span></td>
+            <td><span class="cmp-val-bad">Entire host machine</span></td>
+            <td><span class="cmp-val-ok">Only the disposable sandbox</span></td>
           </tr>
         </tbody>
       </table>
@@ -336,10 +336,12 @@
       <div class="qs-body"><span class="cmd-comment"># Install agents-sandbox (daemon starts automatically)</span>
 <span class="cmd-prefix">$ </span>curl -fsSL https://agents-sandbox.com/install.sh | bash
 
-<span class="cmd-comment"># Run Claude Code in an isolated sandbox</span>
+<span class="cmd-comment"># Run interactive Claude Code in an isolated sandbox with full permissions.</span>
+<span class="cmd-comment"># Equivalent to running: claude --dangerously-skip-permissions</span>
 <span class="cmd-prefix">$ </span>agbox agent claude
 
-<span class="cmd-comment"># Or run Codex</span>
+<span class="cmd-comment"># Run interactive Codex in an isolated sandbox with full permissions.</span>
+<span class="cmd-comment"># Equivalent to running: codex --dangerously-bypass-approvals-and-sandbox</span>
 <span class="cmd-prefix">$ </span>agbox agent codex</div>
     </div>
     <a href="https://docs.agents-sandbox.com" class="link-arrow">View full documentation &rarr;</a>
