@@ -480,6 +480,9 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"labels",
 				"created_at",
 				"image",
+				"error_code",
+				"error_message",
+				"state_changed_at",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"sandbox_id":          1,
@@ -490,6 +493,9 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"labels":              6,
 				"created_at":          7,
 				"image":               8,
+				"error_code":          9,
+				"error_message":       10,
+				"state_changed_at":    11,
 			},
 		},
 		{

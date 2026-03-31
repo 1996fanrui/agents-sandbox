@@ -117,6 +117,9 @@ message SandboxHandle {
   map<string, string> labels = 6;
   google.protobuf.Timestamp created_at = 7;
   string image = 8;
+  string error_code = 9;
+  string error_message = 10;
+  google.protobuf.Timestamp state_changed_at = 11;
 }
 
 message SandboxPhaseDetails {
