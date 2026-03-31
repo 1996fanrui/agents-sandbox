@@ -164,6 +164,9 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         labels=dict(handle.labels),
         created_at=created_at,
         image=handle.image,
+        error_code=handle.error_code or None,
+        error_message=handle.error_message or None,
+        state_changed_at=handle.state_changed_at.ToDatetime(tzinfo=UTC) if handle.HasField("state_changed_at") else None,
     )
 
 
