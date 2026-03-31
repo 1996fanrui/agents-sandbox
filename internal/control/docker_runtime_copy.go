@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
+	ignore "github.com/sabhiram/go-gitignore"
 )
 
 func matchesExcludePattern(relativePath string, patterns []string) bool {
@@ -27,9 +28,60 @@ func matchesExcludePattern(relativePath string, patterns []string) bool {
 	return false
 }
 
-// buildCopyTar writes a tar archive of sourceRoot to w, applying exclude patterns
-// and preserving symlinks. The archive paths are relative so that CopyToContainer
-// extracts them under the target directory. The writer is always closed.
+// loadGitignore loads and compiles the .gitignore file under sourceRoot.
+// Returns nil (not an error) when no .gitignore exists.
+func loadGitignore(sourceRoot string) *ignore.GitIgnore {
+	gitignorePath := filepath.Join(sourceRoot, ".gitignore")
+	gi, err := ignore.CompileIgnoreFile(gitignorePath)
+	if err != nil {
+		return nil
+	}
+	return gi
+}
+
+// dirContainsExternalSymlink reports whether dir (an absolute path) contains
+// at least one symlink whose target resolves outside rootAbs.
+func dirContainsExternalSymlink(dir string, rootAbs string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.Type()&os.ModeSymlink != 0 {
+			resolved, err := runtimedocker.ResolveLinkTarget(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			if !pathWithinRoot(rootAbs, resolved) {
+				return true
+			}
+		}
+		if entry.IsDir() {
+			if dirContainsExternalSymlink(filepath.Join(dir, entry.Name()), rootAbs) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// buildCopyTar writes a tar archive of sourceRoot to w, preserving symlinks.
+// The archive paths are relative so that CopyToContainer extracts them under
+// the target directory. The writer is always closed.
+//
+// Filtering priority for each entry during the walk:
+//  1. Exclude patterns — if the entry matches an explicit exclude pattern, skip it
+//     (SkipDir for directories). Checked first, so excluded content never triggers
+//     any downstream logic.
+//  2. Internal symlinks — symlinks whose target resolves within the source tree
+//     are preserved as-is in the tar archive.
+//  3. External symlinks + .gitignore — symlinks resolving outside the source tree
+//     are normally rejected with an error. However, if the source root contains a
+//     .gitignore and the entry's path matches a gitignore rule, the entry is
+//     silently skipped. For directory-level gitignore rules (e.g. ".generated/"),
+//     the entire directory is skipped (SkipDir) when it contains at least one
+//     external symlink. External symlinks not covered by .gitignore still cause
+//     a hard error.
 func buildCopyTar(w io.WriteCloser, sourceRoot string, excludePatterns []string) error {
 	tw := tar.NewWriter(w)
 	closeAll := func(tarErr error) error {
@@ -59,6 +111,8 @@ func buildCopyTar(w io.WriteCloser, sourceRoot string, excludePatterns []string)
 		return closeAll(err)
 	}
 
+	gi := loadGitignore(sourceRoot)
+
 	err = filepath.WalkDir(sourceRoot, func(currentPath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -76,12 +130,19 @@ func buildCopyTar(w io.WriteCloser, sourceRoot string, excludePatterns []string)
 			}
 			return nil
 		}
+
+		// For directories matched by .gitignore that contain external symlinks,
+		// skip the entire directory to avoid partial copies of gitignored content.
+		if entry.IsDir() && gi != nil && gi.MatchesPath(relPath+"/") && dirContainsExternalSymlink(currentPath, rootAbs) {
+			return filepath.SkipDir
+		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return writeTarSymlink(tw, currentPath, relPath, rootAbs)
+			return writeTarSymlink(tw, currentPath, relPath, rootAbs, gi)
 		}
 		if entry.IsDir() {
 			header, headerErr := tar.FileInfoHeader(info, "")
@@ -114,17 +175,21 @@ func writeTarFile(tw *tar.Writer, sourcePath string, archiveName string, info fs
 	return err
 }
 
-func writeTarSymlink(tw *tar.Writer, sourcePath string, archiveName string, sourceRootAbs string) error {
+func writeTarSymlink(tw *tar.Writer, sourcePath string, archiveName string, sourceRootAbs string, gi *ignore.GitIgnore) error {
 	linkTarget, err := os.Readlink(sourcePath)
 	if err != nil {
 		return err
 	}
-	// Reject external symlinks (those resolving outside the source tree).
+	// Reject external symlinks (those resolving outside the source tree),
+	// unless the path is covered by .gitignore.
 	resolvedTarget, err := runtimedocker.ResolveLinkTarget(sourcePath)
 	if err != nil {
 		return err
 	}
 	if !pathWithinRoot(sourceRootAbs, resolvedTarget) {
+		if gi != nil && gi.MatchesPath(archiveName) {
+			return nil
+		}
 		return fmt.Errorf("copy source contains external symlink: %s", sourcePath)
 	}
 	info, err := os.Lstat(sourcePath)
