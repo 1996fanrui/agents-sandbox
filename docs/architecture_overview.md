@@ -35,10 +35,10 @@ flowchart LR
 ### Primary request and event flow
 
 1. A client sends a gRPC request over the Unix socket.
-2. The service performs synchronous fail-fast validation for create inputs, service declarations, builtin resource IDs, historical ID reuse, and exec command shape.
+2. The service performs synchronous fail-fast validation for create inputs, companion container declarations, builtin resource IDs, historical ID reuse, and exec command shape.
 3. During `CreateSandbox` and `CreateExec`, the daemon reserves the final ID in the persistent historical ID registry before accepting the request. When the caller omits an ID, the daemon generates and reserves a UUID v4 first.
 4. `CreateSandbox`, `ResumeSandbox`, `StopSandbox`, `DeleteSandbox`, and `CreateExec` return as accepted operations while the daemon continues convergence asynchronously.
-5. The runtime backend performs Docker-side work and reports results back to the service. Required services gate readiness; optional services start in parallel and report asynchronously without blocking sandbox readiness.
+5. The runtime backend performs Docker-side work and reports results back to the control service. Companion containers start in parallel with the primary container and report asynchronously without blocking sandbox readiness.
 6. The service persists ordered events and configs before updating in-memory state, exposes numeric ordering through event sequences, and performs full restart recovery by reconciling persisted state with Docker inspect results.
 7. The high-level SDKs and CLI optionally wait by combining an authoritative baseline read with `SubscribeSandboxEvents`.
 
@@ -46,7 +46,7 @@ flowchart LR
 
 ### Sandbox lifecycle management
 
-Each sandbox gets one primary container, one dedicated Docker network, zero or more service containers (required and optional), and ordered lifecycle and exec events. The CLI supports daemon reachability checks, sandbox creation/inspection/deletion, label-based fleet operations, and ad hoc command execution.
+Each sandbox gets one primary container, one dedicated Docker network, zero or more companion containers, and ordered lifecycle and exec events. The CLI supports daemon reachability checks, sandbox creation/inspection/deletion, label-based fleet operations, and ad hoc command execution.
 
 ### Command execution and direct output consumption
 
@@ -54,11 +54,11 @@ Exec creation is asynchronous at the protocol layer. Exec stdout and stderr are 
 
 ### Filesystem ingress and built-in resources
 
-Sandbox creation supports three public filesystem ingress modes: `mounts` (explicit bind mounts), `copies` (daemon-owned copied content), and `builtin_tools` (daemon-defined resource shortcuts). Services are declared as `required_services` or `optional_services` and become sibling containers on the sandbox network. See [Container Dependency Strategy](container_dependency_strategy.md) for details.
+Sandbox creation supports three public filesystem ingress modes: `mounts` (explicit bind mounts), `copies` (daemon-owned copied content), and `builtin_tools` (daemon-defined resource shortcuts). Companion containers are declared as `companion_containers` and become sibling containers on the sandbox network. See [Container Dependency Strategy](container_dependency_strategy.md) for details.
 
 ### Event subscription and replay
 
-The daemon exposes a per-sandbox ordered event stream with full replay, daemon-issued sequence anchors for incremental replay, and monotonic `sequence` numbers per sandbox. Each event carries typed details (sandbox phase, exec, or service). `CreateSandbox` returns a handle with a daemon-issued `last_event_sequence` cursor that seeds incremental subscription without a snapshot/subscription race.
+The daemon exposes a per-sandbox ordered event stream with full replay, daemon-issued sequence anchors for incremental replay, and monotonic `sequence` numbers per sandbox. Each event carries typed details (sandbox phase, exec, or companion container). `CreateSandbox` returns a handle with a daemon-issued `last_event_sequence` cursor that seeds incremental subscription without a snapshot/subscription race.
 
 ### SDK layering and integration choices
 

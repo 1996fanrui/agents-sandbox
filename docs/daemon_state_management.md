@@ -38,7 +38,7 @@ Actual condition of Docker containers and networks. Never written to bbolt; obta
 |-------|--------------|
 | Container running/exited/OOM status | `docker inspect {container_name}` |
 | Container exit code | `docker inspect {container_name}` |
-| Service health status | `docker inspect {container_name}` → `.State.Health` |
+| Companion container health status | `docker inspect {container_name}` → `.State.Health` |
 | Network exists | `docker network inspect {network_name}` |
 
 ## Category C — Derived / Rebuilt State
@@ -49,13 +49,13 @@ Recomputed on startup from Category A and B.
 |-------|-------------|
 | Network name | `agbox-net-{sanitize(sandbox_id)}` |
 | Primary container name | `agbox-primary-{sanitize(sandbox_id)}` |
-| Service container name | `agbox-svc-{sanitize(sandbox_id)}-{sanitize(service_name)}` |
+| Companion container name | `agbox-companion-{sanitize(sandbox_id)}-{sanitize(name)}` |
 | Exec ID → Sandbox ID mapping | Enumerate `exec-config:{sandbox_id}` buckets |
 | `deletedAtRecorded` flag | Presence check in `sandbox-deleted-at` |
 | `lastTerminalRunFinishedAt` | Latest terminal exec event timestamp; falls back to `createdAt` when no exec history exists |
 | `nextSequence` | `MaxSequence()` over `events:{sandbox_id}` |
 | `context.CancelFunc` per exec | New cancel context for running execs |
-| `optionalServiceStarts` channels | Re-inspect optional service containers |
+| `companionContainerStarts` channels | Re-inspect companion containers |
 | `SandboxHandle.ErrorCode`, `ErrorMessage`, `StateChangedAt` | Last `SANDBOX_FAILED` event's `SandboxPhaseDetails` (error fields); last state-matching event's `OccurredAt` (timestamp) |
 | `sandboxRuntimeState` | Container names + runtime status from Docker |
 

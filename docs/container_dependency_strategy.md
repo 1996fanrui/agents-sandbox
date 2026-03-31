@@ -66,48 +66,36 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 - Directory trees with escaping symlinks are bind-mounted directly from the host path.
 - Socket resources such as `ssh-agent` are forwarded only when the host path is a real Unix socket.
 
-## Service Model
+## Companion Container Model
 
-Services are declared through `ServiceSpec` and split into `required_services` and `optional_services`.
-
-`ServiceSpec` fields: `name` (stable service name, also used as `network_alias`), `image`, `envs`, `healthcheck`, `post_start_on_primary` (hook commands on primary after service becomes healthy).
-
-| Category | Startup | Failure |
-|----------|---------|---------|
-| `required_services` | Must be healthy before primary is READY | Fails entire sandbox materialization |
-| `optional_services` | Started in parallel with primary | Emits `SANDBOX_SERVICE_FAILED` for initial attempt only; not restarted in V1 |
+For companion container field definitions and usage scenarios, see [Companion Container Guide](companion_container_guide.md).
 
 ## Startup Strategy
 
 ```mermaid
 flowchart TB
     A[Create dedicated network] --> B[Materialize filesystem inputs and built-in resources]
-    B --> C[Create required service containers]
+    B --> S[Create companion containers]
     B --> D[Create primary container]
-    B --> O[Create optional service containers]
-    C --> E[Start required services serially; wait for each healthcheck]
+    S --> P[Start all companion containers in parallel with primary]
     D --> F[Start primary container]
-    O --> P[Start optional services in parallel with primary]
-    E --> G[All required services healthy]
-    G --> H[Run post_start_on_primary hooks for required services]
-    F --> H
-    H --> I[Emit SANDBOX_SERVICE_READY per required service]
-    P --> Q[Emit SANDBOX_SERVICE_READY or SANDBOX_SERVICE_FAILED per optional service]
-    I --> J[Emit sandbox ready event]
+    P --> Q[Emit COMPANION_CONTAINER_READY or COMPANION_CONTAINER_FAILED per companion]
+    P --> H[Run post_start_on_primary hooks after companion healthy]
+    F --> R[Emit sandbox ready event]
 ```
 
 Startup rules:
-- `post_start_on_primary` is valid only for `required_services`; `optional_services` must reject it during synchronous validation.
-- Parallel startup of optional services must not weaken isolation or readiness checks for required services.
-- Service startup, health inspection, and hook execution must stay on structured Docker API paths.
+- All companion containers start concurrently with the primary container and do not block sandbox READY.
+- `post_start_on_primary` requires `healthcheck` to be defined on the companion container.
+- Companion container startup, health inspection, and hook execution must stay on structured Docker API paths.
 
 ## Permissions and Runtime User Model
 
-The runtime must execute under a non-root user inside the sandbox. Bind-mounted writable paths must remain writable to that runtime user. The daemon must not rely on root-only behavior for normal exec, lifecycle, or service orchestration.
+The runtime must execute under a non-root user inside the sandbox. Bind-mounted writable paths must remain writable to that runtime user. The daemon must not rely on root-only behavior for normal exec, lifecycle, or companion container orchestration.
 
 ## Cleanup and Ownership
 
-`agents-sandbox` owns cleanup for resources carrying the `io.github.1996fanrui.agents-sandbox.*` label namespace: primary containers, service containers, dedicated networks, and event/artifact files.
+`agents-sandbox` owns cleanup for resources carrying the `io.github.1996fanrui.agents-sandbox.*` label namespace: primary containers, companion containers, dedicated networks, and event/artifact files.
 
 Docker objects without these labels are never inspected, stopped, or removed by the daemon. Ownership must be derivable from runtime state plus namespaced labels without requiring an external product database snapshot. Cleanup continues on daemon-owned contexts rather than request-scoped cancellation.
 

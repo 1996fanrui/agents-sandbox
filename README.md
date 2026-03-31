@@ -1,6 +1,6 @@
 # Agents Sandbox
 
-**Full power for your AI agents. Full safety for the host.**
+**Full power for your agents. Full safety for your machine.**
 
 - **Unrestricted AI agent** — Agents install anything, run anything, break anything. Zero permission prompts, zero manual approvals.
 - **Untouchable host** — No host filesystem access. No host network access. No exceptions. A bad command destroys only the disposable sandbox, never your machine.
@@ -131,6 +131,12 @@ asyncio.run(main())
 ```
 
 For full examples, see `examples/`.
+
+## Learn More
+
+- Agent needs databases, caches, or other dependencies for debugging? See [Companion Container Guide](docs/companion_container_guide.md)
+- Want reusable sandbox environments as YAML? See [Declarative YAML Config](docs/declarative_yaml_config.md)
+- Tuning daemon behavior (idle TTL, cleanup, log level)? See [Configuration Reference](docs/configuration_reference.md)
 
 ## Repository Layout
 

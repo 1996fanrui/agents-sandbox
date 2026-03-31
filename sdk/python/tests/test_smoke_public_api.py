@@ -336,10 +336,9 @@ def test_public_docs_use_converged_python_sdk_api() -> None:
 
     assert "AgentsSandboxClient()" in public_docs["README.md"]
     assert "AgentsSandboxClient()" in public_docs["docs/sdk_python_usage.md"]
-    assert "ServiceSpec" in public_docs["docs/sdk_python_usage.md"]
+    assert "CompanionContainerSpec" in public_docs["docs/sdk_python_usage.md"]
     assert "HealthcheckConfig" in public_docs["docs/sdk_python_usage.md"]
-    assert "required_services" in public_docs["docs/sdk_python_usage.md"]
-    assert "optional_services" in public_docs["docs/sdk_python_usage.md"]
+    assert "companion_containers" in public_docs["docs/sdk_python_usage.md"]
     assert "sandbox_id=" in public_docs["docs/sdk_python_usage.md"]
     assert "exec_id=" in public_docs["docs/sdk_python_usage.md"]
     assert "from_sequence=0" in public_docs["docs/sdk_python_usage.md"]

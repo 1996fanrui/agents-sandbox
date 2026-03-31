@@ -27,7 +27,7 @@ labels:
 envs:
   APP_ENV: production
 
-required_services:
+companion_containers:
   postgres:
     image: postgres:16-alpine
     envs:
@@ -40,7 +40,6 @@ required_services:
       retries: 12
     post_start_on_primary: ["psql -U postgres -c 'CREATE EXTENSION IF NOT EXISTS vector'"]
 
-optional_services:
   redis:
     image: redis:7-alpine
     healthcheck:
@@ -59,8 +58,7 @@ optional_services:
 | `copies` | `CreateSpec.copies` | list of CopySpec | Files to copy into the container |
 | `mounts` | `CreateSpec.mounts` | list of MountSpec | Bind mounts from host to container |
 | `builtin_tools` | `CreateSpec.builtin_tools` | list of string | Built-in resources to provision |
-| `required_services` | `CreateSpec.required_services` | map of ServiceSpec | Services that must be healthy before READY |
-| `optional_services` | `CreateSpec.optional_services` | map of ServiceSpec | Services started concurrently, not blocking READY |
+| `companion_containers` | `CreateSpec.companion_containers` | map of CompanionContainerSpec | Companion containers started concurrently with the primary container |
 | `labels` | `CreateSpec.labels` | map of string | Labels attached to the sandbox |
 | `envs` | `CreateSpec.envs` | map of string | Env vars on primary container, inherited by all execs |
 | `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
@@ -73,22 +71,9 @@ optional_services:
 
 `source` (absolute host path), `target` (absolute container path), `writable` (default: false). For detailed mount semantics, see [Container Dependency Strategy](container_dependency_strategy.md).
 
-### ServiceSpec Fields
+### CompanionContainerSpec and HealthcheckConfig Fields
 
-Services use a map format where the YAML key becomes `ServiceSpec.name`. Fields: `image`, `envs`, `healthcheck`, `post_start_on_primary`. For service startup behavior and required vs optional semantics, see [Container Dependency Strategy](container_dependency_strategy.md).
-
-### HealthcheckConfig Fields
-
-Duration fields (`interval`, `timeout`, `start_period`, `start_interval`) accept a duration string in YAML (e.g., `"5s"`, `"1m30s"`). The daemon parses this into `google.protobuf.Duration`.
-
-| YAML Key | Description |
-|---|---|
-| `test` | Healthcheck command (e.g., `["CMD-SHELL", "pg_isready"]`) |
-| `interval` | Check interval |
-| `timeout` | Check timeout |
-| `retries` | Max retry count |
-| `start_period` | Grace period before checks count |
-| `start_interval` | Check interval during start period |
+Companion containers use a map format where the YAML key becomes the container name and network alias. For field definitions, usage scenarios, and healthcheck configuration, see [Companion Container Guide](companion_container_guide.md).
 
 ## SDK Usage
 
@@ -137,4 +122,4 @@ Sandbox-level `envs` are applied to the primary container at creation time and i
 
 YAML parsing is implemented in the daemon, not in SDKs. SDKs send raw YAML bytes via `config_yaml` in `CreateSandboxRequest`, avoiding duplicating parsing logic. The daemon uses strict parsing that rejects unknown fields.
 
-Service ordering: when converting YAML service maps to proto `repeated ServiceSpec`, services are sorted alphabetically by name. For `required_services`, this determines sequential startup order. For `optional_services`, services start concurrently regardless of sort order.
+Companion container ordering: when converting YAML companion container maps to proto `repeated CompanionContainerSpec`, entries are sorted alphabetically by name. All companion containers start concurrently.

@@ -60,7 +60,7 @@ Sandbox image selection is a request-time input. The daemon must not supply a hi
 
 `SandboxEvent` uses an envelope + oneof model. Each event carries:
 - top-level fields: `event_id`, `sequence`, `sandbox_id`, `event_type`, `timestamp`
-- a `oneof details` discriminator with one of: `SandboxPhaseDetails` (lifecycle transitions, errors, reason), `ExecEventDetails` (exec state, exit code, errors), or `ServiceEventDetails` (service name, errors)
+- a `oneof details` discriminator with one of: `SandboxPhaseDetails` (lifecycle transitions, errors, reason), `ExecEventDetails` (exec state, exit code, errors), or `CompanionContainerEventDetails` (companion container name, errors)
 
 The top-level `sandbox_state` reflects the sandbox state when the event was emitted. SDKs must dispatch on the active `details` field, not on `event_type` alone.
 

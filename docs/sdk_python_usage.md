@@ -5,9 +5,9 @@
 ```python
 from agents_sandbox import (
     AgentsSandboxClient,
+    CompanionContainerSpec,
     HealthcheckConfig,
     MountSpec,
-    ServiceSpec,
 )
 
 async with AgentsSandboxClient() as client:
@@ -29,8 +29,7 @@ class SandboxHandle:
     sandbox_id: str
     state: SandboxState
     last_event_sequence: int
-    required_services: tuple[ServiceSpec, ...]
-    optional_services: tuple[ServiceSpec, ...]
+    companion_containers: tuple[CompanionContainerSpec, ...]
     labels: Mapping[str, str]
     created_at: datetime | None
     image: str
@@ -39,11 +38,11 @@ class SandboxHandle:
     state_changed_at: datetime | None
 ```
 
-`ServiceSpec` uses `envs` (not `environment`); `HealthcheckConfig` uses `timedelta` for duration fields:
+`CompanionContainerSpec` uses `envs` (not `environment`); `HealthcheckConfig` uses `timedelta` for duration fields:
 
 ```python
 @dataclass
-class ServiceSpec:
+class CompanionContainerSpec:
     name: str
     image: str
     envs: Mapping[str, str]
@@ -81,8 +80,8 @@ sandbox = await client.create_sandbox(
     image="ghcr.io/agents-sandbox/coding-runtime:latest",
     sandbox_id="demo-sandbox",
     mounts=(MountSpec(source="/path/to/workspace", target="/workspace", writable=True),),
-    required_services=(
-        ServiceSpec(
+    companion_containers=(
+        CompanionContainerSpec(
             name="postgres",
             image="postgres:16",
             healthcheck=HealthcheckConfig(
@@ -92,8 +91,8 @@ sandbox = await client.create_sandbox(
             ),
             post_start_on_primary=("python -c \"print('seeded')\"",),
         ),
+        CompanionContainerSpec(name="redis", image="redis:7"),
     ),
-    optional_services=(ServiceSpec(name="redis", image="redis:7"),),
     wait=False,
 )
 ```
@@ -122,7 +121,7 @@ print(result.stdout_log_path)
 
 ## Subscription
 
-`subscribe_sandbox_events` is a public advanced API returning an async iterator of events with `event_type`, `sequence`, and typed sub-structs (`sandbox_phase`, `exec`, `service`):
+`subscribe_sandbox_events` is a public advanced API returning an async iterator of events with `event_type`, `sequence`, and typed sub-structs (`sandbox_phase`, `exec`, `companion_container`):
 
 ```python
 async for event in client.subscribe_sandbox_events(sandbox_id, from_sequence=0):
