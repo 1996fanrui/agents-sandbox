@@ -13,6 +13,7 @@
       "items": [
         { "text": "Quick Start", "link": "/quick_start" },
         { "text": "Architecture Overview", "link": "/architecture_overview" },
+        { "text": "Isolation and Security", "link": "/isolation_and_security" },
         { "text": "Why Not Built-in Sandboxes", "link": "/why_not_builtin_sandboxes" }
       ]
     },

@@ -40,6 +40,8 @@ The first-class principle is: **the sandbox is fully isolated from the host by d
 | **Minimal credential injection** | Only a small set of daemon-defined credential shortcuts (e.g., `ssh-agent`, `gh-auth`) can enter. Fixed rules, not arbitrary host path passthrough. |
 | **Deterministic cleanup** | All runtime resources (containers, networks, filesystem state) are fully removed on delete. No orphans, no leaks. |
 
+See [Isolation and Security](docs/isolation_and_security.md) for the full security posture reference.
+
 ## Use Cases
 
 Any AI agent that needs to **take actions** — not just generate text — benefits from a sandbox.
