@@ -92,6 +92,9 @@ def test_public_models_match_protocol_contract() -> None:
         "labels",
         "created_at",
         "image",
+        "error_code",
+        "error_message",
+        "state_changed_at",
     }
     assert SandboxHandle.__annotations__["last_event_sequence"] == "int"
     assert set(ExecHandle.__annotations__) == {

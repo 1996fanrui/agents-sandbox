@@ -109,6 +109,9 @@ type SandboxHandle struct {
 	Labels            map[string]string
 	CreatedAt         time.Time
 	Image             string
+	ErrorCode         *string
+	ErrorMessage      *string
+	StateChangedAt    *time.Time
 }
 
 // DeleteSandboxesResult is the public bulk delete result.
@@ -192,6 +195,11 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 	if handle.GetCreatedAt() != nil {
 		createdAt = handle.GetCreatedAt().AsTime().UTC()
 	}
+	var stateChangedAt *time.Time
+	if handle.GetStateChangedAt() != nil {
+		t := handle.GetStateChangedAt().AsTime().UTC()
+		stateChangedAt = &t
+	}
 	return SandboxHandle{
 		SandboxID:         handle.GetSandboxId(),
 		State:             SandboxState(handle.GetState()),
@@ -201,6 +209,9 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 		Labels:            cloneStringMap(handle.GetLabels()),
 		CreatedAt:         createdAt,
 		Image:             handle.GetImage(),
+		ErrorCode:         emptyStringPtr(handle.GetErrorCode()),
+		ErrorMessage:      emptyStringPtr(handle.GetErrorMessage()),
+		StateChangedAt:    stateChangedAt,
 	}, nil
 }
 

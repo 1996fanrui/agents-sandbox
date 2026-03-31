@@ -97,6 +97,9 @@ class SandboxHandle:
     labels: Mapping[str, str] = field(default_factory=dict)
     created_at: datetime | None = None
     image: str = ""
+    error_code: str | None = None
+    error_message: str | None = None
+    state_changed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))
