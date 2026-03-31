@@ -260,8 +260,18 @@ func (s *Service) ListSandboxes(_ context.Context, req *agboxv1.ListSandboxesReq
 		}
 		handles = append(handles, cloneHandle(record.handle))
 	}
+	// Sort by created_at descending (newest first), matching docker ps convention.
 	slices.SortFunc(handles, func(left, right *agboxv1.SandboxHandle) int {
-		return strings.Compare(left.GetSandboxId(), right.GetSandboxId())
+		lt := left.GetCreatedAt().AsTime()
+		rt := right.GetCreatedAt().AsTime()
+		switch {
+		case lt.After(rt):
+			return -1
+		case lt.Before(rt):
+			return 1
+		default:
+			return strings.Compare(left.GetSandboxId(), right.GetSandboxId())
+		}
 	})
 	return &agboxv1.ListSandboxesResponse{Sandboxes: handles}, nil
 }
