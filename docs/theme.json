@@ -11,6 +11,7 @@
     {
       "text": "Overview",
       "items": [
+        { "text": "Quick Start", "link": "/quick_start" },
         { "text": "Architecture Overview", "link": "/architecture_overview" },
         { "text": "Why Not Built-in Sandboxes", "link": "/why_not_builtin_sandboxes" }
       ]
@@ -18,6 +19,8 @@
     {
       "text": "Usage Guides",
       "items": [
+        { "text": "CLI Reference", "link": "/cli_reference" },
+        { "text": "Companion Container Guide", "link": "/companion_container_guide" },
         { "text": "Declarative YAML Config", "link": "/declarative_yaml_config" },
         { "text": "Python SDK", "link": "/sdk_python_usage" },
         { "text": "Go SDK", "link": "/sdk_go_usage" }

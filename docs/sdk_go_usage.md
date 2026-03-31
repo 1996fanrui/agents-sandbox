@@ -56,7 +56,7 @@ type SandboxHandle struct {
     SandboxID, Image  string
     State             SandboxState
     LastEventSequence uint64
-    RequiredServices, OptionalServices []ServiceSpec
+    CompanionContainers []CompanionContainerSpec
     Labels            map[string]string
     CreatedAt         time.Time
     ErrorCode         *string
@@ -77,7 +77,7 @@ type ExecHandle struct {
 }
 ```
 
-`ServiceSpec` uses `Envs` (not `Environment`); `HealthcheckConfig` uses `*time.Duration` for duration fields.
+`CompanionContainerSpec` uses `Envs` (not `Environment`); `HealthcheckConfig` uses `*time.Duration` for duration fields.
 
 `ListActiveExecs` uses the option pattern: pass `WithSandboxID` to filter by sandbox.
 

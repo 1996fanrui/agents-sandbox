@@ -1,6 +1,6 @@
 # Sandbox Container Lifecycle
 
-This document describes the runtime lifecycle contract owned by `agents-sandbox`: primary sandbox container, dedicated network, service containers, runtime event stream, exec output redirection, and cleanup/reconciliation.
+This document describes the runtime lifecycle contract owned by `agents-sandbox`: primary sandbox container, dedicated network, companion containers, runtime event stream, exec output redirection, and cleanup/reconciliation.
 
 ## Runtime Resources
 
@@ -8,7 +8,7 @@ This document describes the runtime lifecycle contract owned by `agents-sandbox`
 |----------|-------|
 | Primary container | Main execution target for `CreateExec` |
 | Dedicated network | One per sandbox; shared bridge and host network are not supported |
-| Service containers | Required and optional services declared via `ServiceSpec`, on the same network |
+| Companion containers | Declared via `CompanionContainerSpec`, on the same network |
 | Persistent event history | Stored in bbolt; lifecycle and exec events survive daemon restart until retention cleanup |
 | Exec output artifacts | Files under the configured artifact root |
 | Exec log bind-mount | `{ArtifactOutputRoot}/{sandbox_id}/` → `/var/log/agents-sandbox/` (rw); each exec writes `{exec_id}.stdout.log` and `{exec_id}.stderr.log` |
@@ -44,8 +44,8 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`. T
 |------------|----------|
 | Create accepted | `SANDBOX_ACCEPTED` |
 | Materialization in progress | `SANDBOX_PREPARING` |
-| Required service ready | `SANDBOX_SERVICE_READY` |
-| Optional service fails | `SANDBOX_SERVICE_FAILED` |
+| Companion container ready | `COMPANION_CONTAINER_READY` |
+| Companion container fails | `COMPANION_CONTAINER_FAILED` |
 | Create or resume succeeds | `SANDBOX_READY` |
 | Create/resume/stop/delete fails | `SANDBOX_FAILED` |
 
@@ -82,19 +82,18 @@ flowchart TB
     C --> D[Create dedicated network]
     D --> E[Materialize filesystem inputs and built-in resources]
     E --> E1[Create exec log directory and bind-mount into primary container]
-    E1 --> F[Create required and optional service containers]
-    F --> G[Start and wait each required service healthy]
-    G --> H[Start primary and optional services]
-    H --> I[Run post_start_on_primary for required services]
+    E1 --> F[Create companion containers]
+    F --> G[Start primary and all companion containers in parallel]
+    G --> H[Run post_start_on_primary after each companion healthy]
     I --> J[Persist runtime handles]
-    J --> K[Emit SANDBOX_SERVICE_READY / SANDBOX_SERVICE_FAILED]
+    J --> K[Emit COMPANION_CONTAINER_READY / COMPANION_CONTAINER_FAILED]
     K --> L[Emit SANDBOX_READY]
 ```
 
 Create-path rules:
 - `CreateSandbox` returns immediately after acceptance; the caller must not infer readiness from the response alone.
-- The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid service declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
-- Optional services only report initial create/start result in V1; not restarted or runtime-monitored after readiness.
+- The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid companion container declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
+- Companion containers only report initial create/start result in V1; not restarted or runtime-monitored after readiness.
 - If materialization fails after resources exist, cleanup continues on a daemon-owned background context with bounded timeout.
 
 ## Resume Path
@@ -125,4 +124,4 @@ flowchart LR
 
 ## Reconciliation
 
-The daemon owns runtime reconciliation for resources under its namespace: idle sandboxes eligible for stop, resources left after failed materialization, orphaned service containers, and dedicated networks without live runtime membership. Reconciliation uses structured audit logs and explicit action reasons, deriving decisions from structured Docker metadata and recorded runtime state.
+The daemon owns runtime reconciliation for resources under its namespace: idle sandboxes eligible for stop, resources left after failed materialization, orphaned companion containers, and dedicated networks without live runtime membership. Reconciliation uses structured audit logs and explicit action reasons, deriving decisions from structured Docker metadata and recorded runtime state.

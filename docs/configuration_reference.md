@@ -12,7 +12,7 @@ If a change adds, removes, renames, or changes the default of a config key, upda
 - Secrets stay outside the repository and outside generated documentation.
 - Daemon runtime paths are fixed platform paths, not operator-tunable config.
 
-Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_tools`), and service declarations belong to the RPC contract, not to `config.toml`.
+Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_tools`), and companion container declarations belong to the RPC contract, not to `config.toml`.
 
 The AgentsSandbox daemon always derives its runtime paths internally and then auto-loads the platform-default `config.toml` if it exists. There is no CLI flag, environment variable, or config key that overrides the socket path, lock path, config path, or ID store path.
 
@@ -49,8 +49,7 @@ The northbound API may override only a narrow subset of behavior:
 | Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `claude`, `codex`, `git`, `uv`, `npm`, or `apt` |
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
-| `required_services` | Yes | Each sandbox declares the services that must become healthy before the primary is reported ready |
-| `optional_services` | Yes | Each sandbox declares the services whose initial startup result is reported without blocking readiness |
+| `companion_containers` | Yes | Each sandbox declares companion containers started concurrently with the primary container |
 | `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |
