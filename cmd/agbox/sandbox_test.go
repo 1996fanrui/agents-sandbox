@@ -279,7 +279,7 @@ func TestSandboxList(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("unexpected output lines: %#v", lines)
 	}
-	if !strings.Contains(lines[0], "SANDBOX ID") || !strings.Contains(lines[0], "STATE") || !strings.Contains(lines[0], "LABELS") {
+	if !strings.Contains(lines[0], "SANDBOX ID") || !strings.Contains(lines[0], "CREATED") || !strings.Contains(lines[0], "STATUS") || !strings.Contains(lines[0], "LABELS") || !strings.Contains(lines[0], "ERROR") {
 		t.Fatalf("unexpected header line: %q", lines[0])
 	}
 	if !strings.Contains(stdout, "sandbox-a") || !strings.Contains(stdout, "sandbox-b") || !strings.Contains(stdout, "sandbox-c") {
@@ -308,7 +308,7 @@ func TestSandboxList(t *testing.T) {
 	if len(emptyLines) != 1 {
 		t.Fatalf("unexpected empty output: %#v", emptyLines)
 	}
-	if !strings.Contains(emptyLines[0], "SANDBOX ID") || !strings.Contains(emptyLines[0], "STATE") || !strings.Contains(emptyLines[0], "LABELS") {
+	if !strings.Contains(emptyLines[0], "SANDBOX ID") || !strings.Contains(emptyLines[0], "CREATED") || !strings.Contains(emptyLines[0], "STATUS") || !strings.Contains(emptyLines[0], "LABELS") || !strings.Contains(emptyLines[0], "ERROR") {
 		t.Fatalf("unexpected header line: %q", emptyLines[0])
 	}
 }
@@ -431,6 +431,7 @@ func TestSandboxGet(t *testing.T) {
 		"state=SANDBOX_STATE_READY",
 		"image=",
 		"created_at=",
+		"state_changed_at=",
 		"last_event_sequence=7",
 		`labels={"env":"dev","team":"backend"}`,
 		`required_services=[{"name":"db","image":"postgres:16"}]`,
@@ -468,6 +469,7 @@ func TestSandboxGet(t *testing.T) {
 		"state=SANDBOX_STATE_PENDING",
 		"image=",
 		"created_at=",
+		"state_changed_at=",
 		"last_event_sequence=0",
 		"labels={}",
 		"required_services=[]",
@@ -480,6 +482,31 @@ func TestSandboxGet(t *testing.T) {
 		if !strings.HasPrefix(line, want[index]) {
 			t.Fatalf("unexpected line %d: got %q want prefix %q", index, line, want[index])
 		}
+	}
+}
+
+func TestSandboxGetFailed(t *testing.T) {
+	service := &fakeSandboxService{
+		getFn: func(_ context.Context, request *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:    "sandbox-fail",
+					State:        agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+					ErrorCode:    "CONTAINER_NOT_RUNNING",
+					ErrorMessage: "primary container not running",
+				},
+			}, nil
+		},
+	}
+	stdout, stderr, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "get", "sandbox-fail")
+	if exitCode != exitCodeSuccess {
+		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "error_code=CONTAINER_NOT_RUNNING") {
+		t.Fatalf("expected error_code in output, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "error_message=primary container not running") {
+		t.Fatalf("expected error_message in output, got %q", stdout)
 	}
 }
 

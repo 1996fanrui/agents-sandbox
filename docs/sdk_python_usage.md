@@ -32,8 +32,11 @@ class SandboxHandle:
     required_services: tuple[ServiceSpec, ...]
     optional_services: tuple[ServiceSpec, ...]
     labels: Mapping[str, str]
-    created_at: datetime | None   # None if not set by daemon
+    created_at: datetime | None
     image: str
+    error_code: str | None
+    error_message: str | None
+    state_changed_at: datetime | None
 ```
 
 `ServiceSpec` uses `envs` (not `environment`); `HealthcheckConfig` uses `timedelta` for duration fields:

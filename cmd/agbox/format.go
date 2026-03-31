@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -59,18 +60,81 @@ func formatSandboxDeleteByLabel(resp *agboxv1.DeleteSandboxesResponse) string {
 	)
 }
 
+// relativeTime returns a human-friendly relative time string like "5m ago", "3h ago", "2d ago".
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// relativeAge returns a compact relative duration like "2h", "5m", "1d".
+func relativeAge(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// humanStateName converts a SandboxState enum to a human-friendly name.
+// E.g. SANDBOX_STATE_READY -> "Ready", SANDBOX_STATE_FAILED -> "Failed"
+func humanStateName(state agboxv1.SandboxState) string {
+	name := state.String()
+	// Strip "SANDBOX_STATE_" prefix
+	const prefix = "SANDBOX_STATE_"
+	if strings.HasPrefix(name, prefix) {
+		name = name[len(prefix):]
+	}
+	// Title case: first letter upper, rest lower
+	if len(name) == 0 {
+		return name
+	}
+	return strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
+}
+
 func formatSandboxListTable(handles []*agboxv1.SandboxHandle) string {
 	var buffer bytes.Buffer
 	writer := tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', 0)
 
-	_, _ = fmt.Fprintln(writer, "SANDBOX ID\tSTATE\tLABELS")
+	_, _ = fmt.Fprintln(writer, "SANDBOX ID\tCREATED\tSTATUS\tLABELS\tERROR")
 	for _, handle := range handles {
+		created := ""
+		if ts := handle.GetCreatedAt(); ts != nil {
+			created = relativeTime(ts.AsTime())
+		}
+		status := humanStateName(handle.GetState())
+		if ts := handle.GetStateChangedAt(); ts != nil {
+			status += " " + relativeAge(ts.AsTime())
+		}
+		errorMsg := handle.GetErrorMessage()
 		_, _ = fmt.Fprintf(
 			writer,
-			"%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\n",
 			handle.GetSandboxId(),
-			handle.GetState(),
+			created,
+			status,
 			strings.Join(labelsToPairs(handle.GetLabels()), ","),
+			errorMsg,
 		)
 	}
 
@@ -93,15 +157,25 @@ func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
 		createdAt = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
 	}
 
+	stateChangedAt := ""
+	if ts := handle.GetStateChangedAt(); ts != nil {
+		stateChangedAt = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
+	}
+
 	var builder strings.Builder
 	_, _ = fmt.Fprintf(&builder, "sandbox_id=%s\n", handle.GetSandboxId())
 	_, _ = fmt.Fprintf(&builder, "state=%s\n", handle.GetState())
 	_, _ = fmt.Fprintf(&builder, "image=%s\n", handle.GetImage())
 	_, _ = fmt.Fprintf(&builder, "created_at=%s\n", createdAt)
+	_, _ = fmt.Fprintf(&builder, "state_changed_at=%s\n", stateChangedAt)
 	_, _ = fmt.Fprintf(&builder, "last_event_sequence=%d\n", handle.GetLastEventSequence())
 	_, _ = fmt.Fprintf(&builder, "labels=%s\n", formatStringMapJSON(handle.GetLabels()))
 	_, _ = fmt.Fprintf(&builder, "required_services=%s\n", requiredServices)
 	_, _ = fmt.Fprintf(&builder, "optional_services=%s\n", optionalServices)
+	if handle.GetErrorCode() != "" {
+		_, _ = fmt.Fprintf(&builder, "error_code=%s\n", handle.GetErrorCode())
+		_, _ = fmt.Fprintf(&builder, "error_message=%s\n", handle.GetErrorMessage())
+	}
 	return builder.String(), nil
 }
 
