@@ -104,6 +104,9 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		OptionalServices:  cloneServiceSpecs(handle.GetOptionalServices()),
 		CreatedAt:         handle.GetCreatedAt(),
 		Image:             handle.GetImage(),
+		ErrorCode:         handle.GetErrorCode(),
+		ErrorMessage:      handle.GetErrorMessage(),
+		StateChangedAt:    handle.GetStateChangedAt(),
 	}
 }
 

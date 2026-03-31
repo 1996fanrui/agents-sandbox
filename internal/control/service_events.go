@@ -266,6 +266,30 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 	record.nextSequence = nextSequence
 	record.events = append(record.events, event)
 	record.handle.LastEventSequence = event.GetSequence()
+
+	// Update state_changed_at when the sandbox state actually transitions
+	// or when it is set for the first time (e.g. CreateSandbox: UNSPECIFIED->PENDING).
+	if mutation.sandboxState != agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED {
+		if mutation.sandboxState != record.handle.GetState() || record.handle.StateChangedAt == nil {
+			record.handle.StateChangedAt = event.GetOccurredAt()
+		}
+	}
+
+	// Populate error fields when transitioning INTO FAILED.
+	if mutation.sandboxState == agboxv1.SandboxState_SANDBOX_STATE_FAILED &&
+		mutation.sandboxState != record.handle.GetState() {
+		record.handle.ErrorCode = mutation.errorCode
+		record.handle.ErrorMessage = mutation.errorMessage
+	}
+
+	// Clear error fields when transitioning OUT OF FAILED.
+	if record.handle.GetState() == agboxv1.SandboxState_SANDBOX_STATE_FAILED &&
+		mutation.sandboxState != agboxv1.SandboxState_SANDBOX_STATE_UNSPECIFIED &&
+		mutation.sandboxState != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
+		record.handle.ErrorCode = ""
+		record.handle.ErrorMessage = ""
+	}
+
 	return nil
 }
 
@@ -412,6 +436,26 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			nextSequence:              maxSequence,
 			lastTerminalRunFinishedAt: lastTerminalRunFinishedAt,
 			deletedAtRecorded:         deletedRecorded,
+		}
+
+		// Recover state_changed_at from persisted events.
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].GetSandboxState() == persistedState {
+				record.handle.StateChangedAt = events[i].GetOccurredAt()
+				break
+			}
+		}
+		// Recover error fields for FAILED sandboxes from the last SANDBOX_FAILED event.
+		if persistedState == agboxv1.SandboxState_SANDBOX_STATE_FAILED {
+			for i := len(events) - 1; i >= 0; i-- {
+				if events[i].GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
+					if phase := events[i].GetSandboxPhase(); phase != nil {
+						record.handle.ErrorCode = phase.GetErrorCode()
+						record.handle.ErrorMessage = phase.GetErrorMessage()
+					}
+					break
+				}
+			}
 		}
 
 		// Build runtime state for non-terminal sandboxes.

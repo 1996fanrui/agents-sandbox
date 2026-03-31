@@ -180,7 +180,7 @@ class CreateSpec(_message.Message):
     def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
-    __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels", "created_at", "image")
+    __slots__ = ("sandbox_id", "state", "last_event_sequence", "required_services", "optional_services", "labels", "created_at", "image", "error_code", "error_message", "state_changed_at")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -196,6 +196,9 @@ class SandboxHandle(_message.Message):
     LABELS_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     IMAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    STATE_CHANGED_AT_FIELD_NUMBER: _ClassVar[int]
     sandbox_id: str
     state: SandboxState
     last_event_sequence: int
@@ -204,7 +207,10 @@ class SandboxHandle(_message.Message):
     labels: _containers.ScalarMap[str, str]
     created_at: _timestamp_pb2.Timestamp
     image: str
-    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_sequence: _Optional[int] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., image: _Optional[str] = ...) -> None: ...
+    error_code: str
+    error_message: str
+    state_changed_at: _timestamp_pb2.Timestamp
+    def __init__(self, sandbox_id: _Optional[str] = ..., state: _Optional[_Union[SandboxState, str]] = ..., last_event_sequence: _Optional[int] = ..., required_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., optional_services: _Optional[_Iterable[_Union[ServiceSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., image: _Optional[str] = ..., error_code: _Optional[str] = ..., error_message: _Optional[str] = ..., state_changed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class SandboxPhaseDetails(_message.Message):
     __slots__ = ("phase", "error_code", "error_message", "reason")
