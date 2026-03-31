@@ -56,6 +56,7 @@ Recomputed on startup from Category A and B.
 | `nextSequence` | `MaxSequence()` over `events:{sandbox_id}` |
 | `context.CancelFunc` per exec | New cancel context for running execs |
 | `optionalServiceStarts` channels | Re-inspect optional service containers |
+| `SandboxHandle.ErrorCode`, `ErrorMessage`, `StateChangedAt` | Last `SANDBOX_FAILED` event's `SandboxPhaseDetails` (error fields); last state-matching event's `OccurredAt` (timestamp) |
 | `sandboxRuntimeState` | Container names + runtime status from Docker |
 
 ## Category D — Host Filesystem Artifacts

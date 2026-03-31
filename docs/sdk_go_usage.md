@@ -59,6 +59,9 @@ type SandboxHandle struct {
     RequiredServices, OptionalServices []ServiceSpec
     Labels            map[string]string
     CreatedAt         time.Time
+    ErrorCode         *string
+    ErrorMessage      *string
+    StateChangedAt    *time.Time
 }
 
 type ExecHandle struct {

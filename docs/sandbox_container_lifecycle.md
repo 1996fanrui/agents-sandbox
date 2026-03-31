@@ -48,6 +48,9 @@ All lifecycle convergence must be observable through `SubscribeSandboxEvents`. T
 | Optional service fails | `SANDBOX_SERVICE_FAILED` |
 | Create or resume succeeds | `SANDBOX_READY` |
 | Create/resume/stop/delete fails | `SANDBOX_FAILED` |
+
+The `SANDBOX_FAILED` event's `error_code` and `error_message` from `SandboxPhaseDetails` are projected onto `SandboxHandle`, and `state_changed_at` records the timestamp of each state transition. This allows any read path (`GetSandbox`, `ListSandboxes`) to return failure context without event subscription.
+
 | Stop begins | `SANDBOX_STOP_REQUESTED` |
 | Stop completes | `SANDBOX_STOPPED` |
 | Delete begins | `SANDBOX_DELETE_REQUESTED` |
