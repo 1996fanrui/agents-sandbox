@@ -238,7 +238,7 @@ func TestListSandboxesWithLabelSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSandboxes(all) failed: %v", err)
 	}
-	if got := sandboxIDs(listAll.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-dev", "selector-api-prod", "selector-worker-dev"}) {
+	if got := sandboxIDs(listAll.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-prod", "selector-worker-dev", "selector-api-dev"}) {
 		t.Fatalf("unexpected all sandboxes: %#v", got)
 	}
 
@@ -248,7 +248,7 @@ func TestListSandboxesWithLabelSelector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSandboxes(env) failed: %v", err)
 	}
-	if got := sandboxIDs(listEnv.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-api-dev", "selector-worker-dev"}) {
+	if got := sandboxIDs(listEnv.GetSandboxes()); !reflect.DeepEqual(got, []string{"selector-worker-dev", "selector-api-dev"}) {
 		t.Fatalf("unexpected env selector result: %#v", got)
 	}
 
@@ -295,6 +295,34 @@ func TestListSandboxesReturnsLabels(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listResp.GetSandboxes()[0].GetLabels(), map[string]string{"owner": "team-a", "env": "dev"}) {
 		t.Fatalf("unexpected labels in list response: %#v", listResp.GetSandboxes()[0].GetLabels())
+	}
+}
+
+func TestListSandboxesSortedByCreatedAtDescending(t *testing.T) {
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	})
+
+	// Create sandboxes sequentially so each has a distinct created_at.
+	ids := []string{"sort-first", "sort-second", "sort-third"}
+	for _, id := range ids {
+		if _, err := client.CreateSandbox(context.Background(), createSandboxRequest(id, "ghcr.io/agents-sandbox/coding-runtime:test")); err != nil {
+			t.Fatalf("CreateSandbox(%s) failed: %v", id, err)
+		}
+		waitForSandboxState(t, client, id, agboxv1.SandboxState_SANDBOX_STATE_READY)
+	}
+
+	listResp, err := client.ListSandboxes(context.Background(), &agboxv1.ListSandboxesRequest{})
+	if err != nil {
+		t.Fatalf("ListSandboxes failed: %v", err)
+	}
+
+	got := sandboxIDs(listResp.GetSandboxes())
+	// Newest first: sort-third, sort-second, sort-first.
+	want := []string{"sort-third", "sort-second", "sort-first"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected descending created_at order %v, got %v", want, got)
 	}
 }
 
