@@ -4,11 +4,12 @@
 
 ## What matters most when running AI agents locally?
 
-**Your machine must stay safe** — Host filesystem invisible, host network unreachable. Bad commands destroy only the sandbox.
+**Your machine must stay safe** — No host filesystem access. No host network access. No exceptions. Bad commands destroy only the sandbox.
 **The agent must run free** — Install anything, run anything, break anything. Zero approval prompts. Deliver results directly.
 **Reuse your CLI subscriptions** — Host authentication and flat-rate subscriptions (Claude Max, Codex) carry into the sandbox. Zero extra cost.
 **One command to start sandbox** — `agbox agent claude` or `agbox agent codex` with Full Permissions.
 **Data never leaves your machine** — Code, credentials, all agent activity stay local.
+**No dedicated Mac Mini needed** — Your laptop already has Docker. That's all it takes.
 
 ## Why agents-sandbox?
 
