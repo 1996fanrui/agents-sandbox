@@ -2,11 +2,13 @@
 
 **Full power for your agents. Full safety for your machine.**
 
-- **Unrestricted AI agent** — Agents install anything, run anything, break anything. Zero permission prompts, zero manual approvals.
-- **Untouchable host** — No host filesystem access. No host network access. No exceptions. A bad command destroys only the disposable sandbox, never your machine.
-- **Agents deliver results, not questions** — With both guarantees in place, AI agents run autonomously and deliver results directly. No babysitting. No manual review loops.
-- **Host credentials, zero setup** — Sandboxes inherit host authentication (SSH agent, GitHub CLI, etc.) out of the box. Claude Code and Codex work immediately — powered by your flat-rate CLI subscriptions, not per-token API billing.
-- **Local-first, cloud-optional** — Zero latency, zero cost, and your data never leaves your machine.
+## What matters most when running AI agents locally?
+
+**Your machine must stay safe** — Host filesystem invisible, host network unreachable. Bad commands destroy only the sandbox.
+**The agent must run free** — Install anything, run anything, break anything. Zero approval prompts. Deliver results directly.
+**Reuse your CLI subscriptions** — Host authentication and flat-rate subscriptions (Claude Max, Codex) carry into the sandbox. Zero extra cost.
+**One command to start sandbox** — `agbox agent claude` or `agbox agent codex` with Full Permissions.
+**Data never leaves your machine** — Code, credentials, all agent activity stay local.
 
 ## Why agents-sandbox?
 
@@ -54,20 +56,6 @@ Any AI agent that needs to **take actions** — not just generate text — benef
 | **DevOps / SRE agents** | Run deployment scripts and CLI tools in disposable, contained environments |
 | **Research agents** | Install anything, run any experiment, discard when done |
 | **CI / test agents** | Each run gets a clean, reproducible, fully isolated environment |
-
-## Why Local, Not a Remote VPS?
-
-A remote VPS gives you isolation too — but with tradeoffs. agents-sandbox runs locally, giving you the same isolation with none of the downsides:
-
-| | Local Sandbox | Remote VPS |
-|---|---|---|
-| **Latency** | Near-zero | 10–100ms+ per command round-trip |
-| **Cost** | Free — you own the hardware. Agents use flat-rate CLI subscriptions (Claude Code, Codex), not per-token API billing | Pay per hour/VM/GB, plus API metering for every token |
-| **Data privacy** | Code and credentials never leave your machine | Source code and API keys travel to a third party |
-| **Startup** | Seconds | 30s–minutes for VM provisioning |
-| **Local resources** | Direct access to files, GPU via controlled mounts | Must sync files up/down |
-
-**Local-first, cloud-optional.** The same daemon and SDK work in cloud deployments when you need to scale.
 
 ## Installation
 
