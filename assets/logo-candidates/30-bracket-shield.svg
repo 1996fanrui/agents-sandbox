@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Square brackets form a shield-like containment -->
+  <!-- Left bracket -->
+  <path d="M160,100 L120,100 L120,412 L160,412" fill="none" stroke="#F59E0B" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right bracket -->
+  <path d="M352,100 L392,100 L392,412 L352,412" fill="none" stroke="#F59E0B" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Small box in center -->
+  <rect x="196" y="208" width="120" height="96" rx="8" fill="none" stroke="#F59E0B" stroke-width="5"/>
+  <!-- Dot = agent running -->
+  <circle cx="256" cy="256" r="10" fill="#F59E0B"/>
+</svg>

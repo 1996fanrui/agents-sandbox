@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Padlock body is a terminal window -->
+  <!-- Lock shackle -->
+  <path d="M176 200 L176 152 Q176 72 256 72 Q336 72 336 152 L336 200"
+        fill="none" stroke="#10B981" stroke-width="12" stroke-linecap="round"/>
+  <!-- Lock body = terminal -->
+  <rect x="144" y="200" width="224" height="240" rx="20" fill="none" stroke="#10B981" stroke-width="8"/>
+  <line x1="144" y1="240" x2="368" y2="240" stroke="#10B981" stroke-width="5"/>
+  <circle cx="172" cy="220" r="6" fill="#10B981"/>
+  <circle cx="192" cy="220" r="6" fill="#10B981"/>
+  <circle cx="212" cy="220" r="6" fill="#10B981"/>
+  <!-- Cursor inside -->
+  <text x="192" y="340" font-family="monospace" font-weight="bold" font-size="52" fill="#10B981">&gt;_</text>
+</svg>

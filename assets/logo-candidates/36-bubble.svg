@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Bubble: agent safe inside a translucent sphere -->
+  <!-- Outer bubble -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#06B6D4" stroke-width="4"/>
+  <!-- Highlight arc (glass reflection) -->
+  <path d="M160,140 Q200,100 280,120" fill="none" stroke="#06B6D4" stroke-width="6" stroke-linecap="round" opacity="0.6"/>
+  <path d="M148,170 Q170,150 210,145" fill="none" stroke="#06B6D4" stroke-width="3" stroke-linecap="round" opacity="0.3"/>
+  <!-- Simple terminal box inside -->
+  <rect x="196" y="208" width="120" height="96" rx="8" fill="none" stroke="#06B6D4" stroke-width="4"/>
+  <line x1="196" y1="232" x2="316" y2="232" stroke="#06B6D4" stroke-width="2.5"/>
+  <text x="212" y="280" font-family="monospace" font-weight="bold" font-size="28" fill="#06B6D4">&gt;_</text>
+</svg>

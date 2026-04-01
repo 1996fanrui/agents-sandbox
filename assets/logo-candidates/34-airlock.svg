@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Airlock door: two concentric rounded rects with seal indicators -->
+  <rect x="80" y="80" width="352" height="352" rx="28" fill="none" stroke="#DC2626" stroke-width="6"/>
+  <!-- Seal bolts on outer frame -->
+  <circle cx="108" cy="108" r="8" fill="none" stroke="#DC2626" stroke-width="3"/>
+  <circle cx="404" cy="108" r="8" fill="none" stroke="#DC2626" stroke-width="3"/>
+  <circle cx="108" cy="404" r="8" fill="none" stroke="#DC2626" stroke-width="3"/>
+  <circle cx="404" cy="404" r="8" fill="none" stroke="#DC2626" stroke-width="3"/>
+  <!-- Inner chamber -->
+  <rect x="152" y="152" width="208" height="208" rx="16" fill="none" stroke="#DC2626" stroke-width="5"/>
+  <!-- Sealed indicator -->
+  <line x1="116" y1="200" x2="152" y2="200" stroke="#DC2626" stroke-width="2"/>
+  <line x1="116" y1="256" x2="152" y2="256" stroke="#DC2626" stroke-width="2"/>
+  <line x1="116" y1="312" x2="152" y2="312" stroke="#DC2626" stroke-width="2"/>
+  <line x1="360" y1="200" x2="396" y2="200" stroke="#DC2626" stroke-width="2"/>
+  <line x1="360" y1="256" x2="396" y2="256" stroke="#DC2626" stroke-width="2"/>
+  <line x1="360" y1="312" x2="396" y2="312" stroke="#DC2626" stroke-width="2"/>
+  <!-- Status: SEALED -->
+  <circle cx="256" cy="240" r="20" fill="none" stroke="#DC2626" stroke-width="4"/>
+  <circle cx="256" cy="240" r="6" fill="#DC2626"/>
+  <text x="210" y="310" font-family="monospace" font-size="22" fill="#DC2626">SEALED</text>
+</svg>

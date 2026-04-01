@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Clean isometric cube outline = sandbox container -->
+  <!-- Back edges -->
+  <line x1="256" y1="96" x2="400" y2="176" stroke="#0EA5E9" stroke-width="5" opacity="0.3"/>
+  <line x1="256" y1="96" x2="112" y2="176" stroke="#0EA5E9" stroke-width="5" opacity="0.3"/>
+  <line x1="400" y1="176" x2="400" y2="336" stroke="#0EA5E9" stroke-width="5" opacity="0.3"/>
+  <!-- Front edges -->
+  <line x1="112" y1="176" x2="112" y2="336" stroke="#0EA5E9" stroke-width="6"/>
+  <line x1="112" y1="336" x2="256" y2="416" stroke="#0EA5E9" stroke-width="6"/>
+  <line x1="256" y1="416" x2="400" y2="336" stroke="#0EA5E9" stroke-width="6"/>
+  <!-- Center vertical -->
+  <line x1="256" y1="256" x2="256" y2="416" stroke="#0EA5E9" stroke-width="5"/>
+  <!-- Top face edges -->
+  <line x1="112" y1="176" x2="256" y2="256" stroke="#0EA5E9" stroke-width="5"/>
+  <line x1="400" y1="176" x2="256" y2="256" stroke="#0EA5E9" stroke-width="5"/>
+  <!-- Lock icon on front face -->
+  <path d="M240 320 L240 305 Q240 290 256 290 Q272 290 272 305 L272 320"
+        fill="none" stroke="#0EA5E9" stroke-width="4" stroke-linecap="round"/>
+  <rect x="232" y="320" width="48" height="36" rx="6" fill="none" stroke="#0EA5E9" stroke-width="4"/>
+  <circle cx="256" cy="338" r="5" fill="#0EA5E9"/>
+</svg>

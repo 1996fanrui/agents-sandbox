@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Solid box + dashed circle = contained + isolated -->
+  <circle cx="256" cy="256" r="220" fill="none" stroke="#6366F1" stroke-width="5" stroke-dasharray="16,10"/>
+  <rect x="160" y="176" width="192" height="160" rx="14" fill="none" stroke="#6366F1" stroke-width="7"/>
+  <line x1="160" y1="212" x2="352" y2="212" stroke="#6366F1" stroke-width="4"/>
+  <circle cx="180" cy="194" r="5" fill="#6366F1"/>
+  <circle cx="196" cy="194" r="5" fill="#6366F1"/>
+  <circle cx="212" cy="194" r="5" fill="#6366F1"/>
+  <text x="186" y="290" font-family="monospace" font-weight="bold" font-size="36" fill="#6366F1">&gt;_</text>
+</svg>

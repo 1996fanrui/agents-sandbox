@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Castle moat: inner keep + water gap + outer wall -->
+  <!-- Outer wall -->
+  <rect x="56" y="56" width="400" height="400" rx="8" fill="none" stroke="#94A3B8" stroke-width="4"/>
+  <!-- Battlements on outer wall -->
+  <rect x="56" y="44" width="32" height="20" fill="#94A3B8"/>
+  <rect x="136" y="44" width="32" height="20" fill="#94A3B8"/>
+  <rect x="240" y="44" width="32" height="20" fill="#94A3B8"/>
+  <rect x="344" y="44" width="32" height="20" fill="#94A3B8"/>
+  <rect x="424" y="44" width="32" height="20" fill="#94A3B8"/>
+  <!-- Moat (gap) indicated by dashed line -->
+  <rect x="104" y="104" width="304" height="304" rx="6" fill="none" stroke="#3B82F6" stroke-width="3" stroke-dasharray="10,6"/>
+  <!-- Inner keep -->
+  <rect x="168" y="168" width="176" height="176" rx="12" fill="none" stroke="#3B82F6" stroke-width="6"/>
+  <!-- Agent in keep -->
+  <text x="210" y="272" font-family="monospace" font-weight="bold" font-size="44" fill="#3B82F6">&gt;_</text>
+</svg>

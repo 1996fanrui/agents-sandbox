@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Letter A with fence/barrier as the crossbar -->
+  <!-- A legs -->
+  <line x1="128" y1="420" x2="232" y2="92" stroke="#E0E7FF" stroke-width="12" stroke-linecap="round"/>
+  <line x1="384" y1="420" x2="280" y2="92" stroke="#E0E7FF" stroke-width="12" stroke-linecap="round"/>
+  <!-- A peak connection -->
+  <line x1="232" y1="92" x2="280" y2="92" stroke="#E0E7FF" stroke-width="12" stroke-linecap="round"/>
+  <!-- Crossbar as fence/barrier (barbed wire style) -->
+  <line x1="172" y1="280" x2="340" y2="280" stroke="#F59E0B" stroke-width="6"/>
+  <line x1="168" y1="296" x2="344" y2="296" stroke="#F59E0B" stroke-width="3" stroke-dasharray="8,6"/>
+  <!-- Fence posts on crossbar -->
+  <line x1="200" y1="268" x2="200" y2="308" stroke="#F59E0B" stroke-width="4"/>
+  <line x1="240" y1="268" x2="240" y2="308" stroke="#F59E0B" stroke-width="4"/>
+  <line x1="280" y1="268" x2="280" y2="308" stroke="#F59E0B" stroke-width="4"/>
+  <line x1="320" y1="268" x2="320" y2="308" stroke="#F59E0B" stroke-width="4"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Minimal shield outline with a single box inside -->
+  <path d="M256 56 L424 124 L424 272 Q424 392 256 456 Q88 392 88 272 L88 124 Z"
+        fill="none" stroke="#3B82F6" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="192" y="192" width="128" height="96" rx="10" fill="none" stroke="#3B82F6" stroke-width="6"/>
+  <line x1="192" y1="220" x2="320" y2="220" stroke="#3B82F6" stroke-width="4"/>
+  <circle cx="208" cy="206" r="4" fill="#3B82F6"/>
+  <circle cx="222" cy="206" r="4" fill="#3B82F6"/>
+  <circle cx="236" cy="206" r="4" fill="#3B82F6"/>
+</svg>

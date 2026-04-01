@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Thick wall with cursor peeking through a window -->
+  <!-- Outer thick frame -->
+  <rect x="60" y="60" width="392" height="392" rx="24" fill="#1E293B" stroke="#334155" stroke-width="4"/>
+  <!-- Window cut-out -->
+  <rect x="160" y="160" width="192" height="192" rx="12" fill="#0F172A" stroke="#60A5FA" stroke-width="4"/>
+  <!-- Wall thickness indicators -->
+  <rect x="60" y="60" width="392" height="392" rx="24" fill="none" stroke="#475569" stroke-width="2" stroke-dasharray="0"/>
+  <!-- Cursor in window -->
+  <text x="204" y="276" font-family="monospace" font-weight="bold" font-size="52" fill="#60A5FA">&gt;_</text>
+</svg>
