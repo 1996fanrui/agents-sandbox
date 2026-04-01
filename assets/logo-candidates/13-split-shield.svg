@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Split shield: left=freedom(warm), right=safety(cool) -->
+  <defs>
+    <linearGradient id="g13a" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="g13b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <clipPath id="leftHalf"><rect x="0" y="0" width="256" height="512"/></clipPath>
+    <clipPath id="rightHalf"><rect x="256" y="0" width="256" height="512"/></clipPath>
+  </defs>
+  <!-- Left half - warm (agent power) -->
+  <g clip-path="url(#leftHalf)">
+    <path d="M256 48 L440 120 L440 280 Q440 400 256 472 Q72 400 72 280 L72 120 Z" fill="url(#g13a)"/>
+  </g>
+  <!-- Right half - cool (safety) -->
+  <g clip-path="url(#rightHalf)">
+    <path d="M256 48 L440 120 L440 280 Q440 400 256 472 Q72 400 72 280 L72 120 Z" fill="url(#g13b)"/>
+  </g>
+  <!-- Center divider -->
+  <line x1="256" y1="60" x2="256" y2="460" stroke="#0F172A" stroke-width="4"/>
+  <!-- Left icon: lightning (power) -->
+  <polygon points="220,180 195,240 212,240 190,300 240,230 222,230 240,180" fill="#0F172A"/>
+  <!-- Right icon: lock (safety) -->
+  <rect x="280" y="230" width="50" height="45" rx="6" fill="#0F172A"/>
+  <path d="M288,230 L288,210 Q288,190 305,190 Q322,190 322,210 L322,230" fill="none" stroke="#0F172A" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="305" cy="252" r="6" fill="#3B82F6"/>
+  <!-- Outer glow -->
+  <path d="M256 48 L440 120 L440 280 Q440 400 256 472 Q72 400 72 280 L72 120 Z" fill="none" stroke="#fff" stroke-width="2" opacity="0.2"/>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Keyhole that doubles as an eye: security + agent awareness -->
+  <defs>
+    <linearGradient id="g17" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F43F5E"/>
+      <stop offset="100%" stop-color="#BE123C"/>
+    </linearGradient>
+    <radialGradient id="g17r" cx="50%" cy="40%">
+      <stop offset="0%" stop-color="#FCA5A5"/>
+      <stop offset="100%" stop-color="#F43F5E"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#1C0A0F"/>
+  <!-- Outer eye shape -->
+  <path d="M60,256 Q256,100 452,256 Q256,412 60,256 Z" fill="#2D0A14" stroke="#F43F5E" stroke-width="4"/>
+  <!-- Iris -->
+  <circle cx="256" cy="256" r="100" fill="url(#g17)" opacity="0.3"/>
+  <circle cx="256" cy="256" r="100" fill="none" stroke="#FB7185" stroke-width="3"/>
+  <!-- Pupil / keyhole -->
+  <circle cx="256" cy="232" r="36" fill="#1C0A0F"/>
+  <polygon points="238,250 274,250 264,320 248,320" fill="#1C0A0F"/>
+  <!-- Iris detail rings -->
+  <circle cx="256" cy="256" r="70" fill="none" stroke="#FB7185" stroke-width="1" opacity="0.3"/>
+  <circle cx="256" cy="256" r="50" fill="none" stroke="#FB7185" stroke-width="1" opacity="0.4"/>
+  <!-- Highlight -->
+  <circle cx="278" cy="220" r="12" fill="#FCA5A5" opacity="0.4"/>
+  <!-- Scan lines -->
+  <line x1="60" y1="256" x2="150" y2="256" stroke="#F43F5E" stroke-width="1" opacity="0.3"/>
+  <line x1="362" y1="256" x2="452" y2="256" stroke="#F43F5E" stroke-width="1" opacity="0.3"/>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Abstract container ship: stacked containers with agent flag -->
+  <defs>
+    <linearGradient id="g16" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#4338CA"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#1E1B4B"/>
+  <!-- Container grid (3x2) -->
+  <!-- Row 1 -->
+  <rect x="136" y="200" width="72" height="52" rx="6" fill="#818CF8" opacity="0.4"/>
+  <rect x="220" y="200" width="72" height="52" rx="6" fill="#818CF8" opacity="0.5"/>
+  <rect x="304" y="200" width="72" height="52" rx="6" fill="#818CF8" opacity="0.4"/>
+  <!-- Row 2 -->
+  <rect x="136" y="264" width="72" height="52" rx="6" fill="#818CF8" opacity="0.3"/>
+  <rect x="304" y="264" width="72" height="52" rx="6" fill="#818CF8" opacity="0.3"/>
+  <!-- Active sandbox container (highlighted) -->
+  <rect x="220" y="264" width="72" height="52" rx="6" fill="url(#g16)" stroke="#A5B4FC" stroke-width="3"/>
+  <!-- Terminal inside active container -->
+  <text x="234" y="298" font-family="monospace" font-weight="bold" font-size="22" fill="#E0E7FF">&gt;_</text>
+  <!-- Base platform -->
+  <rect x="116" y="328" width="280" height="12" rx="6" fill="#4338CA"/>
+  <!-- Wave/water below -->
+  <path d="M80,370 Q140,350 200,370 Q260,390 320,370 Q380,350 440,370" fill="none" stroke="#6366F1" stroke-width="4" opacity="0.4"/>
+  <path d="M60,390 Q120,370 180,390 Q240,410 300,390 Q360,370 420,390 Q460,370 480,390" fill="none" stroke="#6366F1" stroke-width="3" opacity="0.25"/>
+  <!-- Flag pole on top -->
+  <line x1="256" y1="130" x2="256" y2="200" stroke="#A5B4FC" stroke-width="3"/>
+  <!-- Flag -->
+  <polygon points="260,130 310,148 260,166" fill="#A5B4FC"/>
+  <!-- A on flag -->
+  <text x="268" y="156" font-family="sans-serif" font-weight="bold" font-size="20" fill="#1E1B4B">A</text>
+</svg>

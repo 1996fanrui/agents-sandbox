@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Play button inside shield: run with confidence -->
+  <defs>
+    <linearGradient id="g23" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#16A34A"/>
+    </linearGradient>
+    <linearGradient id="g23b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E3A2F"/>
+      <stop offset="100%" stop-color="#0A1F15"/>
+    </linearGradient>
+  </defs>
+  <!-- Shield -->
+  <path d="M256 40 L450 116 L450 288 Q450 416 256 480 Q62 416 62 288 L62 116 Z"
+        fill="url(#g23b)" stroke="url(#g23)" stroke-width="6"/>
+  <!-- Inner shield -->
+  <path d="M256 70 L422 136 L422 278 Q422 392 256 450 Q90 392 90 278 L90 136 Z"
+        fill="none" stroke="#22C55E" stroke-width="2" opacity="0.2"/>
+  <!-- Play triangle -->
+  <polygon points="210,160 210,360 370,260" fill="url(#g23)" opacity="0.9"/>
+  <!-- Inner triangle cutout effect -->
+  <polygon points="230,190 230,330 340,260" fill="#0A1F15" opacity="0.3"/>
+  <!-- Subtle grid on shield -->
+  <line x1="256" y1="70" x2="256" y2="450" stroke="#22C55E" stroke-width="1" opacity="0.08"/>
+  <line x1="90" y1="260" x2="422" y2="260" stroke="#22C55E" stroke-width="1" opacity="0.08"/>
+</svg>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Portal/gateway: agent steps through to isolated world -->
+  <defs>
+    <linearGradient id="g19" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#6D28D9"/>
+    </linearGradient>
+    <radialGradient id="g19r" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#C4B5FD"/>
+      <stop offset="40%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#1E1B4B"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#0C0A1D"/>
+  <!-- Portal ring -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="url(#g19)" stroke-width="12"/>
+  <circle cx="256" cy="256" r="155" fill="none" stroke="#A78BFA" stroke-width="2" opacity="0.4"/>
+  <circle cx="256" cy="256" r="185" fill="none" stroke="#7C3AED" stroke-width="2" opacity="0.3"/>
+  <!-- Portal inner glow -->
+  <circle cx="256" cy="256" r="145" fill="url(#g19r)" opacity="0.6"/>
+  <!-- Swirl effect -->
+  <path d="M256,120 Q340,180 300,256 Q260,332 256,392" fill="none" stroke="#C4B5FD" stroke-width="2" opacity="0.3"/>
+  <path d="M160,180 Q220,220 256,256 Q292,292 352,332" fill="none" stroke="#C4B5FD" stroke-width="2" opacity="0.3"/>
+  <path d="M140,256 Q190,230 256,256 Q322,282 372,256" fill="none" stroke="#C4B5FD" stroke-width="2" opacity="0.25"/>
+  <!-- Agent figure stepping through -->
+  <!-- Head -->
+  <circle cx="256" cy="216" r="22" fill="#E0E7FF"/>
+  <!-- Body -->
+  <line x1="256" y1="238" x2="256" y2="300" stroke="#E0E7FF" stroke-width="6" stroke-linecap="round"/>
+  <!-- Arms -->
+  <line x1="256" y1="260" x2="224" y2="245" stroke="#E0E7FF" stroke-width="5" stroke-linecap="round"/>
+  <line x1="256" y1="260" x2="288" y2="245" stroke="#E0E7FF" stroke-width="5" stroke-linecap="round"/>
+  <!-- Legs -->
+  <line x1="256" y1="300" x2="236" y2="340" stroke="#E0E7FF" stroke-width="5" stroke-linecap="round"/>
+  <line x1="256" y1="300" x2="276" y2="340" stroke="#E0E7FF" stroke-width="5" stroke-linecap="round"/>
+  <!-- Energy particles -->
+  <circle cx="180" cy="160" r="3" fill="#C4B5FD" opacity="0.6"/>
+  <circle cx="340" cy="170" r="4" fill="#C4B5FD" opacity="0.5"/>
+  <circle cx="150" cy="300" r="3" fill="#C4B5FD" opacity="0.4"/>
+  <circle cx="360" cy="330" r="3" fill="#C4B5FD" opacity="0.5"/>
+  <circle cx="200" cy="380" r="2" fill="#C4B5FD" opacity="0.3"/>
+  <circle cx="320" cy="140" r="2" fill="#C4B5FD" opacity="0.4"/>
+</svg>

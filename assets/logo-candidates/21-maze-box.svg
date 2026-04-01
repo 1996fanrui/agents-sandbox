@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Maze/labyrinth boundary with agent at center -->
+  <defs>
+    <linearGradient id="g21" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#EC4899"/>
+      <stop offset="100%" stop-color="#DB2777"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#1A0A14"/>
+  <!-- Maze walls (concentric with gaps) -->
+  <!-- Layer 1 -->
+  <path d="M80,80 L432,80 L432,432 L80,432 Z" fill="none" stroke="#EC4899" stroke-width="4" opacity="0.25"/>
+  <!-- Layer 2 -->
+  <path d="M120,120 L392,120 L392,392 L120,392 L120,200" fill="none" stroke="#EC4899" stroke-width="4" opacity="0.35"/>
+  <path d="M120,240 L120,120" fill="none" stroke="none"/>
+  <!-- Gap in layer 2 top -->
+  <!-- Layer 3 -->
+  <path d="M160,160 L352,160 L352,352 L160,352 L160,280" fill="none" stroke="#EC4899" stroke-width="4" opacity="0.5"/>
+  <!-- Layer 4 -->
+  <path d="M200,200 L312,200 L312,312 L200,312 L200,200" fill="none" stroke="#F472B6" stroke-width="4" opacity="0.7"/>
+  <!-- Agent core -->
+  <rect x="220" y="220" width="72" height="72" rx="12" fill="url(#g21)"/>
+  <text x="228" y="268" font-family="monospace" font-weight="bold" font-size="32" fill="#FDF2F8">&gt;_</text>
+  <!-- Path trace from outside to agent -->
+  <path d="M80,200 L120,200 L120,280 L160,280 L160,240 L200,240 L200,256 L220,256"
+        fill="none" stroke="#34D399" stroke-width="3" stroke-dasharray="8,4" opacity="0.6"/>
+  <!-- Green dot at entry -->
+  <circle cx="80" cy="200" r="6" fill="#34D399"/>
+</svg>

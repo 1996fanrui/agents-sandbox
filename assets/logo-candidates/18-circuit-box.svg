@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Circuit board pattern forming a box -->
+  <defs>
+    <linearGradient id="g18" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#14B8A6"/>
+      <stop offset="100%" stop-color="#0D9488"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#042F2E"/>
+  <!-- Main box -->
+  <rect x="120" y="120" width="272" height="272" rx="16" fill="none" stroke="url(#g18)" stroke-width="5"/>
+  <!-- Circuit traces going outward from box -->
+  <!-- Top -->
+  <path d="M200,120 L200,80 L160,80" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="160" cy="80" r="5" fill="#14B8A6" opacity="0.6"/>
+  <path d="M280,120 L280,60" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="280" cy="60" r="5" fill="#14B8A6" opacity="0.5"/>
+  <path d="M340,120 L340,90 L400,90" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.4"/>
+  <circle cx="400" cy="90" r="5" fill="#14B8A6" opacity="0.4"/>
+  <!-- Bottom -->
+  <path d="M200,392 L200,440 L140,440" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="140" cy="440" r="5" fill="#14B8A6" opacity="0.5"/>
+  <path d="M320,392 L320,450" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="320" cy="450" r="5" fill="#14B8A6" opacity="0.6"/>
+  <!-- Left -->
+  <path d="M120,200 L70,200" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="70" cy="200" r="5" fill="#14B8A6" opacity="0.5"/>
+  <path d="M120,300 L80,300 L80,340" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.4"/>
+  <circle cx="80" cy="340" r="5" fill="#14B8A6" opacity="0.4"/>
+  <!-- Right -->
+  <path d="M392,220 L440,220 L440,180" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="440" cy="180" r="5" fill="#14B8A6" opacity="0.5"/>
+  <path d="M392,320 L450,320" stroke="#14B8A6" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <circle cx="450" cy="320" r="5" fill="#14B8A6" opacity="0.6"/>
+  <!-- Inner chip / agent core -->
+  <rect x="200" y="200" width="112" height="112" rx="8" fill="#0F766E" stroke="#5EEAD4" stroke-width="2"/>
+  <!-- Agent symbol -->
+  <text x="220" y="270" font-family="monospace" font-weight="bold" font-size="48" fill="#5EEAD4">AI</text>
+  <!-- Pin connections from inner to outer box -->
+  <line x1="200" y1="240" x2="120" y2="240" stroke="#2DD4BF" stroke-width="2" opacity="0.3"/>
+  <line x1="312" y1="240" x2="392" y2="240" stroke="#2DD4BF" stroke-width="2" opacity="0.3"/>
+  <line x1="256" y1="200" x2="256" y2="120" stroke="#2DD4BF" stroke-width="2" opacity="0.3"/>
+  <line x1="256" y1="312" x2="256" y2="392" stroke="#2DD4BF" stroke-width="2" opacity="0.3"/>
+</svg>

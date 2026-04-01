@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Hourglass/sandbox: sand flowing inside contained space -->
+  <defs>
+    <linearGradient id="g20" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="g20b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#0C1322"/>
+  <!-- Top cap -->
+  <rect x="140" y="72" width="232" height="20" rx="10" fill="url(#g20b)"/>
+  <!-- Bottom cap -->
+  <rect x="140" y="420" width="232" height="20" rx="10" fill="url(#g20b)"/>
+  <!-- Hourglass shape -->
+  <path d="M160,92 L160,200 Q160,256 256,256 Q160,256 160,312 L160,420 L352,420 L352,312 Q352,256 256,256 Q352,256 352,200 L352,92 Z"
+        fill="#1E3A5F" stroke="#60A5FA" stroke-width="3"/>
+  <!-- Sand in top -->
+  <path d="M180,92 L180,180 Q180,220 256,240 Q332,220 332,180 L332,92 Z" fill="url(#g20)" opacity="0.3"/>
+  <!-- Sand in bottom (accumulated) -->
+  <path d="M180,420 L180,360 Q180,340 256,330 Q332,340 332,360 L332,420 Z" fill="url(#g20)" opacity="0.7"/>
+  <!-- Falling sand stream -->
+  <line x1="256" y1="240" x2="256" y2="330" stroke="#F59E0B" stroke-width="3" opacity="0.6"/>
+  <!-- Sand particles -->
+  <circle cx="252" cy="270" r="2" fill="#FBBF24" opacity="0.7"/>
+  <circle cx="260" cy="290" r="2" fill="#FBBF24" opacity="0.6"/>
+  <circle cx="254" cy="310" r="2" fill="#FBBF24" opacity="0.5"/>
+  <!-- Agent symbol in bottom sand area -->
+  <text x="228" y="405" font-family="monospace" font-weight="bold" font-size="28" fill="#FBBF24">&gt;_</text>
+  <!-- Data flow arrows on sides -->
+  <path d="M120,180 L120,332" fill="none" stroke="#3B82F6" stroke-width="2" opacity="0.3" stroke-dasharray="4,4"/>
+  <path d="M392,180 L392,332" fill="none" stroke="#3B82F6" stroke-width="2" opacity="0.3" stroke-dasharray="4,4"/>
+</svg>

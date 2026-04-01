@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Isometric stacked layers: host > isolation > sandbox -->
+  <defs>
+    <linearGradient id="g15a" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#64748B"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <linearGradient id="g15b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="g15c" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#0F172A"/>
+  <!-- Bottom layer: host (gray, safe) -->
+  <polygon points="256,360 420,280 420,320 256,400 92,320 92,280" fill="url(#g15a)" opacity="0.6"/>
+  <polygon points="256,280 420,200 420,280 256,360 92,280 92,200" fill="#64748B" opacity="0.3"/>
+  <!-- Label -->
+  <text x="216" y="345" font-family="sans-serif" font-size="18" fill="#94A3B8" font-weight="bold">HOST</text>
+  <!-- Middle layer: isolation (amber, barrier) -->
+  <polygon points="256,280 390,212 390,242 256,310 122,242 122,212" fill="url(#g15b)" opacity="0.7"/>
+  <polygon points="256,212 390,144 390,212 256,280 122,212 122,144" fill="#F59E0B" opacity="0.2"/>
+  <!-- Dashed border -->
+  <polygon points="256,212 390,144 390,212 256,280 122,212 122,144" fill="none" stroke="#FBBF24" stroke-width="2" stroke-dasharray="8,4" opacity="0.6"/>
+  <!-- Top layer: sandbox (blue, active) -->
+  <polygon points="256,200 360,148 360,172 256,224 152,172 152,148" fill="url(#g15c)"/>
+  <polygon points="256,148 360,96 360,148 256,200 152,148 152,96" fill="#60A5FA" opacity="0.8"/>
+  <!-- Terminal cursor on top layer -->
+  <text x="232" y="162" font-family="monospace" font-weight="bold" font-size="28" fill="#DBEAFE">&gt;_</text>
+</svg>
