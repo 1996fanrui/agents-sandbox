@@ -56,8 +56,8 @@ const (
 	SandboxEventTypeExecFinished           SandboxEventType = SandboxEventType(agboxv1.EventType_EXEC_FINISHED)
 	SandboxEventTypeExecFailed             SandboxEventType = SandboxEventType(agboxv1.EventType_EXEC_FAILED)
 	SandboxEventTypeExecCancelled          SandboxEventType = SandboxEventType(agboxv1.EventType_EXEC_CANCELLED)
-	SandboxEventTypeSandboxServiceReady    SandboxEventType = SandboxEventType(agboxv1.EventType_SANDBOX_SERVICE_READY)
-	SandboxEventTypeSandboxServiceFailed   SandboxEventType = SandboxEventType(agboxv1.EventType_SANDBOX_SERVICE_FAILED)
+	SandboxEventTypeCompanionContainerReady  SandboxEventType = SandboxEventType(agboxv1.EventType_COMPANION_CONTAINER_READY)
+	SandboxEventTypeCompanionContainerFailed SandboxEventType = SandboxEventType(agboxv1.EventType_COMPANION_CONTAINER_FAILED)
 )
 
 // PingInfo is the public ping response type.
@@ -66,7 +66,7 @@ type PingInfo struct {
 	Daemon  string
 }
 
-// HealthcheckConfig is the public service healthcheck type.
+// HealthcheckConfig is the public companion container healthcheck type.
 type HealthcheckConfig struct {
 	Test          []string
 	Interval      *time.Duration
@@ -76,8 +76,8 @@ type HealthcheckConfig struct {
 	StartInterval *time.Duration
 }
 
-// ServiceSpec is the public service declaration type.
-type ServiceSpec struct {
+// CompanionContainerSpec is the public companion container declaration type.
+type CompanionContainerSpec struct {
 	Name               string
 	Image              string
 	Envs               map[string]string
@@ -101,17 +101,16 @@ type CopySpec struct {
 
 // SandboxHandle is the public sandbox state snapshot.
 type SandboxHandle struct {
-	SandboxID         string
-	State             SandboxState
-	LastEventSequence uint64
-	RequiredServices  []ServiceSpec
-	OptionalServices  []ServiceSpec
-	Labels            map[string]string
-	CreatedAt         time.Time
-	Image             string
-	ErrorCode         *string
-	ErrorMessage      *string
-	StateChangedAt    *time.Time
+	SandboxID           string
+	State               SandboxState
+	LastEventSequence   uint64
+	CompanionContainers []CompanionContainerSpec
+	Labels              map[string]string
+	CreatedAt           time.Time
+	Image               string
+	ErrorCode           *string
+	ErrorMessage        *string
+	StateChangedAt      *time.Time
 }
 
 // DeleteSandboxesResult is the public bulk delete result.
@@ -152,26 +151,26 @@ type ExecEventDetails struct {
 	ErrorMessage *string
 }
 
-// ServiceEventDetails holds details for service lifecycle events.
-type ServiceEventDetails struct {
-	ServiceName  string
+// CompanionContainerEventDetails holds details for companion container lifecycle events.
+type CompanionContainerEventDetails struct {
+	Name         string
 	ErrorCode    *string
 	ErrorMessage *string
 }
 
 // SandboxEvent is the public sandbox event type.
 type SandboxEvent struct {
-	EventID      string
-	Sequence     uint64
-	SandboxID    string
-	EventType    SandboxEventType
-	OccurredAt   time.Time
-	Replay       bool
-	Snapshot     bool
-	SandboxState *SandboxState
-	SandboxPhase *SandboxPhaseDetails
-	Exec         *ExecEventDetails
-	Service      *ServiceEventDetails
+	EventID            string
+	Sequence           uint64
+	SandboxID          string
+	EventType          SandboxEventType
+	OccurredAt         time.Time
+	Replay             bool
+	Snapshot           bool
+	SandboxState       *SandboxState
+	SandboxPhase       *SandboxPhaseDetails
+	Exec               *ExecEventDetails
+	CompanionContainer *CompanionContainerEventDetails
 }
 
 // EventOrError is the channel item exposed by SubscribeSandboxEvents.
@@ -201,17 +200,16 @@ func toSandboxHandle(handle *agboxv1.SandboxHandle) (SandboxHandle, error) {
 		stateChangedAt = &t
 	}
 	return SandboxHandle{
-		SandboxID:         handle.GetSandboxId(),
-		State:             SandboxState(handle.GetState()),
-		LastEventSequence: handle.GetLastEventSequence(),
-		RequiredServices:  toServices(handle.GetRequiredServices()),
-		OptionalServices:  toServices(handle.GetOptionalServices()),
-		Labels:            cloneStringMap(handle.GetLabels()),
-		CreatedAt:         createdAt,
-		Image:             handle.GetImage(),
-		ErrorCode:         emptyStringPtr(handle.GetErrorCode()),
-		ErrorMessage:      emptyStringPtr(handle.GetErrorMessage()),
-		StateChangedAt:    stateChangedAt,
+		SandboxID:           handle.GetSandboxId(),
+		State:               SandboxState(handle.GetState()),
+		LastEventSequence:   handle.GetLastEventSequence(),
+		CompanionContainers: toCompanionContainers(handle.GetCompanionContainers()),
+		Labels:              cloneStringMap(handle.GetLabels()),
+		CreatedAt:           createdAt,
+		Image:               handle.GetImage(),
+		ErrorCode:           emptyStringPtr(handle.GetErrorCode()),
+		ErrorMessage:        emptyStringPtr(handle.GetErrorMessage()),
+		StateChangedAt:      stateChangedAt,
 	}, nil
 }
 
@@ -297,12 +295,12 @@ func toSandboxEvent(event *agboxv1.SandboxEvent) (SandboxEvent, error) {
 				ErrorMessage: emptyStringPtr(d.Exec.GetErrorMessage()),
 			}
 		}
-	case *agboxv1.SandboxEvent_Service:
-		if d != nil && d.Service != nil {
-			result.Service = &ServiceEventDetails{
-				ServiceName:  d.Service.GetServiceName(),
-				ErrorCode:    emptyStringPtr(d.Service.GetErrorCode()),
-				ErrorMessage: emptyStringPtr(d.Service.GetErrorMessage()),
+	case *agboxv1.SandboxEvent_CompanionContainer:
+		if d != nil && d.CompanionContainer != nil {
+			result.CompanionContainer = &CompanionContainerEventDetails{
+				Name:         d.CompanionContainer.GetName(),
+				ErrorCode:    emptyStringPtr(d.CompanionContainer.GetErrorCode()),
+				ErrorMessage: emptyStringPtr(d.CompanionContainer.GetErrorMessage()),
 			}
 		}
 	}
@@ -326,8 +324,8 @@ func toProtoCopy(spec CopySpec) *agboxv1.CopySpec {
 	}
 }
 
-func toProtoService(spec ServiceSpec) *agboxv1.ServiceSpec {
-	return &agboxv1.ServiceSpec{
+func toProtoCompanionContainer(spec CompanionContainerSpec) *agboxv1.CompanionContainerSpec {
+	return &agboxv1.CompanionContainerSpec{
 		Name:               spec.Name,
 		Image:              spec.Image,
 		Envs:               cloneStringMap(spec.Envs),
@@ -359,13 +357,13 @@ func toProtoHealthcheck(config *HealthcheckConfig) *agboxv1.HealthcheckConfig {
 	return result
 }
 
-func toServices(specs []*agboxv1.ServiceSpec) []ServiceSpec {
-	result := make([]ServiceSpec, 0, len(specs))
+func toCompanionContainers(specs []*agboxv1.CompanionContainerSpec) []CompanionContainerSpec {
+	result := make([]CompanionContainerSpec, 0, len(specs))
 	for _, spec := range specs {
 		if spec == nil {
 			continue
 		}
-		result = append(result, ServiceSpec{
+		result = append(result, CompanionContainerSpec{
 			Name:               spec.GetName(),
 			Image:              spec.GetImage(),
 			Envs:               cloneStringMap(spec.GetEnvs()),

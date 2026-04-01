@@ -158,11 +158,11 @@ func hasActiveExec(record *sandboxRecord) bool {
 	return false
 }
 
-func drainAvailableRuntimeServiceStatuses(statuses <-chan runtimeServiceStatus) ([]runtimeServiceStatus, bool) {
+func drainAvailableCompanionContainerStatuses(statuses <-chan companionContainerStatus) ([]companionContainerStatus, bool) {
 	if statuses == nil {
 		return nil, false
 	}
-	drained := make([]runtimeServiceStatus, 0)
+	drained := make([]companionContainerStatus, 0)
 	for {
 		select {
 		case statusValue, ok := <-statuses:
@@ -176,15 +176,15 @@ func drainAvailableRuntimeServiceStatuses(statuses <-chan runtimeServiceStatus) 
 	}
 }
 
-func (s *Service) completeOptionalServiceCreate(sandboxID string, statuses <-chan runtimeServiceStatus) {
-	for serviceStatus := range statuses {
+func (s *Service) completeCompanionContainerStartup(sandboxID string, statuses <-chan companionContainerStatus) {
+	for containerStatus := range statuses {
 		s.mu.Lock()
 		record, ok := s.boxes[sandboxID]
 		if !ok || record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
 			s.mu.Unlock()
 			continue
 		}
-		if err := s.appendServiceEventsLocked(record, []runtimeServiceStatus{serviceStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY); err != nil {
+		if err := s.appendCompanionContainerEventsLocked(record, []companionContainerStatus{containerStatus}, agboxv1.SandboxState_SANDBOX_STATE_READY); err != nil {
 			logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
 			s.mu.Unlock()
 			return
@@ -193,22 +193,22 @@ func (s *Service) completeOptionalServiceCreate(sandboxID string, statuses <-cha
 	}
 }
 
-func (s *Service) appendServiceEventsLocked(record *sandboxRecord, statuses []runtimeServiceStatus, sandboxState agboxv1.SandboxState) error {
-	for _, serviceStatus := range statuses {
-		if serviceStatus.Ready {
-			if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_READY, eventMutation{
-				serviceName:  serviceStatus.Name,
-				sandboxState: sandboxState,
+func (s *Service) appendCompanionContainerEventsLocked(record *sandboxRecord, statuses []companionContainerStatus, sandboxState agboxv1.SandboxState) error {
+	for _, containerStatus := range statuses {
+		if containerStatus.Ready {
+			if err := s.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_READY, eventMutation{
+				companionContainerName: containerStatus.Name,
+				sandboxState:           sandboxState,
 			}); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_FAILED, eventMutation{
-			serviceName:  serviceStatus.Name,
-			errorCode:    "SANDBOX_SERVICE_FAILED",
-			errorMessage: serviceStatus.Message,
-			sandboxState: sandboxState,
+		if err := s.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
+			companionContainerName: containerStatus.Name,
+			errorCode:              "COMPANION_CONTAINER_FAILED",
+			errorMessage:           containerStatus.Message,
+			sandboxState:           sandboxState,
 		}); err != nil {
 			return err
 		}
@@ -241,10 +241,10 @@ func (s *Service) appendEventLocked(record *sandboxRecord, eventType agboxv1.Eve
 				ErrorMessage: mutation.errorMessage,
 			},
 		}
-	case mutation.serviceName != "":
-		event.Details = &agboxv1.SandboxEvent_Service{
-			Service: &agboxv1.ServiceEventDetails{
-				ServiceName:  mutation.serviceName,
+	case mutation.companionContainerName != "":
+		event.Details = &agboxv1.SandboxEvent_CompanionContainer{
+			CompanionContainer: &agboxv1.CompanionContainerEventDetails{
+				Name:         mutation.companionContainerName,
 				ErrorCode:    mutation.errorCode,
 				ErrorMessage: mutation.errorMessage,
 			},
@@ -418,18 +418,16 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 		// Build the record with nextSequence set before any event append.
 		record := &sandboxRecord{
 			handle: &agboxv1.SandboxHandle{
-				SandboxId:         sandboxID,
-				State:             persistedState,
-				LastEventSequence: events[len(events)-1].GetSequence(),
-				Labels:            cloneStringMap(createSpec.GetLabels()),
-				RequiredServices:  cloneServiceSpecs(createSpec.GetRequiredServices()),
-				OptionalServices:  cloneServiceSpecs(createSpec.GetOptionalServices()),
-				CreatedAt:         createdAt,
-				Image:             createSpec.GetImage(),
+				SandboxId:           sandboxID,
+				State:               persistedState,
+				LastEventSequence:   events[len(events)-1].GetSequence(),
+				Labels:              cloneStringMap(createSpec.GetLabels()),
+				CompanionContainers: cloneCompanionContainerSpecs(createSpec.GetCompanionContainers()),
+				CreatedAt:           createdAt,
+				Image:               createSpec.GetImage(),
 			},
 			createSpec:                cloneCreateSpec(createSpec),
-			requiredServices:          cloneServiceSpecs(createSpec.GetRequiredServices()),
-			optionalServices:          cloneServiceSpecs(createSpec.GetOptionalServices()),
+			companionContainers:       cloneCompanionContainerSpecs(createSpec.GetCompanionContainers()),
 			events:                    events,
 			execs:                     make(map[string]*agboxv1.ExecStatus),
 			execCancel:                make(map[string]context.CancelFunc),
@@ -461,25 +459,17 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 		// Build runtime state for non-terminal sandboxes.
 		if persistedState != agboxv1.SandboxState_SANDBOX_STATE_DELETED &&
 			persistedState != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
-			serviceContainers := make([]runtimeServiceContainer, 0, len(createSpec.GetRequiredServices())+len(createSpec.GetOptionalServices()))
-			for _, svc := range createSpec.GetRequiredServices() {
-				serviceContainers = append(serviceContainers, runtimeServiceContainer{
-					Name:          svc.GetName(),
-					ContainerName: dockerServiceContainerName(sandboxID, svc.GetName()),
-					Required:      true,
-				})
-			}
-			for _, svc := range createSpec.GetOptionalServices() {
-				serviceContainers = append(serviceContainers, runtimeServiceContainer{
-					Name:          svc.GetName(),
-					ContainerName: dockerServiceContainerName(sandboxID, svc.GetName()),
-					Required:      false,
+			companionContainers := make([]runtimeCompanionContainer, 0, len(createSpec.GetCompanionContainers()))
+			for _, cc := range createSpec.GetCompanionContainers() {
+				companionContainers = append(companionContainers, runtimeCompanionContainer{
+					Name:          cc.GetName(),
+					ContainerName: dockerCompanionContainerName(sandboxID, cc.GetName()),
 				})
 			}
 			record.runtimeState = &sandboxRuntimeState{
-				NetworkName:          dockerNetworkName(sandboxID),
-				PrimaryContainerName: dockerPrimaryContainerName(sandboxID),
-				ServiceContainers:    serviceContainers,
+				NetworkName:           dockerNetworkName(sandboxID),
+				PrimaryContainerName:  dockerPrimaryContainerName(sandboxID),
+				CompanionContainers:   companionContainers,
 			}
 		}
 

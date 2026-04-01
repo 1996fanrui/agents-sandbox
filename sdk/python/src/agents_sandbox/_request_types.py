@@ -6,7 +6,7 @@ import datetime
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .types import CopySpec, MountSpec, ServiceSpec
+from .types import CompanionContainerSpec, CopySpec, MountSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,8 +15,7 @@ class CreateSandboxSpec:
     mounts: tuple[MountSpec, ...] = ()
     copies: tuple[CopySpec, ...] = ()
     builtin_tools: tuple[str, ...] = ()
-    required_services: tuple[ServiceSpec, ...] = ()
-    optional_services: tuple[ServiceSpec, ...] = ()
+    companion_containers: tuple[CompanionContainerSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
     envs: Mapping[str, str] = field(default_factory=dict)
     idle_ttl: datetime.timedelta | None = None

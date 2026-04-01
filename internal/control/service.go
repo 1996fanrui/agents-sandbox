@@ -76,8 +76,7 @@ type execArtifactPaths struct {
 type sandboxRecord struct {
 	handle                    *agboxv1.SandboxHandle
 	createSpec                *agboxv1.CreateSpec
-	requiredServices          []*agboxv1.ServiceSpec
-	optionalServices          []*agboxv1.ServiceSpec
+	companionContainers       []*agboxv1.CompanionContainerSpec
 	runtimeState              *sandboxRuntimeState
 	events                    []*agboxv1.SandboxEvent
 	execs                     map[string]*agboxv1.ExecStatus
@@ -88,15 +87,15 @@ type sandboxRecord struct {
 }
 
 type eventMutation struct {
-	phase        string
-	serviceName  string
-	errorCode    string
-	errorMessage string
-	reason       string
-	execID       string
-	exitCode     int32
-	sandboxState agboxv1.SandboxState
-	execState    agboxv1.ExecState
+	phase                  string
+	companionContainerName string
+	errorCode              string
+	errorMessage           string
+	reason                 string
+	execID                 string
+	exitCode               int32
+	sandboxState           agboxv1.SandboxState
+	execState              agboxv1.ExecState
 }
 
 var callerProvidedIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{2,198}[a-zA-Z0-9]$`)
@@ -201,19 +200,17 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	}
 	record := &sandboxRecord{
 		handle: &agboxv1.SandboxHandle{
-			SandboxId:        sandboxID,
-			State:            agboxv1.SandboxState_SANDBOX_STATE_PENDING,
-			Labels:           cloneStringMap(req.GetCreateSpec().GetLabels()),
-			RequiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
-			OptionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
-			CreatedAt:        timestamppb.Now(),
-			Image:            req.GetCreateSpec().GetImage(),
+			SandboxId:           sandboxID,
+			State:               agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+			Labels:              cloneStringMap(req.GetCreateSpec().GetLabels()),
+			CompanionContainers: cloneCompanionContainerSpecs(req.GetCreateSpec().GetCompanionContainers()),
+			CreatedAt:           timestamppb.Now(),
+			Image:               req.GetCreateSpec().GetImage(),
 		},
-		createSpec:       cloneCreateSpec(req.GetCreateSpec()),
-		requiredServices: cloneServiceSpecs(req.GetCreateSpec().GetRequiredServices()),
-		optionalServices: cloneServiceSpecs(req.GetCreateSpec().GetOptionalServices()),
-		execs:      make(map[string]*agboxv1.ExecStatus),
-		execCancel: make(map[string]context.CancelFunc),
+		createSpec:          cloneCreateSpec(req.GetCreateSpec()),
+		companionContainers: cloneCompanionContainerSpecs(req.GetCreateSpec().GetCompanionContainers()),
+		execs:               make(map[string]*agboxv1.ExecStatus),
+		execCancel:           make(map[string]context.CancelFunc),
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,

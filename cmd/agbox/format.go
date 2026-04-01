@@ -143,11 +143,7 @@ func formatSandboxListTable(handles []*agboxv1.SandboxHandle) string {
 }
 
 func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
-	requiredServices, err := formatServiceSpecsJSON(handle.GetRequiredServices())
-	if err != nil {
-		return "", err
-	}
-	optionalServices, err := formatServiceSpecsJSON(handle.GetOptionalServices())
+	companionContainers, err := formatCompanionContainersJSON(handle.GetCompanionContainers())
 	if err != nil {
 		return "", err
 	}
@@ -170,8 +166,7 @@ func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
 	_, _ = fmt.Fprintf(&builder, "state_changed_at=%s\n", stateChangedAt)
 	_, _ = fmt.Fprintf(&builder, "last_event_sequence=%d\n", handle.GetLastEventSequence())
 	_, _ = fmt.Fprintf(&builder, "labels=%s\n", formatStringMapJSON(handle.GetLabels()))
-	_, _ = fmt.Fprintf(&builder, "required_services=%s\n", requiredServices)
-	_, _ = fmt.Fprintf(&builder, "optional_services=%s\n", optionalServices)
+	_, _ = fmt.Fprintf(&builder, "companion_containers=%s\n", companionContainers)
 	if handle.GetErrorCode() != "" {
 		_, _ = fmt.Fprintf(&builder, "error_code=%s\n", handle.GetErrorCode())
 		_, _ = fmt.Fprintf(&builder, "error_message=%s\n", handle.GetErrorMessage())
@@ -179,18 +174,18 @@ func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
 	return builder.String(), nil
 }
 
-func formatServiceSpecsJSON(services []*agboxv1.ServiceSpec) (string, error) {
-	if len(services) == 0 {
+func formatCompanionContainersJSON(containers []*agboxv1.CompanionContainerSpec) (string, error) {
+	if len(containers) == 0 {
 		return "[]", nil
 	}
 
 	var builder strings.Builder
 	builder.WriteByte('[')
-	for index, service := range services {
+	for index, cc := range containers {
 		if index > 0 {
 			builder.WriteByte(',')
 		}
-		data, err := compactProtoJSONOptions.Marshal(service)
+		data, err := compactProtoJSONOptions.Marshal(cc)
 		if err != nil {
 			return "", err
 		}

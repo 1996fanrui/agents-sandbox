@@ -78,12 +78,8 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 		return
 	}
 	record.runtimeState = result.RuntimeState
-	if err := s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
-		logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
-		return
-	}
-	optionalStatuses, optionalStatusesOpen := drainAvailableRuntimeServiceStatuses(result.OptionalServiceStatuses)
-	if err := s.appendServiceEventsLocked(record, optionalStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
+	companionStatuses, companionStatusesOpen := drainAvailableCompanionContainerStatuses(result.CompanionContainerStatuses)
+	if err := s.appendCompanionContainerEventsLocked(record, companionStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
 		logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
 		return
 	}
@@ -95,8 +91,8 @@ func (s *Service) completeSandboxCreate(sandboxID string) {
 	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_READY
 	s.config.Logger.Info("sandbox ready", slog.String("sandbox_id", sandboxID))
-	if optionalStatusesOpen {
-		go s.completeOptionalServiceCreate(sandboxID, result.OptionalServiceStatuses)
+	if companionStatusesOpen {
+		go s.completeCompanionContainerStartup(sandboxID, result.CompanionContainerStatuses)
 	}
 }
 
@@ -132,7 +128,7 @@ func (s *Service) completeSandboxResume(sandboxID string) {
 		s.config.Logger.Warn("sandbox failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
 		return
 	}
-	if err := s.appendServiceEventsLocked(record, result.ServiceStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
+	if err := s.appendCompanionContainerEventsLocked(record, result.CompanionContainerStatuses, agboxv1.SandboxState_SANDBOX_STATE_PENDING); err != nil {
 		logAsyncEventAppendFailure(s.config.Logger, sandboxID, agboxv1.EventType_EVENT_TYPE_UNSPECIFIED, err)
 		return
 	}

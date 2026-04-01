@@ -16,7 +16,7 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 		return errors.New("idle_ttl must not be negative")
 	}
 	targets := make(map[string]string)
-	seenServiceNames := make(map[string]struct{}, len(spec.GetRequiredServices())+len(spec.GetOptionalServices()))
+	seenNames := make(map[string]struct{}, len(spec.GetCompanionContainers()))
 	registerTarget := func(kind string, target string) error {
 		if target == "" {
 			return fmt.Errorf("%s target is required", kind)
@@ -52,10 +52,7 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return err
 		}
 	}
-	if err := validateServiceSpecs(spec.GetRequiredServices(), true, seenServiceNames); err != nil {
-		return err
-	}
-	if err := validateServiceSpecs(spec.GetOptionalServices(), false, seenServiceNames); err != nil {
+	if err := validateCompanionContainerSpecs(spec.GetCompanionContainers(), seenNames); err != nil {
 		return err
 	}
 	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinTools()))
@@ -74,54 +71,51 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 	return nil
 }
 
-func validateServiceSpecs(items []*agboxv1.ServiceSpec, required bool, seen map[string]struct{}) error {
-	for _, service := range items {
-		if service.GetName() == "" {
-			return errors.New("service name is required")
+func validateCompanionContainerSpecs(items []*agboxv1.CompanionContainerSpec, seen map[string]struct{}) error {
+	for _, cc := range items {
+		if cc.GetName() == "" {
+			return errors.New("companion container name is required")
 		}
-		if service.GetImage() == "" {
-			return fmt.Errorf("service %q image is required", service.GetName())
+		if cc.GetImage() == "" {
+			return fmt.Errorf("companion container %q image is required", cc.GetName())
 		}
-		if _, exists := seen[service.GetName()]; exists {
-			return fmt.Errorf("duplicate service name %q", service.GetName())
+		if _, exists := seen[cc.GetName()]; exists {
+			return fmt.Errorf("duplicate companion container name %q", cc.GetName())
 		}
-		seen[service.GetName()] = struct{}{}
-		if required && service.GetHealthcheck() == nil {
-			return fmt.Errorf("required service %q must define healthcheck", service.GetName())
+		seen[cc.GetName()] = struct{}{}
+		if len(cc.GetPostStartOnPrimary()) > 0 && cc.GetHealthcheck() == nil {
+			return fmt.Errorf("companion container %q with post_start_on_primary must define healthcheck", cc.GetName())
 		}
-		if !required && len(service.GetPostStartOnPrimary()) > 0 && service.GetHealthcheck() == nil {
-			return fmt.Errorf("optional service %q with post_start_on_primary must define healthcheck", service.GetName())
-		}
-		if err := validateHealthcheck(service.GetName(), service.GetHealthcheck(), required); err != nil {
+		if err := validateHealthcheck(cc.GetName(), cc.GetHealthcheck()); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateHealthcheck(serviceName string, healthcheck *agboxv1.HealthcheckConfig, required bool) error {
+func validateHealthcheck(name string, healthcheck *agboxv1.HealthcheckConfig) error {
 	if healthcheck == nil {
 		return nil
 	}
 	if len(healthcheck.GetTest()) == 0 {
-		return fmt.Errorf("service %q healthcheck.test must not be empty", serviceName)
+		return fmt.Errorf("companion container %q healthcheck.test must not be empty", name)
 	}
 	command := healthcheck.GetTest()[0]
 	allowed := map[string]struct{}{
 		"CMD":       {},
 		"CMD-SHELL": {},
-	}
-	if !required {
-		allowed["NONE"] = struct{}{}
+		"NONE":      {},
 	}
 	if _, ok := allowed[command]; !ok {
-		return fmt.Errorf("service %q healthcheck.test[0] %q is invalid", serviceName, command)
+		return fmt.Errorf("companion container %q healthcheck.test[0] %q is invalid", name, command)
 	}
-	if command == "NONE" && len(healthcheck.GetTest()) > 1 {
-		return fmt.Errorf("service %q healthcheck.test must not include extra args when NONE is used", serviceName)
+	if command == "NONE" {
+		if len(healthcheck.GetTest()) > 1 {
+			return fmt.Errorf("companion container %q healthcheck.test must not include extra args when NONE is used", name)
+		}
 	}
 	if (command == "CMD" || command == "CMD-SHELL") && len(healthcheck.GetTest()) < 2 {
-		return fmt.Errorf("service %q healthcheck.test for %s must include a command", serviceName, command)
+		return fmt.Errorf("companion container %q healthcheck.test for %s must include a command", name, command)
 	}
 	// Duration fields use google.protobuf.Duration which is inherently valid when set.
 	return nil

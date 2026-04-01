@@ -26,7 +26,7 @@ class HealthcheckConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ServiceSpec:
+class CompanionContainerSpec:
     name: str
     image: str
     envs: Mapping[str, str] = field(default_factory=dict)
@@ -66,8 +66,8 @@ class ExecEventDetails:
 
 
 @dataclass(frozen=True, slots=True)
-class ServiceEventDetails:
-    service_name: str = ""
+class CompanionContainerEventDetails:
+    name: str = ""
     error_code: str | None = None
     error_message: str | None = None
 
@@ -84,7 +84,7 @@ class SandboxEvent:
     sandbox_state: SandboxState | None = None
     sandbox_phase: SandboxPhaseDetails | None = None
     exec: ExecEventDetails | None = None
-    service: ServiceEventDetails | None = None
+    companion_container: CompanionContainerEventDetails | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,8 +92,7 @@ class SandboxHandle:
     sandbox_id: str
     state: SandboxState
     last_event_sequence: int = 0
-    required_services: tuple[ServiceSpec, ...] = ()
-    optional_services: tuple[ServiceSpec, ...] = ()
+    companion_containers: tuple[CompanionContainerSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
     created_at: datetime | None = None
     image: str = ""
@@ -127,6 +126,8 @@ class ExecHandle:
 
 
 __all__ = [
+    "CompanionContainerEventDetails",
+    "CompanionContainerSpec",
     "CopySpec",
     "DeleteSandboxesResult",
     "ExecEventDetails",
@@ -137,6 +138,4 @@ __all__ = [
     "SandboxEvent",
     "SandboxHandle",
     "SandboxPhaseDetails",
-    "ServiceEventDetails",
-    "ServiceSpec",
 ]

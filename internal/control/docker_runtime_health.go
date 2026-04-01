@@ -11,11 +11,11 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-func (backend *dockerRuntimeBackend) dockerWaitRequiredServiceHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
+func (backend *dockerRuntimeBackend) dockerWaitCompanionContainerHealthy(ctx context.Context, name string, healthcheck *agboxv1.HealthcheckConfig) error {
 	if healthcheck == nil {
-		return fmt.Errorf("required service %s is missing healthcheck", name)
+		return fmt.Errorf("companion container %s is missing healthcheck", name)
 	}
-	upperBound, err := requiredServiceHealthWaitUpperBound(healthcheck)
+	upperBound, err := companionContainerHealthWaitUpperBound(healthcheck)
 	if err != nil {
 		return fmt.Errorf("compute health wait upper bound for %s: %w", name, err)
 	}
@@ -50,7 +50,7 @@ func (backend *dockerRuntimeBackend) dockerWaitRequiredServiceHealthy(ctx contex
 			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf(
-					"service %s did not become healthy within %s (status=%s failing_streak=%d last_log=%s)",
+					"companion container %s did not become healthy within %s (status=%s failing_streak=%d last_log=%s)",
 					name,
 					upperBound,
 					healthStatus,
@@ -62,7 +62,7 @@ func (backend *dockerRuntimeBackend) dockerWaitRequiredServiceHealthy(ctx contex
 	}
 }
 
-func requiredServiceHealthWaitUpperBound(healthcheck *agboxv1.HealthcheckConfig) (time.Duration, error) {
+func companionContainerHealthWaitUpperBound(healthcheck *agboxv1.HealthcheckConfig) (time.Duration, error) {
 	const (
 		defaultInterval      = 30 * time.Second
 		defaultTimeout       = 30 * time.Second

@@ -5,7 +5,7 @@ const LabelNamespace = "io.github.1996fanrui.agents-sandbox"
 const (
 	LabelSandboxID   = LabelNamespace + ".sandbox-id"
 	LabelComponent   = LabelNamespace + ".component"
-	LabelServiceName = LabelNamespace + ".service-name"
+	LabelCompanionContainerName = LabelNamespace + ".companion-container-name"
 	LabelProfile     = LabelNamespace + ".profile"
 	LabelUserPrefix  = LabelNamespace + ".user."
 )
@@ -19,11 +19,11 @@ func SandboxLabels(sandboxID string, profile string, userLabels map[string]strin
 	return withUserLabels(labels, userLabels)
 }
 
-func ServiceLabels(sandboxID string, serviceName string, userLabels map[string]string) map[string]string {
+func CompanionContainerLabels(sandboxID string, name string, userLabels map[string]string) map[string]string {
 	labels := map[string]string{
-		LabelSandboxID:   sandboxID,
-		LabelComponent:   "service",
-		LabelServiceName: serviceName,
+		LabelSandboxID:             sandboxID,
+		LabelComponent:             "companion",
+		LabelCompanionContainerName: name,
 	}
 	return withUserLabels(labels, userLabels)
 }

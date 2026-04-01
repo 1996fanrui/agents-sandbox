@@ -21,7 +21,7 @@ from agents_sandbox import (
     SandboxEventType,
     SandboxHandle,
     SandboxState,
-    ServiceSpec,
+    CompanionContainerSpec,
 )
 from agents_sandbox._generated import service_pb2
 from agents_sandbox.client import _resolve_default_socket_path
@@ -50,7 +50,7 @@ def test_package_root_exports_only_formal_client() -> None:
 
 
 def test_public_models_match_protocol_contract() -> None:
-    service = ServiceSpec(
+    cc = CompanionContainerSpec(
         name="postgres",
         image="postgres:16",
         envs={"POSTGRES_DB": "agents"},
@@ -64,10 +64,10 @@ def test_public_models_match_protocol_contract() -> None:
     mount = MountSpec(source="/tmp/workspace", target="/workspace", writable=True)
     copy = CopySpec(source="/tmp/source", target="/workspace/source", exclude_patterns=(".git",))
 
-    assert service.name == "postgres"
-    assert service.envs["POSTGRES_DB"] == "agents"
-    assert service.healthcheck is not None
-    assert service.healthcheck.test == ("CMD-SHELL", "pg_isready -U postgres")
+    assert cc.name == "postgres"
+    assert cc.envs["POSTGRES_DB"] == "agents"
+    assert cc.healthcheck is not None
+    assert cc.healthcheck.test == ("CMD-SHELL", "pg_isready -U postgres")
     assert mount.target == "/workspace"
     assert copy.exclude_patterns == (".git",)
     assert set(SandboxEvent.__annotations__) == {
@@ -81,14 +81,13 @@ def test_public_models_match_protocol_contract() -> None:
         "sandbox_state",
         "sandbox_phase",
         "exec",
-        "service",
+        "companion_container",
     }
     assert set(SandboxHandle.__annotations__) == {
         "sandbox_id",
         "state",
         "last_event_sequence",
-        "required_services",
-        "optional_services",
+        "companion_containers",
         "labels",
         "created_at",
         "image",
@@ -130,8 +129,8 @@ def test_sdk_exports_proto_backed_public_enums() -> None:
         service_pb2.EXEC_FINISHED: "exec_finished",
         service_pb2.EXEC_FAILED: "exec_failed",
         service_pb2.EXEC_CANCELLED: "exec_cancelled",
-        service_pb2.SANDBOX_SERVICE_READY: "sandbox_service_ready",
-        service_pb2.SANDBOX_SERVICE_FAILED: "sandbox_service_failed",
+        service_pb2.COMPANION_CONTAINER_READY: "companion_container_ready",
+        service_pb2.COMPANION_CONTAINER_FAILED: "companion_container_failed",
     } == {
         3: "sandbox_ready",
         4: "sandbox_failed",
@@ -139,13 +138,13 @@ def test_sdk_exports_proto_backed_public_enums() -> None:
         10: "exec_finished",
         11: "exec_failed",
         12: "exec_cancelled",
-        13: "sandbox_service_ready",
-        14: "sandbox_service_failed",
+        13: "companion_container_ready",
+        14: "companion_container_failed",
     }
     assert SandboxEventType(service_pb2.EXEC_FINISHED) is SandboxEventType.EXEC_FINISHED
     assert (
-        SandboxEventType(service_pb2.SANDBOX_SERVICE_READY)
-        is SandboxEventType.SANDBOX_SERVICE_READY
+        SandboxEventType(service_pb2.COMPANION_CONTAINER_READY)
+        is SandboxEventType.COMPANION_CONTAINER_READY
     )
 
 
@@ -283,8 +282,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "mounts",
         "copies",
         "builtin_tools",
-        "required_services",
-        "optional_services",
+        "companion_containers",
         "labels",
         "envs",
         "idle_ttl",
@@ -357,20 +355,20 @@ def test_public_async_client_round_trips_over_unix_socket(tmp_path: Path) -> Non
     assert result["sandbox_state"] is SandboxState.PENDING
     assert result["exec_state"] is ExecState.FINISHED
     assert result["event_types"] == [
-        SandboxEventType.SANDBOX_SERVICE_READY,
+        SandboxEventType.COMPANION_CONTAINER_READY,
         SandboxEventType.EXEC_FINISHED,
     ]
-    assert result["service_names"] == ["postgres", None]
+    assert result["companion_container_names"] == ["postgres", None]
     assert result["exec_last_event_sequence"] == 3
     assert servicer.subscribe_requests[0].from_sequence == 0
     assert servicer.create_requests[0].create_spec.image == "python:3.12-slim"
     assert servicer.create_requests[0].sandbox_id == "sandbox-1"
     assert dict(servicer.create_requests[0].create_spec.labels) == {"team": "sdk", "purpose": "smoke"}
     # envs are serialized as a map in the proto.
-    assert dict(servicer.create_requests[0].create_spec.required_services[0].envs) == {"POSTGRES_DB": "agents"}
-    assert servicer.create_requests[0].create_spec.required_services[0].name == "postgres"
-    assert servicer.create_requests[0].create_spec.required_services[0].image == "postgres:16"
-    assert servicer.create_requests[0].create_spec.optional_services[0].name == "redis"
+    assert dict(servicer.create_requests[0].create_spec.companion_containers[0].envs) == {"POSTGRES_DB": "agents"}
+    assert servicer.create_requests[0].create_spec.companion_containers[0].name == "postgres"
+    assert servicer.create_requests[0].create_spec.companion_containers[0].image == "postgres:16"
+    assert servicer.create_requests[0].create_spec.companion_containers[1].name == "redis"
     assert dict(servicer.list_requests[0].label_selector) == {"team": "sdk"}
     assert dict(servicer.delete_sandboxes_requests[0].label_selector) == {"team": "sdk"}
     assert servicer.create_exec_requests[0].cwd == "/workspace"
@@ -411,7 +409,7 @@ def test_create_sandbox_sandbox_id_serializes_explicit_and_omitted_values(monkey
     assert _FakeRawSandboxClient.create_requests[1].sandbox_id == ""
 
 
-def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_proto(
+def test_create_sandbox_mounts_copies_builtin_tools_and_companion_containers_serialize_to_proto(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _FakeRawSandboxClient:
@@ -451,8 +449,8 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
                 ),
             ),
             builtin_tools=("claude", "uv"),
-            required_services=(
-                ServiceSpec(
+            companion_containers=(
+                CompanionContainerSpec(
                     name="postgres",
                     image="postgres:16",
                     envs={"POSTGRES_DB": "agents"},
@@ -463,9 +461,7 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
                     ),
                     post_start_on_primary=("python", "-c", "print('seeded')"),
                 ),
-            ),
-            optional_services=(
-                ServiceSpec(
+                CompanionContainerSpec(
                     name="redis",
                     image="redis:7",
                 ),
@@ -487,17 +483,16 @@ def test_create_sandbox_mounts_copies_builtin_tools_and_services_serialize_to_pr
             exclude_patterns=[".git", "__pycache__"],
         )
     ]
-    # Verify service fields individually (proto equality sensitive to field ordering).
-    assert len(create_spec.required_services) == 1
-    req_svc = create_spec.required_services[0]
-    assert req_svc.name == "postgres"
-    assert req_svc.image == "postgres:16"
-    assert dict(req_svc.envs) == {"POSTGRES_DB": "agents"}
-    assert req_svc.healthcheck.interval.seconds == 5
-    assert req_svc.healthcheck.retries == 3
-    assert list(req_svc.post_start_on_primary) == ["python", "-c", "print('seeded')"]
-    assert len(create_spec.optional_services) == 1
-    assert create_spec.optional_services[0].name == "redis"
+    # Verify companion container fields individually (proto equality sensitive to field ordering).
+    assert len(create_spec.companion_containers) == 2
+    cc_postgres = create_spec.companion_containers[0]
+    assert cc_postgres.name == "postgres"
+    assert cc_postgres.image == "postgres:16"
+    assert dict(cc_postgres.envs) == {"POSTGRES_DB": "agents"}
+    assert cc_postgres.healthcheck.interval.seconds == 5
+    assert cc_postgres.healthcheck.retries == 3
+    assert list(cc_postgres.post_start_on_primary) == ["python", "-c", "print('seeded')"]
+    assert create_spec.companion_containers[1].name == "redis"
 
 
 def test_create_sandbox_with_labels_serializes_to_proto(monkeypatch: pytest.MonkeyPatch) -> None:

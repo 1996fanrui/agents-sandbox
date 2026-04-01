@@ -23,7 +23,7 @@ copies:
       - ".git"
 builtin_tools:
   - "claude"
-required_services:
+companion_containers:
   db:
     image: postgres:16
     envs:
@@ -38,7 +38,6 @@ required_services:
       start_interval: "500ms"
     post_start_on_primary:
       - "echo db ready"
-optional_services:
   cache:
     image: redis:7
     envs:
@@ -68,10 +67,10 @@ envs:
 	if len(cfg.BuiltinTools) != 1 || cfg.BuiltinTools[0] != "claude" {
 		t.Fatalf("unexpected builtin_tools: %v", cfg.BuiltinTools)
 	}
-	if len(cfg.RequiredServices) != 1 {
-		t.Fatalf("expected 1 required service, got %d", len(cfg.RequiredServices))
+	if len(cfg.CompanionContainers) != 2 {
+		t.Fatalf("expected 2 companion containers, got %d", len(cfg.CompanionContainers))
 	}
-	db := cfg.RequiredServices["db"]
+	db := cfg.CompanionContainers["db"]
 	if db.Image != "postgres:16" {
 		t.Fatalf("unexpected db image: %s", db.Image)
 	}
@@ -84,10 +83,7 @@ envs:
 	if len(db.PostStartOnPrimary) != 1 || db.PostStartOnPrimary[0] != "echo db ready" {
 		t.Fatalf("unexpected post_start_on_primary: %v", db.PostStartOnPrimary)
 	}
-	if len(cfg.OptionalServices) != 1 {
-		t.Fatalf("expected 1 optional service, got %d", len(cfg.OptionalServices))
-	}
-	cache := cfg.OptionalServices["cache"]
+	cache := cfg.CompanionContainers["cache"]
 	if cache.Image != "redis:7" {
 		t.Fatalf("unexpected cache image: %s", cache.Image)
 	}
@@ -120,7 +116,7 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		Copies: []YAMLCopySpec{
 			{Source: "/project", Target: "/workspace", ExcludePatterns: []string{".git"}},
 		},
-		RequiredServices: map[string]YAMLServiceSpec{
+		CompanionContainers: map[string]YAMLCompanionContainerSpec{
 			"beta": {
 				Image: "beta:1",
 				Envs: map[string]string{
@@ -140,8 +136,6 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 					Test: []string{"CMD", "true"},
 				},
 			},
-		},
-		OptionalServices: map[string]YAMLServiceSpec{
 			"cache": {Image: "redis:7"},
 		},
 		Labels: map[string]string{"owner": "team-a"},
@@ -166,17 +160,17 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 		t.Fatalf("unexpected copies: %v", spec.GetCopies())
 	}
 
-	// Required services should be sorted alphabetically: alpha before beta.
-	required := spec.GetRequiredServices()
-	if len(required) != 2 {
-		t.Fatalf("expected 2 required services, got %d", len(required))
+	// Companion containers should be sorted alphabetically: alpha before beta before cache.
+	cc := spec.GetCompanionContainers()
+	if len(cc) != 3 {
+		t.Fatalf("expected 3 companion containers, got %d", len(cc))
 	}
-	if required[0].GetName() != "alpha" || required[1].GetName() != "beta" {
-		t.Fatalf("required services not sorted: %s, %s", required[0].GetName(), required[1].GetName())
+	if cc[0].GetName() != "alpha" || cc[1].GetName() != "beta" || cc[2].GetName() != "cache" {
+		t.Fatalf("companion containers not sorted: %s, %s, %s", cc[0].GetName(), cc[1].GetName(), cc[2].GetName())
 	}
 
 	// Beta's envs should contain A_KEY and Z_KEY.
-	betaEnvs := required[1].GetEnvs()
+	betaEnvs := cc[1].GetEnvs()
 	if len(betaEnvs) != 2 {
 		t.Fatalf("expected 2 env vars for beta, got %d", len(betaEnvs))
 	}
@@ -185,7 +179,7 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 	}
 
 	// Verify healthcheck fields including parsed duration.
-	hc := required[1].GetHealthcheck()
+	hc := cc[1].GetHealthcheck()
 	if hc.GetRetries() != 3 {
 		t.Fatalf("unexpected healthcheck retries: %#v", hc)
 	}
@@ -194,14 +188,8 @@ func TestYAMLConfigToCreateSpec(t *testing.T) {
 	}
 
 	// Verify post_start_on_primary.
-	if len(required[1].GetPostStartOnPrimary()) != 1 || required[1].GetPostStartOnPrimary()[0] != "echo ready" {
-		t.Fatalf("unexpected post_start_on_primary: %v", required[1].GetPostStartOnPrimary())
-	}
-
-	// Optional services.
-	optional := spec.GetOptionalServices()
-	if len(optional) != 1 || optional[0].GetName() != "cache" {
-		t.Fatalf("unexpected optional services: %v", optional)
+	if len(cc[1].GetPostStartOnPrimary()) != 1 || cc[1].GetPostStartOnPrimary()[0] != "echo ready" {
+		t.Fatalf("unexpected post_start_on_primary: %v", cc[1].GetPostStartOnPrimary())
 	}
 
 	// Labels.
@@ -243,18 +231,16 @@ func TestYAMLConfigToCreateSpecIdleTTL(t *testing.T) {
 	}
 }
 
-func TestYAMLConfigServiceTypes(t *testing.T) {
+func TestYAMLConfigCompanionContainerTypes(t *testing.T) {
 	cfg := &YAMLConfig{
 		Image: "test:latest",
-		RequiredServices: map[string]YAMLServiceSpec{
+		CompanionContainers: map[string]YAMLCompanionContainerSpec{
 			"db": {
 				Image: "postgres:16",
 				Healthcheck: &YAMLHealthcheckConfig{
 					Test: []string{"CMD", "pg_isready"},
 				},
 			},
-		},
-		OptionalServices: map[string]YAMLServiceSpec{
 			"cache": {Image: "redis:7"},
 		},
 	}
@@ -264,18 +250,18 @@ func TestYAMLConfigServiceTypes(t *testing.T) {
 		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
 	}
 
-	if len(spec.GetRequiredServices()) != 1 || spec.GetRequiredServices()[0].GetName() != "db" {
-		t.Fatalf("required services mismatch: %v", spec.GetRequiredServices())
+	if len(spec.GetCompanionContainers()) != 2 {
+		t.Fatalf("companion containers mismatch: %v", spec.GetCompanionContainers())
 	}
-	if len(spec.GetOptionalServices()) != 1 || spec.GetOptionalServices()[0].GetName() != "cache" {
-		t.Fatalf("optional services mismatch: %v", spec.GetOptionalServices())
+	if spec.GetCompanionContainers()[0].GetName() != "cache" || spec.GetCompanionContainers()[1].GetName() != "db" {
+		t.Fatalf("companion containers not sorted: %v", spec.GetCompanionContainers())
 	}
 }
 
 func TestYAMLInvalidDurationRejected(t *testing.T) {
 	cfg := &YAMLConfig{
 		Image: "test:latest",
-		RequiredServices: map[string]YAMLServiceSpec{
+		CompanionContainers: map[string]YAMLCompanionContainerSpec{
 			"db": {
 				Image: "postgres:16",
 				Healthcheck: &YAMLHealthcheckConfig{
@@ -296,7 +282,7 @@ func TestYAMLAllDurationFieldsParsed(t *testing.T) {
 	cfg := &YAMLConfig{
 		Image:   "test:latest",
 		IdleTTL: "15m",
-		RequiredServices: map[string]YAMLServiceSpec{
+		CompanionContainers: map[string]YAMLCompanionContainerSpec{
 			"db": {
 				Image: "postgres:16",
 				Healthcheck: &YAMLHealthcheckConfig{
@@ -319,7 +305,7 @@ func TestYAMLAllDurationFieldsParsed(t *testing.T) {
 		t.Fatalf("unexpected idle_ttl: %v", spec.GetIdleTtl())
 	}
 
-	hc := spec.GetRequiredServices()[0].GetHealthcheck()
+	hc := spec.GetCompanionContainers()[0].GetHealthcheck()
 	if hc.GetInterval().AsDuration() != 2*time.Second {
 		t.Fatalf("unexpected interval: %v", hc.GetInterval())
 	}

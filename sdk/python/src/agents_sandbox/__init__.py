@@ -18,6 +18,8 @@ from .models import (
     SandboxState,
 )
 from .types import (
+    CompanionContainerEventDetails,
+    CompanionContainerSpec,
     CopySpec,
     DeleteSandboxesResult,
     ExecEventDetails,
@@ -28,12 +30,12 @@ from .types import (
     SandboxEvent,
     SandboxHandle,
     SandboxPhaseDetails,
-    ServiceEventDetails,
-    ServiceSpec,
 )
 
 __all__ = [
     "AgentsSandboxClient",
+    "CompanionContainerEventDetails",
+    "CompanionContainerSpec",
     "CopySpec",
     "DeleteSandboxesResult",
     "ExecAlreadyTerminalError",
@@ -43,6 +45,7 @@ __all__ = [
     "ExecNotRunningError",
     "ExecState",
     "HealthcheckConfig",
+    "MountSpec",
     "PingInfo",
     "SandboxClientError",
     "SandboxConflictError",
@@ -55,7 +58,4 @@ __all__ = [
     "SandboxNotReadyError",
     "SandboxPhaseDetails",
     "SandboxState",
-    "MountSpec",
-    "ServiceEventDetails",
-    "ServiceSpec",
 ]

@@ -82,16 +82,16 @@ func (w *dockerEventWatcher) handleEvent(event ContainerEvent) {
 
 	state := record.handle.GetState()
 
-	if event.IsService {
-		// Service container event: emit SANDBOX_SERVICE_FAILED but do not change sandbox state.
+	if event.IsCompanionContainer {
+		// Companion container event: emit COMPANION_CONTAINER_FAILED but do not change sandbox state.
 		if state == agboxv1.SandboxState_SANDBOX_STATE_READY {
-			if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_SERVICE_FAILED, eventMutation{
-				serviceName:  event.ServiceName,
-				errorCode:    containerEventErrorCode(event.Action),
-				errorMessage: "service container " + event.Action,
-				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
+			if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
+				companionContainerName: event.CompanionContainerName,
+				errorCode:              containerEventErrorCode(event.Action),
+				errorMessage:           "companion container " + event.Action,
+				sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
 			}); err != nil {
-				w.logger.Error("append service failed event", slog.String("sandbox_id", event.SandboxID), slog.Any("error", err))
+				w.logger.Error("append companion container failed event", slog.String("sandbox_id", event.SandboxID), slog.Any("error", err))
 			}
 		}
 		return

@@ -27,7 +27,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 		SandboxId: "session-1",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			RequiredServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{
 					Name:  "db",
 					Image: "postgres:16",
@@ -55,7 +55,7 @@ func TestSandboxLifecycleAndExecStream(t *testing.T) {
 	wantLifecycle := []agboxv1.EventType{
 		agboxv1.EventType_SANDBOX_ACCEPTED,
 		agboxv1.EventType_SANDBOX_PREPARING,
-		agboxv1.EventType_SANDBOX_SERVICE_READY,
+		agboxv1.EventType_COMPANION_CONTAINER_READY,
 		agboxv1.EventType_SANDBOX_READY,
 	}
 	for index, eventType := range wantLifecycle {

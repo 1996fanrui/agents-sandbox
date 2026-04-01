@@ -29,11 +29,11 @@ type runtimeBackend interface {
 
 // ContainerEvent represents a Docker container lifecycle event relevant to sandbox state management.
 type ContainerEvent struct {
-	SandboxID     string
-	ContainerName string
-	Action        string // "die" or "oom"
-	IsService     bool
-	ServiceName   string
+	SandboxID              string
+	ContainerName          string
+	Action                 string // "die" or "oom"
+	IsCompanionContainer   bool
+	CompanionContainerName string
 }
 
 // ContainerInspectResult holds the state of a single container queried via Docker inspect.
@@ -45,29 +45,27 @@ type ContainerInspectResult struct {
 }
 
 type runtimeCreateResult struct {
-	ServiceStatuses         []runtimeServiceStatus
-	OptionalServiceStatuses <-chan runtimeServiceStatus
-	RuntimeState            *sandboxRuntimeState
+	CompanionContainerStatuses <-chan companionContainerStatus
+	RuntimeState               *sandboxRuntimeState
 }
 
 type runtimeResumeResult struct {
-	ServiceStatuses []runtimeServiceStatus
+	CompanionContainerStatuses []companionContainerStatus
 }
 
-type runtimeServiceStatus struct {
-	Name     string
-	Required bool
-	Ready    bool
-	Message  string
+type companionContainerStatus struct {
+	Name    string
+	Ready   bool
+	Message string
 }
 
-type optionalServiceStarts struct {
-	Statuses <-chan runtimeServiceStatus
+type companionContainerStarts struct {
+	Statuses <-chan companionContainerStatus
 	done     <-chan struct{}
 	cancel   context.CancelFunc
 }
 
-func (starts optionalServiceStarts) CancelAndWait() {
+func (starts companionContainerStarts) CancelAndWait() {
 	if starts.cancel != nil {
 		starts.cancel()
 	}
@@ -81,16 +79,15 @@ type runtimeExecResult struct {
 }
 
 type sandboxRuntimeState struct {
-	NetworkName           string
-	PrimaryContainerName  string
-	ServiceContainers     []runtimeServiceContainer
-	OptionalServiceStarts optionalServiceStarts
+	NetworkName              string
+	PrimaryContainerName     string
+	CompanionContainers      []runtimeCompanionContainer
+	CompanionContainerStarts companionContainerStarts
 }
 
-type runtimeServiceContainer struct {
+type runtimeCompanionContainer struct {
 	Name          string
 	ContainerName string
-	Required      bool
 }
 
 type fakeRuntimeBackend struct {
@@ -100,43 +97,32 @@ type fakeRuntimeBackend struct {
 }
 
 func (fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
-	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
-	containers := make([]runtimeServiceContainer, 0, len(record.requiredServices)+len(record.optionalServices))
-	for _, service := range record.requiredServices {
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
-		containers = append(containers, runtimeServiceContainer{
-			Name:          service.GetName(),
-			ContainerName: "fake-service-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(service.GetName()),
-			Required:      true,
+	statuses := make(chan companionContainerStatus, len(record.companionContainers))
+	containers := make([]runtimeCompanionContainer, 0, len(record.companionContainers))
+	for _, cc := range record.companionContainers {
+		statuses <- companionContainerStatus{Name: cc.GetName(), Ready: true}
+		containers = append(containers, runtimeCompanionContainer{
+			Name:          cc.GetName(),
+			ContainerName: "fake-companion-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(cc.GetName()),
 		})
 	}
-	for _, service := range record.optionalServices {
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
-		containers = append(containers, runtimeServiceContainer{
-			Name:          service.GetName(),
-			ContainerName: "fake-service-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(service.GetName()),
-			Required:      false,
-		})
-	}
+	close(statuses)
 	return runtimeCreateResult{
-		ServiceStatuses: statuses,
+		CompanionContainerStatuses: statuses,
 		RuntimeState: &sandboxRuntimeState{
 			NetworkName:          "fake-network-" + record.handle.GetSandboxId(),
 			PrimaryContainerName: "fake-primary-" + record.handle.GetSandboxId(),
-			ServiceContainers:    containers,
+			CompanionContainers:  containers,
 		},
 	}, nil
 }
 
 func (fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord) (runtimeResumeResult, error) {
-	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
-	for _, service := range record.requiredServices {
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
+	statuses := make([]companionContainerStatus, 0, len(record.companionContainers))
+	for _, cc := range record.companionContainers {
+		statuses = append(statuses, companionContainerStatus{Name: cc.GetName(), Ready: true})
 	}
-	for _, service := range record.optionalServices {
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
-	}
-	return runtimeResumeResult{ServiceStatuses: statuses}, nil
+	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
 func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error   { return nil }
 func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error { return nil }
@@ -191,12 +177,12 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		PrimaryContainerName: dockerPrimaryContainerName(record.handle.GetSandboxId()),
 	}
 	cleanupRequired := false
-	var optionalStarts optionalServiceStarts
+	var ccStarts companionContainerStarts
 	defer func() {
 		if !cleanupRequired {
 			return
 		}
-		optionalStarts.CancelAndWait()
+		ccStarts.CancelAndWait()
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
@@ -233,13 +219,8 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := backend.ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	for _, service := range record.requiredServices {
-		if err := backend.ensureDockerImage(ctx, service.GetImage()); err != nil {
-			return runtimeCreateResult{}, err
-		}
-	}
-	for _, service := range record.optionalServices {
-		if err := backend.ensureDockerImage(ctx, service.GetImage()); err != nil {
+	for _, cc := range record.companionContainers {
+		if err := backend.ensureDockerImage(ctx, cc.GetImage()); err != nil {
 			return runtimeCreateResult{}, err
 		}
 	}
@@ -248,45 +229,16 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 
-	statuses := make([]runtimeServiceStatus, 0, len(record.requiredServices)+len(record.optionalServices))
-	state.ServiceContainers = make([]runtimeServiceContainer, 0, len(record.requiredServices)+len(record.optionalServices))
-	for _, service := range record.requiredServices {
-		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
-		state.ServiceContainers = append(state.ServiceContainers, runtimeServiceContainer{
-			Name:          service.GetName(),
-			ContainerName: containerName,
-			Required:      true,
-		})
-		if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
-			Name:         containerName,
-			Image:        service.GetImage(),
-			NetworkName:  state.NetworkName,
-			NetworkAlias: service.GetName(),
-			Labels:       runtimedocker.ServiceLabels(record.handle.GetSandboxId(), service.GetName(), userLabels),
-			Environment:  service.GetEnvs(),
-			Healthcheck:  service.GetHealthcheck(),
-		}); err != nil {
-			return runtimeCreateResult{}, err
-		}
-		if err := backend.dockerContainerStart(ctx, containerName); err != nil {
-			return runtimeCreateResult{}, err
-		}
-		if err := backend.dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
-			return runtimeCreateResult{}, err
-		}
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
-	}
-
-	optionalStarts = startOptionalServicesAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.optionalServices, userLabels, backend, func(ctx context.Context, spec dockerContainerSpec) error {
+	ccStarts = startCompanionContainersAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.companionContainers, userLabels, backend, func(ctx context.Context, spec dockerContainerSpec) error {
 		return backend.dockerContainerCreate(ctx, spec)
 	}, func(ctx context.Context, name string) error {
 		return backend.dockerContainerStart(ctx, name)
 	})
-	for _, service := range record.optionalServices {
-		state.ServiceContainers = append(state.ServiceContainers, runtimeServiceContainer{
-			Name:          service.GetName(),
-			ContainerName: dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName()),
-			Required:      false,
+	state.CompanionContainers = make([]runtimeCompanionContainer, 0, len(record.companionContainers))
+	for _, cc := range record.companionContainers {
+		state.CompanionContainers = append(state.CompanionContainers, runtimeCompanionContainer{
+			Name:          cc.GetName(),
+			ContainerName: dockerCompanionContainerName(record.handle.GetSandboxId(), cc.GetName()),
 		})
 	}
 
@@ -321,23 +273,11 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := backend.dockerWaitContainerRunning(ctx, state.PrimaryContainerName, 10*time.Second); err != nil {
 		return runtimeCreateResult{}, err
 	}
-	for _, service := range record.requiredServices {
-		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, err := backend.dockerExec(ctx, dockerExecSpec{
-				ContainerName: state.PrimaryContainerName,
-				Command:       []string{"sh", "-lc", hook},
-				Environment:   service.GetEnvs(),
-			}); err != nil {
-				return runtimeCreateResult{}, err
-			}
-		}
-	}
 	cleanupRequired = false
-	state.OptionalServiceStarts = optionalStarts
+	state.CompanionContainerStarts = ccStarts
 	return runtimeCreateResult{
-		ServiceStatuses:         statuses,
-		OptionalServiceStatuses: optionalStarts.Statuses,
-		RuntimeState:            state,
+		CompanionContainerStatuses: ccStarts.Statuses,
+		RuntimeState:               state,
 	}, nil
 }
 
@@ -348,82 +288,62 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	if err := backend.dockerContainerMustExist(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeResumeResult{}, err
 	}
-	for _, serviceContainer := range record.runtimeState.ServiceContainers {
-		if err := backend.dockerContainerMustExist(ctx, serviceContainer.ContainerName); err != nil {
+	for _, cc := range record.runtimeState.CompanionContainers {
+		if err := backend.dockerContainerMustExist(ctx, cc.ContainerName); err != nil {
 			return runtimeResumeResult{}, err
 		}
-	}
-	statuses := make([]runtimeServiceStatus, 0, len(record.runtimeState.ServiceContainers))
-	for _, service := range record.requiredServices {
-		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
-		if err := backend.dockerContainerEnsureRunning(ctx, containerName); err != nil {
-			return runtimeResumeResult{}, err
-		}
-		if err := backend.dockerWaitRequiredServiceHealthy(ctx, containerName, service.GetHealthcheck()); err != nil {
-			return runtimeResumeResult{}, err
-		}
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: true, Ready: true})
 	}
 	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeResumeResult{}, err
 	}
-	for _, service := range record.requiredServices {
-		for _, hook := range service.GetPostStartOnPrimary() {
-			if _, err := backend.dockerExec(ctx, dockerExecSpec{
-				ContainerName: record.runtimeState.PrimaryContainerName,
-				Command:       []string{"sh", "-lc", hook},
-			}); err != nil {
-				return runtimeResumeResult{}, err
-			}
-		}
-	}
-	for _, service := range record.optionalServices {
-		containerName := dockerServiceContainerName(record.handle.GetSandboxId(), service.GetName())
+	statuses := make([]companionContainerStatus, 0, len(record.companionContainers))
+	for _, cc := range record.companionContainers {
+		containerName := dockerCompanionContainerName(record.handle.GetSandboxId(), cc.GetName())
 		if err := backend.dockerContainerEnsureRunning(ctx, containerName); err != nil {
-			statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: false, Message: err.Error()})
+			statuses = append(statuses, companionContainerStatus{Name: cc.GetName(), Ready: false, Message: err.Error()})
 			continue
 		}
-		statuses = append(statuses, runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true})
+		statuses = append(statuses, companionContainerStatus{Name: cc.GetName(), Ready: true})
 	}
-	return runtimeResumeResult{ServiceStatuses: statuses}, nil
+	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
 
-func startOptionalServicesAsync(
+func startCompanionContainersAsync(
 	ctx context.Context,
 	sandboxID string,
 	networkName string,
 	primaryContainerName string,
-	services []*agboxv1.ServiceSpec,
+	containers []*agboxv1.CompanionContainerSpec,
 	userLabels map[string]string,
 	backend *dockerRuntimeBackend,
 	createContainer func(context.Context, dockerContainerSpec) error,
 	startContainer func(context.Context, string) error,
-) optionalServiceStarts {
-	optionalCtx, cancel := context.WithCancel(ctx)
-	results := make(chan runtimeServiceStatus, len(services))
+) companionContainerStarts {
+	ccCtx, cancel := context.WithCancel(ctx)
+	results := make(chan companionContainerStatus, len(containers))
 	done := make(chan struct{})
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(len(services))
-	for _, service := range services {
-		containerName := dockerServiceContainerName(sandboxID, service.GetName())
-		go func(service *agboxv1.ServiceSpec, containerName string) {
+	waitGroup.Add(len(containers))
+	for _, cc := range containers {
+		containerName := dockerCompanionContainerName(sandboxID, cc.GetName())
+		go func(cc *agboxv1.CompanionContainerSpec, containerName string) {
 			defer waitGroup.Done()
-			status := runtimeServiceStatus{Name: service.GetName(), Required: false, Ready: true}
-			if err := createContainer(optionalCtx, dockerContainerSpec{
+			status := companionContainerStatus{Name: cc.GetName(), Ready: true}
+			if err := createContainer(ccCtx, dockerContainerSpec{
 				Name:         containerName,
-				Image:        service.GetImage(),
+				Image:        cc.GetImage(),
 				NetworkName:  networkName,
-				NetworkAlias: service.GetName(),
-				Labels:       runtimedocker.ServiceLabels(sandboxID, service.GetName(), userLabels),
-				Environment:  service.GetEnvs(),
-				Healthcheck:  service.GetHealthcheck(),
+				NetworkAlias: cc.GetName(),
+				Labels:       runtimedocker.CompanionContainerLabels(sandboxID, cc.GetName(), userLabels),
+				Environment:  cc.GetEnvs(),
+				Healthcheck:  cc.GetHealthcheck(),
 			}); err != nil {
 				status.Ready = false
 				status.Message = err.Error()
 				results <- status
 				return
 			}
-			if err := startContainer(optionalCtx, containerName); err != nil {
+			if err := startContainer(ccCtx, containerName); err != nil {
 				status.Ready = false
 				status.Message = err.Error()
 				results <- status
@@ -431,39 +351,39 @@ func startOptionalServicesAsync(
 			}
 			results <- status
 			// Run post_start_on_primary hooks after healthcheck passes in a separate
-			// goroutine so sandbox ready is not delayed by optional service setup.
-			if len(service.GetPostStartOnPrimary()) > 0 && service.GetHealthcheck() != nil {
-				go func(svc *agboxv1.ServiceSpec, ctrName string) {
-					if err := backend.dockerWaitRequiredServiceHealthy(optionalCtx, ctrName, svc.GetHealthcheck()); err != nil {
+			// goroutine so sandbox ready is not delayed by companion container setup.
+			if len(cc.GetPostStartOnPrimary()) > 0 && cc.GetHealthcheck() != nil {
+				go func(spec *agboxv1.CompanionContainerSpec, ctrName string) {
+					if err := backend.dockerWaitCompanionContainerHealthy(ccCtx, ctrName, spec.GetHealthcheck()); err != nil {
 						return
 					}
-					for _, hook := range svc.GetPostStartOnPrimary() {
-						if _, err := backend.dockerExec(optionalCtx, dockerExecSpec{
+					for _, hook := range spec.GetPostStartOnPrimary() {
+						if _, err := backend.dockerExec(ccCtx, dockerExecSpec{
 							ContainerName: primaryContainerName,
 							Command:       []string{"sh", "-lc", hook},
-							Environment:   svc.GetEnvs(),
+							Environment:   spec.GetEnvs(),
 						}); err != nil {
 							return
 						}
 					}
-				}(service, containerName)
+				}(cc, containerName)
 			}
-		}(service, containerName)
+		}(cc, containerName)
 	}
 	go func() {
 		waitGroup.Wait()
 		close(results)
 		close(done)
 	}()
-	return optionalServiceStarts{
+	return companionContainerStarts{
 		Statuses: results,
 		done:     done,
 		cancel:   cancel,
 	}
 }
 
-func collectRuntimeServiceStatuses(results <-chan runtimeServiceStatus) []runtimeServiceStatus {
-	statuses := make([]runtimeServiceStatus, 0)
+func collectCompanionContainerStatuses(results <-chan companionContainerStatus) []companionContainerStatus {
+	statuses := make([]companionContainerStatus, 0)
 	for result := range results {
 		statuses = append(statuses, result)
 	}
@@ -474,12 +394,12 @@ func (backend *dockerRuntimeBackend) StopSandbox(ctx context.Context, record *sa
 	if record.runtimeState == nil {
 		return errors.New("sandbox runtime state is missing")
 	}
-	record.runtimeState.OptionalServiceStarts.CancelAndWait()
+	record.runtimeState.CompanionContainerStarts.CancelAndWait()
 	if err := backend.dockerContainerStop(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return err
 	}
-	for _, serviceContainer := range record.runtimeState.ServiceContainers {
-		if err := backend.dockerContainerStop(ctx, serviceContainer.ContainerName); err != nil {
+	for _, cc := range record.runtimeState.CompanionContainers {
+		if err := backend.dockerContainerStop(ctx, cc.ContainerName); err != nil {
 			return err
 		}
 	}
@@ -490,7 +410,7 @@ func (backend *dockerRuntimeBackend) DeleteSandbox(ctx context.Context, record *
 	if record.runtimeState == nil {
 		return nil
 	}
-	record.runtimeState.OptionalServiceStarts.CancelAndWait()
+	record.runtimeState.CompanionContainerStarts.CancelAndWait()
 	return backend.deleteRuntimeArtifacts(ctx, record.runtimeState)
 }
 
@@ -502,8 +422,8 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 	if state.PrimaryContainerName != "" {
 		joined = append(joined, backend.dockerContainerRemove(ctx, state.PrimaryContainerName))
 	}
-	for _, serviceContainer := range state.ServiceContainers {
-		joined = append(joined, backend.dockerContainerRemove(ctx, serviceContainer.ContainerName))
+	for _, cc := range state.CompanionContainers {
+		joined = append(joined, backend.dockerContainerRemove(ctx, cc.ContainerName))
 	}
 	if state.NetworkName != "" {
 		joined = append(joined, backend.dockerNetworkRemove(ctx, state.NetworkName))
@@ -548,15 +468,15 @@ func (backend *dockerRuntimeBackend) WatchContainerEvents(ctx context.Context) (
 				continue
 			}
 			containerName := event.Actor.Attributes["name"]
-			serviceName := event.Actor.Attributes[runtimedocker.LabelServiceName]
+			ccName := event.Actor.Attributes[runtimedocker.LabelCompanionContainerName]
 			component := event.Actor.Attributes[runtimedocker.LabelComponent]
 
 			ce := ContainerEvent{
-				SandboxID:     sandboxID,
-				ContainerName: containerName,
-				Action:        string(event.Action),
-				IsService:     component == "service",
-				ServiceName:   serviceName,
+				SandboxID:              sandboxID,
+				ContainerName:          containerName,
+				Action:                 string(event.Action),
+				IsCompanionContainer:   component == "companion",
+				CompanionContainerName: ccName,
 			}
 			eventCh <- ce
 		}

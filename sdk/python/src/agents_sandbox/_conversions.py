@@ -10,6 +10,8 @@ from ._generated import service_pb2
 from .models import ExecState, SandboxEventType, SandboxState
 from ._request_types import CreateExecRequest, CreateSandboxRequest
 from .types import (
+    CompanionContainerEventDetails,
+    CompanionContainerSpec,
     CopySpec,
     ExecEventDetails,
     ExecHandle,
@@ -19,8 +21,6 @@ from .types import (
     SandboxEvent,
     SandboxHandle,
     SandboxPhaseDetails,
-    ServiceEventDetails,
-    ServiceSpec,
 )
 
 
@@ -66,8 +66,8 @@ def to_proto_healthcheck(config: HealthcheckConfig) -> service_pb2.HealthcheckCo
     return hc
 
 
-def to_proto_service(spec: ServiceSpec) -> service_pb2.ServiceSpec:
-    return service_pb2.ServiceSpec(
+def to_proto_companion_container(spec: CompanionContainerSpec) -> service_pb2.CompanionContainerSpec:
+    return service_pb2.CompanionContainerSpec(
         name=spec.name,
         image=spec.image,
         envs=dict(spec.envs),
@@ -86,8 +86,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
         mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
         copies=[to_proto_copy(item) for item in request.create_spec.copies],
         builtin_tools=list(request.create_spec.builtin_tools),
-        required_services=[to_proto_service(item) for item in request.create_spec.required_services],
-        optional_services=[to_proto_service(item) for item in request.create_spec.optional_services],
+        companion_containers=[to_proto_companion_container(item) for item in request.create_spec.companion_containers],
         labels=dict(request.create_spec.labels),
         envs=dict(request.create_spec.envs),
     )
@@ -139,8 +138,8 @@ def to_healthcheck(config: service_pb2.HealthcheckConfig | None) -> HealthcheckC
     )
 
 
-def to_service(spec: service_pb2.ServiceSpec) -> ServiceSpec:
-    return ServiceSpec(
+def to_companion_container(spec: service_pb2.CompanionContainerSpec) -> CompanionContainerSpec:
+    return CompanionContainerSpec(
         name=spec.name,
         image=spec.image,
         envs=dict(spec.envs),
@@ -159,8 +158,7 @@ def to_sandbox_handle(handle: service_pb2.SandboxHandle) -> SandboxHandle:
         sandbox_id=handle.sandbox_id,
         state=map_sandbox_state(handle.state),
         last_event_sequence=int(handle.last_event_sequence),
-        required_services=tuple(to_service(item) for item in handle.required_services),
-        optional_services=tuple(to_service(item) for item in handle.optional_services),
+        companion_containers=tuple(to_companion_container(item) for item in handle.companion_containers),
         labels=dict(handle.labels),
         created_at=created_at,
         image=handle.image,
@@ -208,7 +206,7 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
 
     sandbox_phase = None
     exec_details = None
-    service_details = None
+    companion_container_details = None
 
     details_field = event.WhichOneof("details")
     if details_field == "sandbox_phase":
@@ -235,12 +233,12 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
             error_code=e.error_code or None,
             error_message=e.error_message or None,
         )
-    elif details_field == "service":
-        s = event.service
-        service_details = ServiceEventDetails(
-            service_name=s.service_name,
-            error_code=s.error_code or None,
-            error_message=s.error_message or None,
+    elif details_field == "companion_container":
+        cc = event.companion_container
+        companion_container_details = CompanionContainerEventDetails(
+            name=cc.name,
+            error_code=cc.error_code or None,
+            error_message=cc.error_message or None,
         )
 
     return SandboxEvent(
@@ -254,7 +252,7 @@ def to_sandbox_event(event: service_pb2.SandboxEvent) -> SandboxEvent:
         sandbox_state=sandbox_state,
         sandbox_phase=sandbox_phase,
         exec=exec_details,
-        service=service_details,
+        companion_container=companion_container_details,
     )
 
 

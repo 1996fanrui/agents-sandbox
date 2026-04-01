@@ -69,8 +69,7 @@ type createSandboxOptions struct {
 	mounts           []MountSpec
 	copies           []CopySpec
 	builtinTools     []string
-	requiredServices []ServiceSpec
-	optionalServices []ServiceSpec
+	companionContainers []CompanionContainerSpec
 	labels           map[string]string
 	envs             map[string]string
 	idleTTL          *time.Duration
@@ -283,27 +282,15 @@ func (o builtinToolsOption) applyCreateSandbox(opts *createSandboxOptions) error
 	return nil
 }
 
-type requiredServicesOption []ServiceSpec
+type companionContainersOption []CompanionContainerSpec
 
-// WithRequiredServices sets required services.
-func WithRequiredServices(services ...ServiceSpec) requiredServicesOption {
-	return requiredServicesOption(slicesClone(services))
+// WithCompanionContainers sets companion containers.
+func WithCompanionContainers(containers ...CompanionContainerSpec) companionContainersOption {
+	return companionContainersOption(slicesClone(containers))
 }
 
-func (o requiredServicesOption) applyCreateSandbox(opts *createSandboxOptions) error {
-	opts.requiredServices = slicesClone([]ServiceSpec(o))
-	return nil
-}
-
-type optionalServicesOption []ServiceSpec
-
-// WithOptionalServices sets optional services.
-func WithOptionalServices(services ...ServiceSpec) optionalServicesOption {
-	return optionalServicesOption(slicesClone(services))
-}
-
-func (o optionalServicesOption) applyCreateSandbox(opts *createSandboxOptions) error {
-	opts.optionalServices = slicesClone([]ServiceSpec(o))
+func (o companionContainersOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	opts.companionContainers = slicesClone([]CompanionContainerSpec(o))
 	return nil
 }
 
@@ -467,10 +454,10 @@ func toProtoCopies(copies []CopySpec) []*agboxv1.CopySpec {
 	return result
 }
 
-func toProtoServices(services []ServiceSpec) []*agboxv1.ServiceSpec {
-	result := make([]*agboxv1.ServiceSpec, 0, len(services))
-	for _, service := range services {
-		result = append(result, toProtoService(service))
+func toProtoCompanionContainers(containers []CompanionContainerSpec) []*agboxv1.CompanionContainerSpec {
+	result := make([]*agboxv1.CompanionContainerSpec, 0, len(containers))
+	for _, cc := range containers {
+		result = append(result, toProtoCompanionContainer(cc))
 	}
 	return result
 }

@@ -132,14 +132,13 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 	}
 
 	createSpec := &agboxv1.CreateSpec{
-		Image:            image,
-		Mounts:           toProtoMounts(options.mounts),
-		Copies:           toProtoCopies(options.copies),
-		BuiltinTools:     slicesClone(options.builtinTools),
-		RequiredServices: toProtoServices(options.requiredServices),
-		OptionalServices: toProtoServices(options.optionalServices),
-		Labels:           cloneStringMap(options.labels),
-		Envs:             cloneStringMap(options.envs),
+		Image:               image,
+		Mounts:              toProtoMounts(options.mounts),
+		Copies:              toProtoCopies(options.copies),
+		BuiltinTools:        slicesClone(options.builtinTools),
+		CompanionContainers: toProtoCompanionContainers(options.companionContainers),
+		Labels:              cloneStringMap(options.labels),
+		Envs:                cloneStringMap(options.envs),
 	}
 	if options.idleTTL != nil {
 		createSpec.IdleTtl = durationpb.New(*options.idleTTL)

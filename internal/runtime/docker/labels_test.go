@@ -14,12 +14,12 @@ func TestRuntimeLabelsUseReverseDNSNamespace(t *testing.T) {
 		t.Fatalf("unexpected label namespace: %s", LabelNamespace)
 	}
 
-	serviceLabels := ServiceLabels("sandbox-1", "db", nil)
-	if serviceLabels[LabelComponent] != "service" {
-		t.Fatalf("unexpected service component label: %#v", serviceLabels)
+	ccLabels := CompanionContainerLabels("sandbox-1", "db", nil)
+	if ccLabels[LabelComponent] != "companion" {
+		t.Fatalf("unexpected companion container component label: %#v", ccLabels)
 	}
-	if serviceLabels[LabelServiceName] != "db" {
-		t.Fatalf("unexpected service label payload: %#v", serviceLabels)
+	if ccLabels[LabelCompanionContainerName] != "db" {
+		t.Fatalf("unexpected companion container label payload: %#v", ccLabels)
 	}
 }
 
@@ -40,16 +40,16 @@ func TestUserLabels(t *testing.T) {
 		t.Fatalf("sandbox labels lost system entries: %#v", sandboxLabels)
 	}
 
-	serviceLabels := ServiceLabels("sandbox-1", "db", userLabels)
-	if serviceLabels[LabelUserPrefix+"owner"] != "team-a" {
-		t.Fatalf("service labels missing owner: %#v", serviceLabels)
+	ccLabels := CompanionContainerLabels("sandbox-1", "db", userLabels)
+	if ccLabels[LabelUserPrefix+"owner"] != "team-a" {
+		t.Fatalf("companion container labels missing owner: %#v", ccLabels)
 	}
-	if serviceLabels[LabelServiceName] != "db" {
-		t.Fatalf("service labels lost service name: %#v", serviceLabels)
+	if ccLabels[LabelCompanionContainerName] != "db" {
+		t.Fatalf("companion container labels lost name: %#v", ccLabels)
 	}
 
 	userLabels["owner"] = "mutated"
-	if sandboxLabels[LabelUserPrefix+"owner"] != "team-a" || serviceLabels[LabelUserPrefix+"owner"] != "team-a" {
-		t.Fatalf("labels should not alias user input: sandbox=%#v service=%#v", sandboxLabels, serviceLabels)
+	if sandboxLabels[LabelUserPrefix+"owner"] != "team-a" || ccLabels[LabelUserPrefix+"owner"] != "team-a" {
+		t.Fatalf("labels should not alias user input: sandbox=%#v cc=%#v", sandboxLabels, ccLabels)
 	}
 }

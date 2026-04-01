@@ -578,7 +578,7 @@ func TestCreateSandboxRejectsUnknownBuiltinToolsBeforeRuntime(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
+func TestCreateSandboxRejectsInvalidCompanionContainerSpecsBeforeRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -587,34 +587,31 @@ func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
 	})
 
 	testCases := []struct {
-		name            string
-		required        []*agboxv1.ServiceSpec
-		optional        []*agboxv1.ServiceSpec
-		expectedErrPart string
+		name                string
+		companionContainers []*agboxv1.CompanionContainerSpec
+		expectedErrPart     string
 	}{
 		{
-			name: "empty_service_name",
-			required: []*agboxv1.ServiceSpec{
+			name: "empty_name",
+			companionContainers: []*agboxv1.CompanionContainerSpec{
 				{Name: "", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
 			},
-			expectedErrPart: "service name is required",
+			expectedErrPart: "companion container name is required",
 		},
 		{
-			name: "required_missing_healthcheck",
-			required: []*agboxv1.ServiceSpec{
+			name: "duplicate_name",
+			companionContainers: []*agboxv1.CompanionContainerSpec{
 				{Name: "postgres", Image: "postgres:16"},
-			},
-			expectedErrPart: "must define healthcheck",
-		},
-		{
-			name: "duplicate_service_name",
-			required: []*agboxv1.ServiceSpec{
-				{Name: "postgres", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
-			},
-			optional: []*agboxv1.ServiceSpec{
 				{Name: "postgres", Image: "postgres:17"},
 			},
-			expectedErrPart: "duplicate service name",
+			expectedErrPart: "duplicate companion container name",
+		},
+		{
+			name: "post_start_on_primary_without_healthcheck_and_none",
+			companionContainers: []*agboxv1.CompanionContainerSpec{
+				{Name: "postgres", Image: "postgres:16", PostStartOnPrimary: []string{"echo seed"}},
+			},
+			expectedErrPart: "must define healthcheck",
 		},
 	}
 
@@ -624,9 +621,8 @@ func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
 			_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 				SandboxId: "session-" + testCase.name,
 				CreateSpec: &agboxv1.CreateSpec{
-					Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
-					RequiredServices: testCase.required,
-					OptionalServices: testCase.optional,
+					Image:               "ghcr.io/agents-sandbox/coding-runtime:test",
+					CompanionContainers: testCase.companionContainers,
 				},
 			})
 			if status.Code(err) != codes.InvalidArgument {
@@ -640,6 +636,29 @@ func TestCreateSandboxRejectsInvalidServiceSpecsBeforeRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateSandboxAcceptsCompanionContainerWithoutHealthcheck(t *testing.T) {
+	runtime := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  runtime,
+	})
+
+	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId: "session-cc-no-healthcheck",
+		CreateSpec: &agboxv1.CreateSpec{
+			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
+				{Name: "redis", Image: "redis:7"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox should accept companion container without healthcheck, got %v", err)
+	}
+	waitForSandboxState(t, client, "session-cc-no-healthcheck", agboxv1.SandboxState_SANDBOX_STATE_READY)
 }
 
 func TestCreateSandboxWithYAML(t *testing.T) {

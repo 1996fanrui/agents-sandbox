@@ -43,14 +43,13 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		return &agboxv1.CreateSpec{}
 	}
 	cloned := &agboxv1.CreateSpec{
-		Image:            spec.GetImage(),
-		Labels:           cloneStringMap(spec.GetLabels()),
-		Mounts:           cloneMounts(spec.GetMounts()),
-		Copies:           cloneCopies(spec.GetCopies()),
-		BuiltinTools:     slices.Clone(spec.GetBuiltinTools()),
-		RequiredServices: cloneServiceSpecs(spec.GetRequiredServices()),
-		OptionalServices: cloneServiceSpecs(spec.GetOptionalServices()),
-		Envs:             cloneStringMap(spec.GetEnvs()),
+		Image:               spec.GetImage(),
+		Labels:              cloneStringMap(spec.GetLabels()),
+		Mounts:              cloneMounts(spec.GetMounts()),
+		Copies:              cloneCopies(spec.GetCopies()),
+		BuiltinTools:        slices.Clone(spec.GetBuiltinTools()),
+		CompanionContainers: cloneCompanionContainerSpecs(spec.GetCompanionContainers()),
+		Envs:                cloneStringMap(spec.GetEnvs()),
 	}
 	if spec.GetIdleTtl() != nil {
 		cloned.IdleTtl = durationpb.New(spec.GetIdleTtl().AsDuration())
@@ -77,10 +76,10 @@ func cloneHealthcheck(healthcheck *agboxv1.HealthcheckConfig) *agboxv1.Healthche
 	return cloned
 }
 
-func cloneServiceSpecs(items []*agboxv1.ServiceSpec) []*agboxv1.ServiceSpec {
-	result := make([]*agboxv1.ServiceSpec, 0, len(items))
+func cloneCompanionContainerSpecs(items []*agboxv1.CompanionContainerSpec) []*agboxv1.CompanionContainerSpec {
+	result := make([]*agboxv1.CompanionContainerSpec, 0, len(items))
 	for _, item := range items {
-		result = append(result, &agboxv1.ServiceSpec{
+		result = append(result, &agboxv1.CompanionContainerSpec{
 			Name:               item.GetName(),
 			Image:              item.GetImage(),
 			Envs:               cloneStringMap(item.GetEnvs()),
@@ -96,17 +95,16 @@ func cloneHandle(handle *agboxv1.SandboxHandle) *agboxv1.SandboxHandle {
 		return nil
 	}
 	return &agboxv1.SandboxHandle{
-		SandboxId:         handle.GetSandboxId(),
-		State:             handle.GetState(),
-		LastEventSequence: handle.GetLastEventSequence(),
-		Labels:            cloneStringMap(handle.GetLabels()),
-		RequiredServices:  cloneServiceSpecs(handle.GetRequiredServices()),
-		OptionalServices:  cloneServiceSpecs(handle.GetOptionalServices()),
-		CreatedAt:         handle.GetCreatedAt(),
-		Image:             handle.GetImage(),
-		ErrorCode:         handle.GetErrorCode(),
-		ErrorMessage:      handle.GetErrorMessage(),
-		StateChangedAt:    handle.GetStateChangedAt(),
+		SandboxId:           handle.GetSandboxId(),
+		State:               handle.GetState(),
+		LastEventSequence:   handle.GetLastEventSequence(),
+		Labels:              cloneStringMap(handle.GetLabels()),
+		CompanionContainers: cloneCompanionContainerSpecs(handle.GetCompanionContainers()),
+		CreatedAt:           handle.GetCreatedAt(),
+		Image:               handle.GetImage(),
+		ErrorCode:           handle.GetErrorCode(),
+		ErrorMessage:        handle.GetErrorMessage(),
+		StateChangedAt:      handle.GetStateChangedAt(),
 	}
 }
 
@@ -192,13 +190,13 @@ func cloneEvent(event *agboxv1.SandboxEvent) *agboxv1.SandboxEvent {
 				},
 			}
 		}
-	case *agboxv1.SandboxEvent_Service:
-		if d != nil && d.Service != nil {
-			cloned.Details = &agboxv1.SandboxEvent_Service{
-				Service: &agboxv1.ServiceEventDetails{
-					ServiceName:  d.Service.GetServiceName(),
-					ErrorCode:    d.Service.GetErrorCode(),
-					ErrorMessage: d.Service.GetErrorMessage(),
+	case *agboxv1.SandboxEvent_CompanionContainer:
+		if d != nil && d.CompanionContainer != nil {
+			cloned.Details = &agboxv1.SandboxEvent_CompanionContainer{
+				CompanionContainer: &agboxv1.CompanionContainerEventDetails{
+					Name:         d.CompanionContainer.GetName(),
+					ErrorCode:    d.CompanionContainer.GetErrorCode(),
+					ErrorMessage: d.CompanionContainer.GetErrorMessage(),
 				},
 			}
 		}
