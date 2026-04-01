@@ -58,7 +58,7 @@ a:hover { color: var(--primary); }
   color: var(--primary); letter-spacing: -0.02em; text-decoration: none;
   display: flex; align-items: center; gap: 8px;
 }
-.nav-logo-box { width: 22px; height: 22px; border-radius: 5px; background: var(--accent); flex-shrink: 0; }
+.nav-logo-img { width: 28px; height: 28px; flex-shrink: 0; }
 .nav-links { display: flex; gap: 24px; }
 .nav-links a { font-size: 14px; color: var(--muted); transition: color 0.15s; }
 .nav-links a:hover { color: var(--primary); }
