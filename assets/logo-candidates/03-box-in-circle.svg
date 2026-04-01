@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Minimalist: circle boundary + cube -->
+  <defs>
+    <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer protection ring -->
+  <circle cx="256" cy="256" r="230" fill="none" stroke="#0EA5E9" stroke-width="8"/>
+  <circle cx="256" cy="256" r="210" fill="none" stroke="#0EA5E9" stroke-width="2" stroke-dasharray="12,8" opacity="0.5"/>
+  <!-- 3D Cube - sandbox -->
+  <polygon points="256,130 370,195 370,325 256,390 142,325 142,195" fill="#082F49"/>
+  <polygon points="256,130 370,195 256,260 142,195" fill="url(#g3)" opacity="0.9"/>
+  <polygon points="256,260 370,195 370,325 256,390" fill="#0284C7" opacity="0.7"/>
+  <polygon points="256,260 142,195 142,325 256,390" fill="#0369A1" opacity="0.8"/>
+  <!-- Agent symbol: robot eye on cube top -->
+  <ellipse cx="256" cy="195" rx="35" ry="20" fill="none" stroke="#7DD3FC" stroke-width="3"/>
+  <circle cx="256" cy="195" r="8" fill="#7DD3FC"/>
+  <!-- Scan lines on cube -->
+  <line x1="180" y1="230" x2="256" y2="270" stroke="#7DD3FC" stroke-width="1" opacity="0.3"/>
+  <line x1="180" y1="260" x2="256" y2="300" stroke="#7DD3FC" stroke-width="1" opacity="0.3"/>
+  <line x1="180" y1="290" x2="256" y2="330" stroke="#7DD3FC" stroke-width="1" opacity="0.3"/>
+</svg>

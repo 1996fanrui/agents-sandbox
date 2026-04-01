@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Diamond/rhombus shape with layered protection -->
+  <defs>
+    <linearGradient id="g11" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0E7490"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer diamond -->
+  <polygon points="256,32 480,256 256,480 32,256" fill="#083344" stroke="#06B6D4" stroke-width="5"/>
+  <!-- Middle diamond -->
+  <polygon points="256,80 432,256 256,432 80,256" fill="none" stroke="#06B6D4" stroke-width="2" stroke-dasharray="10,6" opacity="0.4"/>
+  <!-- Inner diamond -->
+  <polygon points="256,128 384,256 256,384 128,256" fill="#164E63" stroke="#22D3EE" stroke-width="3"/>
+  <!-- Container inside -->
+  <rect x="196" y="210" width="120" height="90" rx="8" fill="#083344" stroke="#67E8F9" stroke-width="2"/>
+  <line x1="196" y1="234" x2="316" y2="234" stroke="#67E8F9" stroke-width="1.5"/>
+  <!-- Mini dots -->
+  <circle cx="210" cy="222" r="3" fill="#F87171"/>
+  <circle cx="222" cy="222" r="3" fill="#FBBF24"/>
+  <circle cx="234" cy="222" r="3" fill="#34D399"/>
+  <!-- Terminal content -->
+  <text x="210" y="262" font-family="monospace" font-size="16" fill="#67E8F9">$ sandbox</text>
+  <text x="210" y="282" font-family="monospace" font-size="16" fill="#22D3EE">ready ✓</text>
+</svg>

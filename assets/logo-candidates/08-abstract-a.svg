@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Abstract "A" formed by container walls -->
+  <defs>
+    <linearGradient id="g8" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#1E1B4B"/>
+  <!-- Abstract A shape - two pillars + crossbar forming a container -->
+  <!-- Left pillar -->
+  <path d="M140,420 L210,92 L250,92 L210,420 Z" fill="url(#g8)"/>
+  <!-- Right pillar -->
+  <path d="M302,92 L342,92 L372,420 L332,420 Z" fill="url(#g8)"/>
+  <!-- Top connection -->
+  <path d="M210,92 L302,92 L290,130 L222,130 Z" fill="url(#g8)"/>
+  <!-- Crossbar - styled as container boundary -->
+  <rect x="185" y="260" width="180" height="8" rx="4" fill="#A5B4FC"/>
+  <!-- Sand particles inside the A (sandbox metaphor) -->
+  <circle cx="240" cy="350" r="6" fill="#C4B5FD" opacity="0.6"/>
+  <circle cx="270" cy="370" r="5" fill="#C4B5FD" opacity="0.5"/>
+  <circle cx="255" cy="340" r="7" fill="#C4B5FD" opacity="0.7"/>
+  <circle cx="225" cy="380" r="4" fill="#C4B5FD" opacity="0.4"/>
+  <circle cx="285" cy="355" r="5" fill="#C4B5FD" opacity="0.5"/>
+  <circle cx="260" cy="390" r="6" fill="#C4B5FD" opacity="0.6"/>
+  <circle cx="235" cy="360" r="4" fill="#C4B5FD" opacity="0.4"/>
+  <circle cx="290" cy="385" r="3" fill="#C4B5FD" opacity="0.3"/>
+  <circle cx="310" cy="370" r="4" fill="#C4B5FD" opacity="0.4"/>
+  <!-- Cursor inside -->
+  <text x="222" y="310" font-family="monospace" font-weight="bold" font-size="32" fill="#E0E7FF">&gt;_</text>
+</svg>

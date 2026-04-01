@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Letter mark: A+S combined -->
+  <defs>
+    <linearGradient id="g5" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="g5b" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="80" fill="#0F172A"/>
+  <!-- Letter A - styled as agent -->
+  <path d="M120,400 L220,120 L260,120 L200,400 Z" fill="url(#g5)"/>
+  <path d="M200,400 L260,120 L300,120 L240,400 Z" fill="#FBBF24" opacity="0.7"/>
+  <!-- A crossbar -->
+  <rect x="145" y="290" width="120" height="24" rx="4" fill="url(#g5)"/>
+  <!-- Letter S - styled as shield/boundary -->
+  <path d="M290,180 Q290,130 340,130 L400,130 Q430,130 430,160 Q430,200 380,210 L330,220 Q290,230 290,270 Q290,310 330,310 L400,310 Q430,310 430,340 Q430,380 390,380 L300,380"
+        fill="none" stroke="url(#g5b)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Accent dot -->
+  <circle cx="256" cy="80" r="10" fill="#F59E0B"/>
+</svg>

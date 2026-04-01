@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Shield + Container: shield outline with a cube inside and lightning bolt -->
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1E40AF"/>
+    </linearGradient>
+  </defs>
+  <!-- Shield -->
+  <path d="M256 48 L440 120 L440 280 Q440 400 256 472 Q72 400 72 280 L72 120 Z"
+        fill="url(#g1)" stroke="none"/>
+  <!-- Inner area -->
+  <path d="M256 72 L416 136 L416 276 Q416 384 256 448 Q96 384 96 276 L96 136 Z"
+        fill="#0F172A"/>
+  <!-- Container/box -->
+  <rect x="176" y="180" width="160" height="120" rx="12" fill="none" stroke="#60A5FA" stroke-width="6"/>
+  <line x1="176" y1="210" x2="336" y2="210" stroke="#60A5FA" stroke-width="4"/>
+  <!-- Three dots on container top bar -->
+  <circle cx="196" cy="195" r="5" fill="#F87171"/>
+  <circle cx="214" cy="195" r="5" fill="#FBBF24"/>
+  <circle cx="232" cy="195" r="5" fill="#34D399"/>
+  <!-- Lightning bolt inside container -->
+  <polygon points="270,220 245,265 262,265 240,310 290,255 272,255 290,220"
+           fill="#FBBF24"/>
+  <!-- Shield glow accent -->
+  <path d="M256 48 L440 120 L440 280 Q440 400 256 472 Q72 400 72 280 L72 120 Z"
+        fill="none" stroke="#60A5FA" stroke-width="3" opacity="0.5"/>
+</svg>

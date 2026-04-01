@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Hexagon sandbox with terminal cursor -->
+  <defs>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer hexagon -->
+  <polygon points="256,52 432,152 432,352 256,452 80,352 80,152"
+           fill="url(#g2)" stroke="none"/>
+  <!-- Inner hexagon -->
+  <polygon points="256,80 408,168 408,340 256,428 104,340 104,168"
+           fill="#1E1B4B"/>
+  <!-- Terminal window -->
+  <rect x="160" y="170" width="192" height="140" rx="10" fill="#0F0A2A" stroke="#A78BFA" stroke-width="3"/>
+  <line x1="160" y1="198" x2="352" y2="198" stroke="#A78BFA" stroke-width="2"/>
+  <circle cx="178" cy="184" r="4" fill="#F87171"/>
+  <circle cx="193" cy="184" r="4" fill="#FBBF24"/>
+  <circle cx="208" cy="184" r="4" fill="#34D399"/>
+  <!-- Terminal prompt -->
+  <text x="178" y="232" font-family="monospace" font-size="22" fill="#A78BFA">$</text>
+  <text x="200" y="232" font-family="monospace" font-size="22" fill="#E0E7FF">agent run</text>
+  <!-- Cursor blink -->
+  <rect x="178" y="245" width="10" height="18" fill="#34D399" opacity="0.8"/>
+  <!-- Isolation rings -->
+  <circle cx="256" cy="252" r="200" fill="none" stroke="#6366F1" stroke-width="2" stroke-dasharray="8,6" opacity="0.4"/>
+</svg>

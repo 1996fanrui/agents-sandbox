@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Ultra minimal: single box with cursor, clean modern -->
+  <defs>
+    <linearGradient id="g10" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="#022C22"/>
+  <!-- Main box outline -->
+  <rect x="96" y="96" width="320" height="320" rx="24" fill="none" stroke="#10B981" stroke-width="8"/>
+  <!-- Crossbar divider -->
+  <line x1="96" y1="168" x2="416" y2="168" stroke="#10B981" stroke-width="4"/>
+  <!-- Window controls -->
+  <circle cx="132" cy="132" r="8" fill="#EF4444"/>
+  <circle cx="160" cy="132" r="8" fill="#EAB308"/>
+  <circle cx="188" cy="132" r="8" fill="#22C55E"/>
+  <!-- Large cursor symbol -->
+  <text x="160" y="320" font-family="monospace" font-weight="bold" font-size="120" fill="url(#g10)">A</text>
+  <!-- Blinking cursor -->
+  <rect x="310" y="230" width="6" height="80" rx="3" fill="#34D399" opacity="0.8"/>
+</svg>

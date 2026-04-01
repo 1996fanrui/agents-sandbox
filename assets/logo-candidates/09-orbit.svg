@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Orbiting protection rings around a core -->
+  <defs>
+    <linearGradient id="g9" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#C2410C"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <circle cx="256" cy="256" r="250" fill="#1C1917"/>
+  <!-- Orbit rings -->
+  <ellipse cx="256" cy="256" rx="200" ry="80" fill="none" stroke="#F97316" stroke-width="3" opacity="0.3" transform="rotate(-30,256,256)"/>
+  <ellipse cx="256" cy="256" rx="200" ry="80" fill="none" stroke="#F97316" stroke-width="3" opacity="0.3" transform="rotate(30,256,256)"/>
+  <ellipse cx="256" cy="256" rx="200" ry="80" fill="none" stroke="#F97316" stroke-width="3" opacity="0.3" transform="rotate(90,256,256)"/>
+  <!-- Core -->
+  <circle cx="256" cy="256" r="70" fill="url(#g9)"/>
+  <circle cx="256" cy="256" r="55" fill="#431407"/>
+  <!-- Agent symbol in core -->
+  <text x="224" y="268" font-family="monospace" font-weight="bold" font-size="40" fill="#FB923C">&gt;_</text>
+  <!-- Orbital nodes (security checkpoints) -->
+  <circle cx="112" cy="140" r="10" fill="#F97316"/>
+  <circle cx="400" cy="140" r="10" fill="#F97316"/>
+  <circle cx="256" cy="56" r="10" fill="#F97316"/>
+  <circle cx="112" cy="372" r="10" fill="#F97316"/>
+  <circle cx="400" cy="372" r="10" fill="#F97316"/>
+  <circle cx="256" cy="456" r="10" fill="#F97316"/>
+</svg>
