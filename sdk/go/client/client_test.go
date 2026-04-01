@@ -21,7 +21,7 @@ func TestConversions(t *testing.T) {
 		SandboxId:         "sandbox-1",
 		State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
 		LastEventSequence: 1,
-		RequiredServices: []*agboxv1.ServiceSpec{
+		CompanionContainers: []*agboxv1.CompanionContainerSpec{
 			{
 				Name:  "postgres",
 				Image: "postgres:16",
@@ -33,8 +33,6 @@ func TestConversions(t *testing.T) {
 				},
 				PostStartOnPrimary: []string{"python", "-c", "print('seeded')"},
 			},
-		},
-		OptionalServices: []*agboxv1.ServiceSpec{
 			{Name: "redis", Image: "redis:7"},
 		},
 		Labels: map[string]string{"team": "sdk"},
@@ -48,8 +46,8 @@ func TestConversions(t *testing.T) {
 	if handle.Labels["team"] != "sdk" {
 		t.Fatalf("unexpected labels: %#v", handle.Labels)
 	}
-	if len(handle.RequiredServices) != 1 || handle.RequiredServices[0].Name != "postgres" {
-		t.Fatalf("unexpected required services: %#v", handle.RequiredServices)
+	if len(handle.CompanionContainers) != 2 || handle.CompanionContainers[0].Name != "postgres" {
+		t.Fatalf("unexpected companion containers: %#v", handle.CompanionContainers)
 	}
 
 	running := toExecHandle(&agboxv1.ExecStatus{
@@ -727,7 +725,7 @@ func TestSubscribeChannel(t *testing.T) {
 				t.Fatalf("unexpected subscribe args: %q %d %v", sandboxID, fromSequence, includeCurrentSnapshot)
 			}
 			return streamFromEvents([]*agboxv1.SandboxEvent{
-				eventPB("sandbox-1", 1, "", agboxv1.EventType_SANDBOX_SERVICE_READY),
+				eventPB("sandbox-1", 1, "", agboxv1.EventType_COMPANION_CONTAINER_READY),
 				eventPB("sandbox-1", 2, "", agboxv1.EventType_EXEC_FINISHED),
 			}, nil), nil
 		}
@@ -739,7 +737,7 @@ func TestSubscribeChannel(t *testing.T) {
 			}
 			got = append(got, item.Event.EventType)
 		}
-		if len(got) != 2 || got[0] != SandboxEventTypeSandboxServiceReady || got[1] != SandboxEventTypeExecFinished {
+		if len(got) != 2 || got[0] != SandboxEventTypeCompanionContainerReady || got[1] != SandboxEventTypeExecFinished {
 			t.Fatalf("unexpected events: %#v", got)
 		}
 	})

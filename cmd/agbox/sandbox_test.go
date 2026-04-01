@@ -410,10 +410,8 @@ func TestSandboxGet(t *testing.T) {
 					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
 					LastEventSequence: 7,
 					Labels:            map[string]string{"team": "backend", "env": "dev"},
-					RequiredServices: []*agboxv1.ServiceSpec{
+					CompanionContainers: []*agboxv1.CompanionContainerSpec{
 						{Name: "db", Image: "postgres:16"},
-					},
-					OptionalServices: []*agboxv1.ServiceSpec{
 						{Name: "cache", Image: "redis:7"},
 					},
 				},
@@ -434,8 +432,7 @@ func TestSandboxGet(t *testing.T) {
 		"state_changed_at=",
 		"last_event_sequence=7",
 		`labels={"env":"dev","team":"backend"}`,
-		`required_services=[{"name":"db","image":"postgres:16"}]`,
-		`optional_services=[{"name":"cache","image":"redis:7"}]`,
+		`companion_containers=[{"name":"db","image":"postgres:16"},{"name":"cache","image":"redis:7"}]`,
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("unexpected line count: %v", lines)
@@ -472,8 +469,7 @@ func TestSandboxGet(t *testing.T) {
 		"state_changed_at=",
 		"last_event_sequence=0",
 		"labels={}",
-		"required_services=[]",
-		"optional_services=[]",
+		"companion_containers=[]",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("unexpected line count: %v", lines)
@@ -522,8 +518,7 @@ func TestSandboxGetJSON(t *testing.T) {
 					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
 					LastEventSequence: 7,
 					Labels:            map[string]string{"env": "dev"},
-					RequiredServices:  []*agboxv1.ServiceSpec{},
-					OptionalServices:  []*agboxv1.ServiceSpec{},
+					CompanionContainers: []*agboxv1.CompanionContainerSpec{},
 				},
 			}, nil
 		},
@@ -542,7 +537,7 @@ func TestSandboxGetJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v", err)
 	}
-	for _, key := range []string{"sandbox_id", "state", "last_event_sequence", "labels", "required_services", "optional_services"} {
+	for _, key := range []string{"sandbox_id", "state", "last_event_sequence", "labels", "companion_containers"} {
 		if _, ok := payload.Sandbox[key]; !ok {
 			t.Fatalf("missing field %q in JSON: %#v", key, payload.Sandbox)
 		}

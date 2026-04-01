@@ -335,9 +335,7 @@ func (backend *capturingRuntimeBackend) CreateSandbox(_ context.Context, record 
 
 func (backend *capturingRuntimeBackend) ResumeSandbox(context.Context, *sandboxRecord) (runtimeResumeResult, error) {
 	return runtimeResumeResult{
-		ServiceStatuses: []runtimeServiceStatus{
-			{Name: "default", Required: true, Ready: true},
-		},
+		CompanionContainerStatuses: []companionContainerStatus{},
 	}, nil
 }
 
@@ -426,10 +424,10 @@ func eventErrorCode(event *agboxv1.SandboxEvent) string {
 	return ""
 }
 
-// eventServiceName extracts the service_name from a SandboxEvent's service details.
-func eventServiceName(event *agboxv1.SandboxEvent) string {
-	if svc, ok := event.GetDetails().(*agboxv1.SandboxEvent_Service); ok && svc != nil {
-		return svc.Service.GetServiceName()
+// eventCompanionContainerName extracts the name from a SandboxEvent's companion container details.
+func eventCompanionContainerName(event *agboxv1.SandboxEvent) string {
+	if cc, ok := event.GetDetails().(*agboxv1.SandboxEvent_CompanionContainer); ok && cc != nil {
+		return cc.CompanionContainer.GetName()
 	}
 	return ""
 }

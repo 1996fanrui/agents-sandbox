@@ -47,8 +47,8 @@ enum EventType {
   EXEC_FINISHED = 10;
   EXEC_FAILED = 11;
   EXEC_CANCELLED = 12;
-  SANDBOX_SERVICE_READY = 13;
-  SANDBOX_SERVICE_FAILED = 14;
+  COMPANION_CONTAINER_READY = 13;
+  COMPANION_CONTAINER_FAILED = 14;
 }
 
 enum ExecState {
@@ -87,7 +87,7 @@ message HealthcheckConfig {
   google.protobuf.Duration start_interval = 6;
 }
 
-message ServiceSpec {
+message CompanionContainerSpec {
   string name = 1;
   string image = 2;
   map<string, string> envs = 3;
@@ -100,26 +100,24 @@ message CreateSpec {
   repeated MountSpec mounts = 2;
   repeated CopySpec copies = 3;
   repeated string builtin_tools = 4;
-  repeated ServiceSpec required_services = 5;
-  repeated ServiceSpec optional_services = 6;
-  map<string, string> labels = 7;
-  map<string, string> envs = 8;
+  repeated CompanionContainerSpec companion_containers = 5;
+  map<string, string> labels = 6;
+  map<string, string> envs = 7;
   // Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
-  google.protobuf.Duration idle_ttl = 9;
+  google.protobuf.Duration idle_ttl = 8;
 }
 
 message SandboxHandle {
   string sandbox_id = 1;
   SandboxState state = 2;
   uint64 last_event_sequence = 3;
-  repeated ServiceSpec required_services = 4;
-  repeated ServiceSpec optional_services = 5;
-  map<string, string> labels = 6;
-  google.protobuf.Timestamp created_at = 7;
-  string image = 8;
-  string error_code = 9;
-  string error_message = 10;
-  google.protobuf.Timestamp state_changed_at = 11;
+  repeated CompanionContainerSpec companion_containers = 4;
+  map<string, string> labels = 5;
+  google.protobuf.Timestamp created_at = 6;
+  string image = 7;
+  string error_code = 8;
+  string error_message = 9;
+  google.protobuf.Timestamp state_changed_at = 10;
 }
 
 message SandboxPhaseDetails {
@@ -137,8 +135,8 @@ message ExecEventDetails {
   string error_message = 5;
 }
 
-message ServiceEventDetails {
-  string service_name = 1;
+message CompanionContainerEventDetails {
+  string name = 1;
   string error_code = 2;
   string error_message = 3;
 }
@@ -155,7 +153,7 @@ message SandboxEvent {
   oneof details {
     SandboxPhaseDetails sandbox_phase = 9;
     ExecEventDetails exec = 10;
-    ServiceEventDetails service = 11;
+    CompanionContainerEventDetails companion_container = 11;
   }
 }
 

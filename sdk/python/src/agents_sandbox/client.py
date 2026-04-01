@@ -33,6 +33,7 @@ from .errors import (
 from .models import SandboxState
 from ._request_types import CreateExecRequest, CreateSandboxRequest, CreateSandboxSpec
 from .types import (
+    CompanionContainerSpec,
     CopySpec,
     DeleteSandboxesResult,
     ExecHandle,
@@ -40,7 +41,6 @@ from .types import (
     PingInfo,
     SandboxEvent,
     SandboxHandle,
-    ServiceSpec,
 )
 
 
@@ -129,8 +129,7 @@ class AgentsSandboxClient:
         mounts: tuple[MountSpec, ...] = (),
         copies: tuple[CopySpec, ...] = (),
         builtin_tools: tuple[str, ...] = (),
-        required_services: tuple[ServiceSpec, ...] = (),
-        optional_services: tuple[ServiceSpec, ...] = (),
+        companion_containers: tuple[CompanionContainerSpec, ...] = (),
         labels: Mapping[str, str] | None = None,
         envs: Mapping[str, str] | None = None,
         idle_ttl: datetime.timedelta | None = None,
@@ -155,8 +154,7 @@ class AgentsSandboxClient:
                 mounts=mounts,
                 copies=copies,
                 builtin_tools=builtin_tools,
-                required_services=required_services,
-                optional_services=optional_services,
+                companion_containers=companion_containers,
                 labels={} if labels is None else dict(labels),
                 envs={} if envs is None else dict(envs),
                 idle_ttl=idle_ttl,

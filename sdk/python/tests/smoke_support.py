@@ -21,10 +21,10 @@ from grpc_status import rpc_status
 import agents_sandbox.client as client_module
 from agents_sandbox import (
     AgentsSandboxClient,
+    CompanionContainerSpec,
     HealthcheckConfig,
     MountSpec,
     SandboxEvent,
-    ServiceSpec,
 )
 from agents_sandbox._generated import service_pb2, service_pb2_grpc
 
@@ -64,8 +64,8 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
     sandbox = await client.create_sandbox(
         image="python:3.12-slim",
         sandbox_id="sandbox-1",
-        required_services=(
-            ServiceSpec(
+        companion_containers=(
+            CompanionContainerSpec(
                 name="postgres",
                 image="postgres:16",
                 envs={"POSTGRES_DB": "agents"},
@@ -75,9 +75,7 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
                 ),
                 post_start_on_primary=("python", "-c", "print('seeded')"),
             ),
-        ),
-        optional_services=(
-            ServiceSpec(
+            CompanionContainerSpec(
                 name="redis",
                 image="redis:7",
             ),
@@ -110,8 +108,8 @@ async def _exercise_public_client(socket_path: Path) -> dict[str, object]:
         "exec_last_event_sequence": exec_handle.last_event_sequence,
         "deleted_count": delete_result.deleted_count,
         "event_types": [event.event_type for event in events],
-        "service_names": [
-            event.service.service_name if event.service else None
+        "companion_container_names": [
+            event.companion_container.name if event.companion_container else None
             for event in events
         ],
     }
@@ -259,8 +257,8 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
             sandbox=service_pb2.SandboxHandle(
                 sandbox_id=request.sandbox_id,
                 state=service_pb2.SANDBOX_STATE_READY,
-                required_services=[
-                    service_pb2.ServiceSpec(
+                companion_containers=[
+                    service_pb2.CompanionContainerSpec(
                         name="postgres",
                         image="postgres:16",
                         envs={"POSTGRES_DB": "agents"},
@@ -270,13 +268,11 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
                             retries=5,
                         ),
                         post_start_on_primary=["python", "-c", "print('seeded')"],
-                    )
-                ],
-                optional_services=[
-                    service_pb2.ServiceSpec(
+                    ),
+                    service_pb2.CompanionContainerSpec(
                         name="redis",
                         image="redis:7",
-                    )
+                    ),
                 ],
                 labels={"team": "sdk", "purpose": "smoke"},
                 last_event_sequence=2,
@@ -323,10 +319,10 @@ class _RecordingSandboxService(service_pb2_grpc.SandboxServiceServicer):
         yield _event_pb(
             sandbox_id=request.sandbox_id,
             sequence=2,
-            event_type=service_pb2.SANDBOX_SERVICE_READY,
+            event_type=service_pb2.COMPANION_CONTAINER_READY,
             replay=True,
             snapshot=True,
-            service_name="postgres",
+            companion_container_name="postgres",
         )
         yield _event_pb(
             sandbox_id=request.sandbox_id,
@@ -406,7 +402,7 @@ def _event_pb(
     snapshot: bool = False,
     sandbox_state: int = service_pb2.SANDBOX_STATE_UNSPECIFIED,
     exec_state: int = service_pb2.EXEC_STATE_UNSPECIFIED,
-    service_name: str = "",
+    companion_container_name: str = "",
     exec_id: str = "",
     exit_code: int = 0,
 ) -> service_pb2.SandboxEvent:
@@ -426,9 +422,9 @@ def _event_pb(
             exit_code=exit_code,
             exec_state=exec_state,
         ))
-    elif service_name:
-        event.service.CopyFrom(service_pb2.ServiceEventDetails(
-            service_name=service_name,
+    elif companion_container_name:
+        event.companion_container.CopyFrom(service_pb2.CompanionContainerEventDetails(
+            name=companion_container_name,
         ))
     return event
 

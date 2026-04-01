@@ -31,8 +31,8 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		"owner": "team-a",
 		"env":   "dev",
 	}
-	requiredContainerName := dockerServiceContainerName(sandboxID, "db")
-	optionalContainerName := dockerServiceContainerName(sandboxID, "cache")
+	dbContainerName := dockerCompanionContainerName(sandboxID, "db")
+	cacheContainerName := dockerCompanionContainerName(sandboxID, "cache")
 	primaryContainerName := dockerPrimaryContainerName(sandboxID)
 
 	var mu sync.Mutex
@@ -68,7 +68,7 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 			writeDockerJSON(t, w, map[string]string{"Id": name})
 		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/start"):
 			w.WriteHeader(http.StatusNoContent)
-		case r.Method == http.MethodGet && path == "/containers/"+requiredContainerName+"/json":
+		case r.Method == http.MethodGet && path == "/containers/"+dbContainerName+"/json":
 			writeDockerJSON(t, w, container.InspectResponse{
 				ContainerJSONBase: &container.ContainerJSONBase{
 					State: &container.State{
@@ -98,7 +98,7 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 			Image:  "ghcr.io/agents-sandbox/coding-runtime:test",
 			Labels: userLabels,
 		},
-		requiredServices: []*agboxv1.ServiceSpec{
+		companionContainers: []*agboxv1.CompanionContainerSpec{
 			{
 				Name:  "db",
 				Image: "postgres:16",
@@ -106,8 +106,6 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 					Test: []string{"CMD", "true"},
 				},
 			},
-		},
-		optionalServices: []*agboxv1.ServiceSpec{
 			{
 				Name:  "cache",
 				Image: "redis:7",
@@ -118,9 +116,9 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
 
-	statuses := collectRuntimeServiceStatuses(result.OptionalServiceStatuses)
-	if len(statuses) != 1 || !statuses[0].Ready || statuses[0].Name != "cache" {
-		t.Fatalf("unexpected optional service statuses: %#v", statuses)
+	statuses := collectCompanionContainerStatuses(result.CompanionContainerStatuses)
+	if len(statuses) != 2 {
+		t.Fatalf("unexpected companion container statuses count: %#v", statuses)
 	}
 
 	assertUserDockerLabels(t, networkLabels, map[string]string{
@@ -130,19 +128,19 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		runtimedocker.LabelUserPrefix + "owner": "team-a",
 		runtimedocker.LabelUserPrefix + "env":   "dev",
 	})
-	assertUserDockerLabels(t, containerLabels[requiredContainerName], map[string]string{
-		runtimedocker.LabelSandboxID:            sandboxID,
-		runtimedocker.LabelComponent:            "service",
-		runtimedocker.LabelServiceName:          "db",
-		runtimedocker.LabelUserPrefix + "owner": "team-a",
-		runtimedocker.LabelUserPrefix + "env":   "dev",
+	assertUserDockerLabels(t, containerLabels[dbContainerName], map[string]string{
+		runtimedocker.LabelSandboxID:                sandboxID,
+		runtimedocker.LabelComponent:                "companion",
+		runtimedocker.LabelCompanionContainerName:   "db",
+		runtimedocker.LabelUserPrefix + "owner":     "team-a",
+		runtimedocker.LabelUserPrefix + "env":       "dev",
 	})
-	assertUserDockerLabels(t, containerLabels[optionalContainerName], map[string]string{
-		runtimedocker.LabelSandboxID:            sandboxID,
-		runtimedocker.LabelComponent:            "service",
-		runtimedocker.LabelServiceName:          "cache",
-		runtimedocker.LabelUserPrefix + "owner": "team-a",
-		runtimedocker.LabelUserPrefix + "env":   "dev",
+	assertUserDockerLabels(t, containerLabels[cacheContainerName], map[string]string{
+		runtimedocker.LabelSandboxID:                sandboxID,
+		runtimedocker.LabelComponent:                "companion",
+		runtimedocker.LabelCompanionContainerName:   "cache",
+		runtimedocker.LabelUserPrefix + "owner":     "team-a",
+		runtimedocker.LabelUserPrefix + "env":       "dev",
 	})
 	assertUserDockerLabels(t, containerLabels[primaryContainerName], map[string]string{
 		runtimedocker.LabelSandboxID:            sandboxID,
@@ -229,7 +227,7 @@ func assertUserDockerLabels(t *testing.T, got map[string]string, want map[string
 	}
 }
 
-func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
+func TestCompanionContainerHealthcheckValidationAndPassthrough(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -241,7 +239,7 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 		SandboxId: "health-pass-through",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			RequiredServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{
 					Name:  "db",
 					Image: "postgres:16",
@@ -254,8 +252,6 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 						StartInterval: durationpb.New(2 * time.Second),
 					},
 				},
-			},
-			OptionalServices: []*agboxv1.ServiceSpec{
 				{
 					Name:  "cache",
 					Image: "redis:7",
@@ -273,7 +269,7 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 	if runtime.lastCreateSpec == nil {
 		t.Fatal("runtime did not receive create spec")
 	}
-	healthcheck := runtime.lastCreateSpec.GetRequiredServices()[0].GetHealthcheck()
+	healthcheck := runtime.lastCreateSpec.GetCompanionContainers()[0].GetHealthcheck()
 	if healthcheck.GetInterval().AsDuration() != 2*time.Second || healthcheck.GetTimeout().AsDuration() != time.Second || healthcheck.GetRetries() != 4 || healthcheck.GetStartPeriod().AsDuration() != 10*time.Second || healthcheck.GetStartInterval().AsDuration() != 2*time.Second {
 		t.Fatalf("healthcheck was not passed through: %#v", healthcheck)
 	}
@@ -284,47 +280,25 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 		errMsg string
 	}{
 		{
-			name: "required_missing_healthcheck",
+			name: "invalid_test_keyword",
 			spec: &agboxv1.CreateSpec{
 				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-				RequiredServices: []*agboxv1.ServiceSpec{
-					{Name: "db", Image: "postgres:16"},
-				},
-			},
-			errMsg: "must define healthcheck",
-		},
-		{
-			name: "required_invalid_none_test",
-			spec: &agboxv1.CreateSpec{
-				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-				RequiredServices: []*agboxv1.ServiceSpec{
-					{Name: "db", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"NONE"}}},
-				},
-			},
-			errMsg: "is invalid",
-		},
-		{
-			name: "optional_invalid_test_keyword",
-			spec: &agboxv1.CreateSpec{
-				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-				OptionalServices: []*agboxv1.ServiceSpec{
+				CompanionContainers: []*agboxv1.CompanionContainerSpec{
 					{Name: "cache", Image: "redis:7", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"INVALID"}}},
 				},
 			},
 			errMsg: "is invalid",
 		},
 		{
-			name: "duplicate_service_name_across_sets",
+			name: "duplicate_name",
 			spec: &agboxv1.CreateSpec{
 				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-				RequiredServices: []*agboxv1.ServiceSpec{
-					{Name: "db", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
-				},
-				OptionalServices: []*agboxv1.ServiceSpec{
+				CompanionContainers: []*agboxv1.CompanionContainerSpec{
+					{Name: "db", Image: "postgres:16"},
 					{Name: "db", Image: "redis:7"},
 				},
 			},
-			errMsg: "duplicate service name",
+			errMsg: "duplicate companion container name",
 		},
 	}
 	for _, testCase := range invalidCases {
@@ -340,10 +314,10 @@ func TestServiceHealthcheckValidationAndPassthrough(t *testing.T) {
 	}
 }
 
-func TestPostStartOnPrimaryRequiredOnly(t *testing.T) {
-	requiredSpec := &agboxv1.CreateSpec{
+func TestPostStartOnPrimaryRequiresHealthcheck(t *testing.T) {
+	validSpec := &agboxv1.CreateSpec{
 		Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-		RequiredServices: []*agboxv1.ServiceSpec{
+		CompanionContainers: []*agboxv1.CompanionContainerSpec{
 			{
 				Name:               "db",
 				Image:              "postgres:16",
@@ -352,13 +326,13 @@ func TestPostStartOnPrimaryRequiredOnly(t *testing.T) {
 			},
 		},
 	}
-	if err := validateCreateSpec(requiredSpec); err != nil {
-		t.Fatalf("required service post_start_on_primary should be valid: %v", err)
+	if err := validateCreateSpec(validSpec); err != nil {
+		t.Fatalf("companion container post_start_on_primary with healthcheck should be valid: %v", err)
 	}
 
-	optionalSpec := &agboxv1.CreateSpec{
+	invalidSpec := &agboxv1.CreateSpec{
 		Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-		OptionalServices: []*agboxv1.ServiceSpec{
+		CompanionContainers: []*agboxv1.CompanionContainerSpec{
 			{
 				Name:               "cache",
 				Image:              "redis:7",
@@ -366,25 +340,23 @@ func TestPostStartOnPrimaryRequiredOnly(t *testing.T) {
 			},
 		},
 	}
-	if err := validateCreateSpec(optionalSpec); err == nil || !strings.Contains(err.Error(), "with post_start_on_primary must define healthcheck") {
-		t.Fatalf("optional service post_start_on_primary should be rejected, got %v", err)
+	if err := validateCreateSpec(invalidSpec); err == nil || !strings.Contains(err.Error(), "with post_start_on_primary must define healthcheck") {
+		t.Fatalf("companion container post_start_on_primary without healthcheck should be rejected, got %v", err)
 	}
 }
 
-func TestServiceLifecycleForResumeStopAndDelete(t *testing.T) {
+func TestCompanionContainerLifecycleForResumeStopAndDelete(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
 		PollInterval:    2 * time.Millisecond,
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxId: "service-lifecycle",
+		SandboxId: "cc-lifecycle",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			RequiredServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{Name: "db", Image: "postgres:16", Healthcheck: &agboxv1.HealthcheckConfig{Test: []string{"CMD", "true"}}},
-			},
-			OptionalServices: []*agboxv1.ServiceSpec{
 				{Name: "cache", Image: "redis:7"},
 			},
 		},
@@ -450,22 +422,20 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"mounts",
 				"copies",
 				"builtin_tools",
-				"required_services",
-				"optional_services",
+				"companion_containers",
 				"labels",
 				"envs",
 				"idle_ttl",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"image":             1,
-				"mounts":            2,
-				"copies":            3,
-				"builtin_tools":     4,
-				"required_services": 5,
-				"optional_services": 6,
-				"labels":            7,
-				"envs":              8,
-				"idle_ttl":          9,
+				"image":                1,
+				"mounts":               2,
+				"copies":               3,
+				"builtin_tools":        4,
+				"companion_containers": 5,
+				"labels":               6,
+				"envs":                 7,
+				"idle_ttl":             8,
 			},
 		},
 		{
@@ -475,8 +445,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"sandbox_id",
 				"state",
 				"last_event_sequence",
-				"required_services",
-				"optional_services",
+				"companion_containers",
 				"labels",
 				"created_at",
 				"image",
@@ -485,17 +454,16 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"state_changed_at",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"sandbox_id":          1,
-				"state":               2,
-				"last_event_sequence": 3,
-				"required_services":   4,
-				"optional_services":   5,
-				"labels":              6,
-				"created_at":          7,
-				"image":               8,
-				"error_code":          9,
-				"error_message":       10,
-				"state_changed_at":    11,
+				"sandbox_id":           1,
+				"state":                2,
+				"last_event_sequence":  3,
+				"companion_containers": 4,
+				"labels":               5,
+				"created_at":           6,
+				"image":                7,
+				"error_code":           8,
+				"error_message":        9,
+				"state_changed_at":     10,
 			},
 		},
 		{
@@ -512,20 +480,20 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"sandbox_state",
 				"sandbox_phase",
 				"exec",
-				"service",
+				"companion_container",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"event_id":      1,
-				"sequence":      2,
-				"sandbox_id":    3,
-				"event_type":    4,
-				"occurred_at":   5,
-				"replay":        6,
-				"snapshot":      7,
-				"sandbox_state": 8,
-				"sandbox_phase": 9,
-				"exec":          10,
-				"service":       11,
+				"event_id":             1,
+				"sequence":             2,
+				"sandbox_id":           3,
+				"event_type":           4,
+				"occurred_at":          5,
+				"replay":               6,
+				"snapshot":             7,
+				"sandbox_state":        8,
+				"sandbox_phase":        9,
+				"exec":                 10,
+				"companion_container":  11,
 			},
 		},
 		{
@@ -678,23 +646,23 @@ func TestMaterializeBuiltinToolsSkipsOptionalWhenHostPathMissing(t *testing.T) {
 	}
 }
 
-func TestProtoEventTypesForServices(t *testing.T) {
+func TestProtoEventTypesForCompanionContainers(t *testing.T) {
 	values := agboxv1.EventType(0).Descriptor().Values()
 	sandboxReady := values.ByName("SANDBOX_READY")
-	ready := values.ByName("SANDBOX_SERVICE_READY")
-	failed := values.ByName("SANDBOX_SERVICE_FAILED")
+	ready := values.ByName("COMPANION_CONTAINER_READY")
+	failed := values.ByName("COMPANION_CONTAINER_FAILED")
 	if sandboxReady == nil || ready == nil || failed == nil {
-		t.Fatalf("service event enums are missing: sandbox_ready=%v ready=%v failed=%v", sandboxReady, ready, failed)
+		t.Fatalf("companion container event enums are missing: sandbox_ready=%v ready=%v failed=%v", sandboxReady, ready, failed)
 	}
 	if sandboxReady.Number() != 3 {
 		t.Fatalf("unexpected sandbox ready enum number: got=%d want=3", sandboxReady.Number())
 	}
 	if ready.Number() != 13 || failed.Number() != 14 {
-		t.Fatalf("unexpected service event enum numbers: ready=%d failed=%d", ready.Number(), failed.Number())
+		t.Fatalf("unexpected companion container event enum numbers: ready=%d failed=%d", ready.Number(), failed.Number())
 	}
-	legacyName := strings.Join([]string{"SANDBOX", "DEPENDENCY", "READY"}, "_")
+	legacyName := strings.Join([]string{"SANDBOX", "SERVICE", "READY"}, "_")
 	if values.ByName(protoreflect.Name(legacyName)) != nil {
-		t.Fatal("legacy dependency event enum should not exist")
+		t.Fatal("legacy service event enum should not exist")
 	}
 }
 

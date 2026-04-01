@@ -184,8 +184,8 @@ func dockerPrimaryContainerName(sandboxID string) string {
 	return "agbox-primary-" + sanitizeRuntimeName(sandboxID)
 }
 
-func dockerServiceContainerName(sandboxID string, serviceName string) string {
-	return "agbox-svc-" + sanitizeRuntimeName(sandboxID) + "-" + sanitizeRuntimeName(serviceName)
+func dockerCompanionContainerName(sandboxID string, name string) string {
+	return "agbox-cc-" + sanitizeRuntimeName(sandboxID) + "-" + sanitizeRuntimeName(name)
 }
 
 func sanitizeRuntimeName(value string) string {

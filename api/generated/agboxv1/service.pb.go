@@ -87,21 +87,21 @@ func (SandboxState) EnumDescriptor() ([]byte, []int) {
 type EventType int32
 
 const (
-	EventType_EVENT_TYPE_UNSPECIFIED   EventType = 0
-	EventType_SANDBOX_ACCEPTED         EventType = 1
-	EventType_SANDBOX_PREPARING        EventType = 2
-	EventType_SANDBOX_READY            EventType = 3
-	EventType_SANDBOX_FAILED           EventType = 4
-	EventType_SANDBOX_STOP_REQUESTED   EventType = 5
-	EventType_SANDBOX_STOPPED          EventType = 6
-	EventType_SANDBOX_DELETE_REQUESTED EventType = 7
-	EventType_SANDBOX_DELETED          EventType = 8
-	EventType_EXEC_STARTED             EventType = 9
-	EventType_EXEC_FINISHED            EventType = 10
-	EventType_EXEC_FAILED              EventType = 11
-	EventType_EXEC_CANCELLED           EventType = 12
-	EventType_SANDBOX_SERVICE_READY    EventType = 13
-	EventType_SANDBOX_SERVICE_FAILED   EventType = 14
+	EventType_EVENT_TYPE_UNSPECIFIED     EventType = 0
+	EventType_SANDBOX_ACCEPTED           EventType = 1
+	EventType_SANDBOX_PREPARING          EventType = 2
+	EventType_SANDBOX_READY              EventType = 3
+	EventType_SANDBOX_FAILED             EventType = 4
+	EventType_SANDBOX_STOP_REQUESTED     EventType = 5
+	EventType_SANDBOX_STOPPED            EventType = 6
+	EventType_SANDBOX_DELETE_REQUESTED   EventType = 7
+	EventType_SANDBOX_DELETED            EventType = 8
+	EventType_EXEC_STARTED               EventType = 9
+	EventType_EXEC_FINISHED              EventType = 10
+	EventType_EXEC_FAILED                EventType = 11
+	EventType_EXEC_CANCELLED             EventType = 12
+	EventType_COMPANION_CONTAINER_READY  EventType = 13
+	EventType_COMPANION_CONTAINER_FAILED EventType = 14
 )
 
 // Enum value maps for EventType.
@@ -120,25 +120,25 @@ var (
 		10: "EXEC_FINISHED",
 		11: "EXEC_FAILED",
 		12: "EXEC_CANCELLED",
-		13: "SANDBOX_SERVICE_READY",
-		14: "SANDBOX_SERVICE_FAILED",
+		13: "COMPANION_CONTAINER_READY",
+		14: "COMPANION_CONTAINER_FAILED",
 	}
 	EventType_value = map[string]int32{
-		"EVENT_TYPE_UNSPECIFIED":   0,
-		"SANDBOX_ACCEPTED":         1,
-		"SANDBOX_PREPARING":        2,
-		"SANDBOX_READY":            3,
-		"SANDBOX_FAILED":           4,
-		"SANDBOX_STOP_REQUESTED":   5,
-		"SANDBOX_STOPPED":          6,
-		"SANDBOX_DELETE_REQUESTED": 7,
-		"SANDBOX_DELETED":          8,
-		"EXEC_STARTED":             9,
-		"EXEC_FINISHED":            10,
-		"EXEC_FAILED":              11,
-		"EXEC_CANCELLED":           12,
-		"SANDBOX_SERVICE_READY":    13,
-		"SANDBOX_SERVICE_FAILED":   14,
+		"EVENT_TYPE_UNSPECIFIED":     0,
+		"SANDBOX_ACCEPTED":           1,
+		"SANDBOX_PREPARING":          2,
+		"SANDBOX_READY":              3,
+		"SANDBOX_FAILED":             4,
+		"SANDBOX_STOP_REQUESTED":     5,
+		"SANDBOX_STOPPED":            6,
+		"SANDBOX_DELETE_REQUESTED":   7,
+		"SANDBOX_DELETED":            8,
+		"EXEC_STARTED":               9,
+		"EXEC_FINISHED":              10,
+		"EXEC_FAILED":                11,
+		"EXEC_CANCELLED":             12,
+		"COMPANION_CONTAINER_READY":  13,
+		"COMPANION_CONTAINER_FAILED": 14,
 	}
 )
 
@@ -516,7 +516,7 @@ func (x *HealthcheckConfig) GetStartInterval() *durationpb.Duration {
 	return nil
 }
 
-type ServiceSpec struct {
+type CompanionContainerSpec struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Image              string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
@@ -527,20 +527,20 @@ type ServiceSpec struct {
 	sizeCache          protoimpl.SizeCache
 }
 
-func (x *ServiceSpec) Reset() {
-	*x = ServiceSpec{}
+func (x *CompanionContainerSpec) Reset() {
+	*x = CompanionContainerSpec{}
 	mi := &file_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ServiceSpec) String() string {
+func (x *CompanionContainerSpec) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ServiceSpec) ProtoMessage() {}
+func (*CompanionContainerSpec) ProtoMessage() {}
 
-func (x *ServiceSpec) ProtoReflect() protoreflect.Message {
+func (x *CompanionContainerSpec) ProtoReflect() protoreflect.Message {
 	mi := &file_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -552,40 +552,40 @@ func (x *ServiceSpec) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ServiceSpec.ProtoReflect.Descriptor instead.
-func (*ServiceSpec) Descriptor() ([]byte, []int) {
+// Deprecated: Use CompanionContainerSpec.ProtoReflect.Descriptor instead.
+func (*CompanionContainerSpec) Descriptor() ([]byte, []int) {
 	return file_service_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *ServiceSpec) GetName() string {
+func (x *CompanionContainerSpec) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *ServiceSpec) GetImage() string {
+func (x *CompanionContainerSpec) GetImage() string {
 	if x != nil {
 		return x.Image
 	}
 	return ""
 }
 
-func (x *ServiceSpec) GetEnvs() map[string]string {
+func (x *CompanionContainerSpec) GetEnvs() map[string]string {
 	if x != nil {
 		return x.Envs
 	}
 	return nil
 }
 
-func (x *ServiceSpec) GetHealthcheck() *HealthcheckConfig {
+func (x *CompanionContainerSpec) GetHealthcheck() *HealthcheckConfig {
 	if x != nil {
 		return x.Healthcheck
 	}
 	return nil
 }
 
-func (x *ServiceSpec) GetPostStartOnPrimary() []string {
+func (x *CompanionContainerSpec) GetPostStartOnPrimary() []string {
 	if x != nil {
 		return x.PostStartOnPrimary
 	}
@@ -593,17 +593,16 @@ func (x *ServiceSpec) GetPostStartOnPrimary() []string {
 }
 
 type CreateSpec struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Image            string                 `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
-	Mounts           []*MountSpec           `protobuf:"bytes,2,rep,name=mounts,proto3" json:"mounts,omitempty"`
-	Copies           []*CopySpec            `protobuf:"bytes,3,rep,name=copies,proto3" json:"copies,omitempty"`
-	BuiltinTools     []string               `protobuf:"bytes,4,rep,name=builtin_tools,json=builtinTools,proto3" json:"builtin_tools,omitempty"`
-	RequiredServices []*ServiceSpec         `protobuf:"bytes,5,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
-	OptionalServices []*ServiceSpec         `protobuf:"bytes,6,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
-	Labels           map[string]string      `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Envs             map[string]string      `protobuf:"bytes,8,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state               protoimpl.MessageState    `protogen:"open.v1"`
+	Image               string                    `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
+	Mounts              []*MountSpec              `protobuf:"bytes,2,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	Copies              []*CopySpec               `protobuf:"bytes,3,rep,name=copies,proto3" json:"copies,omitempty"`
+	BuiltinTools        []string                  `protobuf:"bytes,4,rep,name=builtin_tools,json=builtinTools,proto3" json:"builtin_tools,omitempty"`
+	CompanionContainers []*CompanionContainerSpec `protobuf:"bytes,5,rep,name=companion_containers,json=companionContainers,proto3" json:"companion_containers,omitempty"`
+	Labels              map[string]string         `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Envs                map[string]string         `protobuf:"bytes,7,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
-	IdleTtl       *durationpb.Duration `protobuf:"bytes,9,opt,name=idle_ttl,json=idleTtl,proto3" json:"idle_ttl,omitempty"`
+	IdleTtl       *durationpb.Duration `protobuf:"bytes,8,opt,name=idle_ttl,json=idleTtl,proto3" json:"idle_ttl,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -666,16 +665,9 @@ func (x *CreateSpec) GetBuiltinTools() []string {
 	return nil
 }
 
-func (x *CreateSpec) GetRequiredServices() []*ServiceSpec {
+func (x *CreateSpec) GetCompanionContainers() []*CompanionContainerSpec {
 	if x != nil {
-		return x.RequiredServices
-	}
-	return nil
-}
-
-func (x *CreateSpec) GetOptionalServices() []*ServiceSpec {
-	if x != nil {
-		return x.OptionalServices
+		return x.CompanionContainers
 	}
 	return nil
 }
@@ -702,20 +694,19 @@ func (x *CreateSpec) GetIdleTtl() *durationpb.Duration {
 }
 
 type SandboxHandle struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	SandboxId         string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
-	State             SandboxState           `protobuf:"varint,2,opt,name=state,proto3,enum=agbox.v1.SandboxState" json:"state,omitempty"`
-	LastEventSequence uint64                 `protobuf:"varint,3,opt,name=last_event_sequence,json=lastEventSequence,proto3" json:"last_event_sequence,omitempty"`
-	RequiredServices  []*ServiceSpec         `protobuf:"bytes,4,rep,name=required_services,json=requiredServices,proto3" json:"required_services,omitempty"`
-	OptionalServices  []*ServiceSpec         `protobuf:"bytes,5,rep,name=optional_services,json=optionalServices,proto3" json:"optional_services,omitempty"`
-	Labels            map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Image             string                 `protobuf:"bytes,8,opt,name=image,proto3" json:"image,omitempty"`
-	ErrorCode         string                 `protobuf:"bytes,9,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
-	ErrorMessage      string                 `protobuf:"bytes,10,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	StateChangedAt    *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=state_changed_at,json=stateChangedAt,proto3" json:"state_changed_at,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState    `protogen:"open.v1"`
+	SandboxId           string                    `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
+	State               SandboxState              `protobuf:"varint,2,opt,name=state,proto3,enum=agbox.v1.SandboxState" json:"state,omitempty"`
+	LastEventSequence   uint64                    `protobuf:"varint,3,opt,name=last_event_sequence,json=lastEventSequence,proto3" json:"last_event_sequence,omitempty"`
+	CompanionContainers []*CompanionContainerSpec `protobuf:"bytes,4,rep,name=companion_containers,json=companionContainers,proto3" json:"companion_containers,omitempty"`
+	Labels              map[string]string         `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CreatedAt           *timestamppb.Timestamp    `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Image               string                    `protobuf:"bytes,7,opt,name=image,proto3" json:"image,omitempty"`
+	ErrorCode           string                    `protobuf:"bytes,8,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage        string                    `protobuf:"bytes,9,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	StateChangedAt      *timestamppb.Timestamp    `protobuf:"bytes,10,opt,name=state_changed_at,json=stateChangedAt,proto3" json:"state_changed_at,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SandboxHandle) Reset() {
@@ -769,16 +760,9 @@ func (x *SandboxHandle) GetLastEventSequence() uint64 {
 	return 0
 }
 
-func (x *SandboxHandle) GetRequiredServices() []*ServiceSpec {
+func (x *SandboxHandle) GetCompanionContainers() []*CompanionContainerSpec {
 	if x != nil {
-		return x.RequiredServices
-	}
-	return nil
-}
-
-func (x *SandboxHandle) GetOptionalServices() []*ServiceSpec {
-	if x != nil {
-		return x.OptionalServices
+		return x.CompanionContainers
 	}
 	return nil
 }
@@ -969,29 +953,29 @@ func (x *ExecEventDetails) GetErrorMessage() string {
 	return ""
 }
 
-type ServiceEventDetails struct {
+type CompanionContainerEventDetails struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ServiceName   string                 `protobuf:"bytes,1,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	ErrorCode     string                 `protobuf:"bytes,2,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ServiceEventDetails) Reset() {
-	*x = ServiceEventDetails{}
+func (x *CompanionContainerEventDetails) Reset() {
+	*x = CompanionContainerEventDetails{}
 	mi := &file_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ServiceEventDetails) String() string {
+func (x *CompanionContainerEventDetails) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ServiceEventDetails) ProtoMessage() {}
+func (*CompanionContainerEventDetails) ProtoMessage() {}
 
-func (x *ServiceEventDetails) ProtoReflect() protoreflect.Message {
+func (x *CompanionContainerEventDetails) ProtoReflect() protoreflect.Message {
 	mi := &file_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1003,26 +987,26 @@ func (x *ServiceEventDetails) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ServiceEventDetails.ProtoReflect.Descriptor instead.
-func (*ServiceEventDetails) Descriptor() ([]byte, []int) {
+// Deprecated: Use CompanionContainerEventDetails.ProtoReflect.Descriptor instead.
+func (*CompanionContainerEventDetails) Descriptor() ([]byte, []int) {
 	return file_service_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *ServiceEventDetails) GetServiceName() string {
+func (x *CompanionContainerEventDetails) GetName() string {
 	if x != nil {
-		return x.ServiceName
+		return x.Name
 	}
 	return ""
 }
 
-func (x *ServiceEventDetails) GetErrorCode() string {
+func (x *CompanionContainerEventDetails) GetErrorCode() string {
 	if x != nil {
 		return x.ErrorCode
 	}
 	return ""
 }
 
-func (x *ServiceEventDetails) GetErrorMessage() string {
+func (x *CompanionContainerEventDetails) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
 	}
@@ -1043,7 +1027,7 @@ type SandboxEvent struct {
 	//
 	//	*SandboxEvent_SandboxPhase
 	//	*SandboxEvent_Exec
-	//	*SandboxEvent_Service
+	//	*SandboxEvent_CompanionContainer
 	Details       isSandboxEvent_Details `protobuf_oneof:"details"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1160,10 +1144,10 @@ func (x *SandboxEvent) GetExec() *ExecEventDetails {
 	return nil
 }
 
-func (x *SandboxEvent) GetService() *ServiceEventDetails {
+func (x *SandboxEvent) GetCompanionContainer() *CompanionContainerEventDetails {
 	if x != nil {
-		if x, ok := x.Details.(*SandboxEvent_Service); ok {
-			return x.Service
+		if x, ok := x.Details.(*SandboxEvent_CompanionContainer); ok {
+			return x.CompanionContainer
 		}
 	}
 	return nil
@@ -1181,15 +1165,15 @@ type SandboxEvent_Exec struct {
 	Exec *ExecEventDetails `protobuf:"bytes,10,opt,name=exec,proto3,oneof"`
 }
 
-type SandboxEvent_Service struct {
-	Service *ServiceEventDetails `protobuf:"bytes,11,opt,name=service,proto3,oneof"`
+type SandboxEvent_CompanionContainer struct {
+	CompanionContainer *CompanionContainerEventDetails `protobuf:"bytes,11,opt,name=companion_container,json=companionContainer,proto3,oneof"`
 }
 
 func (*SandboxEvent_SandboxPhase) isSandboxEvent_Details() {}
 
 func (*SandboxEvent_Exec) isSandboxEvent_Details() {}
 
-func (*SandboxEvent_Service) isSandboxEvent_Details() {}
+func (*SandboxEvent_CompanionContainer) isSandboxEvent_Details() {}
 
 type ExecStatus struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -2298,49 +2282,47 @@ const file_service_proto_rawDesc = "" +
 	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x18\n" +
 	"\aretries\x18\x04 \x01(\rR\aretries\x12<\n" +
 	"\fstart_period\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\vstartPeriod\x12@\n" +
-	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\x97\x02\n" +
-	"\vServiceSpec\x12\x12\n" +
+	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\xad\x02\n" +
+	"\x16CompanionContainerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05image\x18\x02 \x01(\tR\x05image\x123\n" +
-	"\x04envs\x18\x03 \x03(\v2\x1f.agbox.v1.ServiceSpec.EnvsEntryR\x04envs\x12=\n" +
+	"\x05image\x18\x02 \x01(\tR\x05image\x12>\n" +
+	"\x04envs\x18\x03 \x03(\v2*.agbox.v1.CompanionContainerSpec.EnvsEntryR\x04envs\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
 	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc0\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8d\x04\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
 	"\x06mounts\x18\x02 \x03(\v2\x13.agbox.v1.MountSpecR\x06mounts\x12*\n" +
 	"\x06copies\x18\x03 \x03(\v2\x12.agbox.v1.CopySpecR\x06copies\x12#\n" +
-	"\rbuiltin_tools\x18\x04 \x03(\tR\fbuiltinTools\x12B\n" +
-	"\x11required_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
-	"\x11optional_services\x18\x06 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x128\n" +
-	"\x06labels\x18\a \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x122\n" +
-	"\x04envs\x18\b \x03(\v2\x1e.agbox.v1.CreateSpec.EnvsEntryR\x04envs\x124\n" +
-	"\bidle_ttl\x18\t \x01(\v2\x19.google.protobuf.DurationR\aidleTtl\x1a9\n" +
+	"\rbuiltin_tools\x18\x04 \x03(\tR\fbuiltinTools\x12S\n" +
+	"\x14companion_containers\x18\x05 \x03(\v2 .agbox.v1.CompanionContainerSpecR\x13companionContainers\x128\n" +
+	"\x06labels\x18\x06 \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x122\n" +
+	"\x04envs\x18\a \x03(\v2\x1e.agbox.v1.CreateSpec.EnvsEntryR\x04envs\x124\n" +
+	"\bidle_ttl\x18\b \x01(\v2\x19.google.protobuf.DurationR\aidleTtl\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe7\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb4\x04\n" +
 	"\rSandboxHandle\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12,\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x16.agbox.v1.SandboxStateR\x05state\x12.\n" +
-	"\x13last_event_sequence\x18\x03 \x01(\x04R\x11lastEventSequence\x12B\n" +
-	"\x11required_services\x18\x04 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10requiredServices\x12B\n" +
-	"\x11optional_services\x18\x05 \x03(\v2\x15.agbox.v1.ServiceSpecR\x10optionalServices\x12;\n" +
-	"\x06labels\x18\x06 \x03(\v2#.agbox.v1.SandboxHandle.LabelsEntryR\x06labels\x129\n" +
+	"\x13last_event_sequence\x18\x03 \x01(\x04R\x11lastEventSequence\x12S\n" +
+	"\x14companion_containers\x18\x04 \x03(\v2 .agbox.v1.CompanionContainerSpecR\x13companionContainers\x12;\n" +
+	"\x06labels\x18\x05 \x03(\v2#.agbox.v1.SandboxHandle.LabelsEntryR\x06labels\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x14\n" +
-	"\x05image\x18\b \x01(\tR\x05image\x12\x1d\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x14\n" +
+	"\x05image\x18\a \x01(\tR\x05image\x12\x1d\n" +
 	"\n" +
-	"error_code\x18\t \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\n" +
-	" \x01(\tR\ferrorMessage\x12D\n" +
-	"\x10state_changed_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\x0estateChangedAt\x1a9\n" +
+	"error_code\x18\b \x01(\tR\terrorCode\x12#\n" +
+	"\rerror_message\x18\t \x01(\tR\ferrorMessage\x12D\n" +
+	"\x10state_changed_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x0estateChangedAt\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x87\x01\n" +
@@ -2357,12 +2339,12 @@ const file_service_proto_rawDesc = "" +
 	"exec_state\x18\x03 \x01(\x0e2\x13.agbox.v1.ExecStateR\texecState\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x04 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\"|\n" +
-	"\x13ServiceEventDetails\x12!\n" +
-	"\fservice_name\x18\x01 \x01(\tR\vserviceName\x12\x1d\n" +
+	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage\"x\n" +
+	"\x1eCompanionContainerEventDetails\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"\x84\x04\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"\xa6\x04\n" +
 	"\fSandboxEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12\x1d\n" +
@@ -2377,8 +2359,8 @@ const file_service_proto_rawDesc = "" +
 	"\rsandbox_state\x18\b \x01(\x0e2\x16.agbox.v1.SandboxStateR\fsandboxState\x12D\n" +
 	"\rsandbox_phase\x18\t \x01(\v2\x1d.agbox.v1.SandboxPhaseDetailsH\x00R\fsandboxPhase\x120\n" +
 	"\x04exec\x18\n" +
-	" \x01(\v2\x1a.agbox.v1.ExecEventDetailsH\x00R\x04exec\x129\n" +
-	"\aservice\x18\v \x01(\v2\x1d.agbox.v1.ServiceEventDetailsH\x00R\aserviceB\t\n" +
+	" \x01(\v2\x1a.agbox.v1.ExecEventDetailsH\x00R\x04exec\x12[\n" +
+	"\x13companion_container\x18\v \x01(\v2(.agbox.v1.CompanionContainerEventDetailsH\x00R\x12companionContainerB\t\n" +
 	"\adetails\"\x8c\x03\n" +
 	"\n" +
 	"ExecStatus\x12\x17\n" +
@@ -2474,7 +2456,7 @@ const file_service_proto_rawDesc = "" +
 	"\x14SANDBOX_STATE_FAILED\x10\x03\x12\x19\n" +
 	"\x15SANDBOX_STATE_STOPPED\x10\x04\x12\x1a\n" +
 	"\x16SANDBOX_STATE_DELETING\x10\x05\x12\x19\n" +
-	"\x15SANDBOX_STATE_DELETED\x10\x06*\xe0\x02\n" +
+	"\x15SANDBOX_STATE_DELETED\x10\x06*\xe8\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SANDBOX_ACCEPTED\x10\x01\x12\x15\n" +
@@ -2489,9 +2471,9 @@ const file_service_proto_rawDesc = "" +
 	"\rEXEC_FINISHED\x10\n" +
 	"\x12\x0f\n" +
 	"\vEXEC_FAILED\x10\v\x12\x12\n" +
-	"\x0eEXEC_CANCELLED\x10\f\x12\x19\n" +
-	"\x15SANDBOX_SERVICE_READY\x10\r\x12\x1a\n" +
-	"\x16SANDBOX_SERVICE_FAILED\x10\x0e*\x89\x01\n" +
+	"\x0eEXEC_CANCELLED\x10\f\x12\x1d\n" +
+	"\x19COMPANION_CONTAINER_READY\x10\r\x12\x1e\n" +
+	"\x1aCOMPANION_CONTAINER_FAILED\x10\x0e*\x89\x01\n" +
 	"\tExecState\x12\x1a\n" +
 	"\x16EXEC_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12EXEC_STATE_RUNNING\x10\x01\x12\x17\n" +
@@ -2531,122 +2513,120 @@ func file_service_proto_rawDescGZIP() []byte {
 var file_service_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_service_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_service_proto_goTypes = []any{
-	(SandboxState)(0),                     // 0: agbox.v1.SandboxState
-	(EventType)(0),                        // 1: agbox.v1.EventType
-	(ExecState)(0),                        // 2: agbox.v1.ExecState
-	(*PingRequest)(nil),                   // 3: agbox.v1.PingRequest
-	(*PingResponse)(nil),                  // 4: agbox.v1.PingResponse
-	(*MountSpec)(nil),                     // 5: agbox.v1.MountSpec
-	(*CopySpec)(nil),                      // 6: agbox.v1.CopySpec
-	(*HealthcheckConfig)(nil),             // 7: agbox.v1.HealthcheckConfig
-	(*ServiceSpec)(nil),                   // 8: agbox.v1.ServiceSpec
-	(*CreateSpec)(nil),                    // 9: agbox.v1.CreateSpec
-	(*SandboxHandle)(nil),                 // 10: agbox.v1.SandboxHandle
-	(*SandboxPhaseDetails)(nil),           // 11: agbox.v1.SandboxPhaseDetails
-	(*ExecEventDetails)(nil),              // 12: agbox.v1.ExecEventDetails
-	(*ServiceEventDetails)(nil),           // 13: agbox.v1.ServiceEventDetails
-	(*SandboxEvent)(nil),                  // 14: agbox.v1.SandboxEvent
-	(*ExecStatus)(nil),                    // 15: agbox.v1.ExecStatus
-	(*CreateSandboxRequest)(nil),          // 16: agbox.v1.CreateSandboxRequest
-	(*CreateSandboxResponse)(nil),         // 17: agbox.v1.CreateSandboxResponse
-	(*GetSandboxRequest)(nil),             // 18: agbox.v1.GetSandboxRequest
-	(*GetSandboxResponse)(nil),            // 19: agbox.v1.GetSandboxResponse
-	(*ListSandboxesRequest)(nil),          // 20: agbox.v1.ListSandboxesRequest
-	(*ListSandboxesResponse)(nil),         // 21: agbox.v1.ListSandboxesResponse
-	(*ResumeSandboxRequest)(nil),          // 22: agbox.v1.ResumeSandboxRequest
-	(*StopSandboxRequest)(nil),            // 23: agbox.v1.StopSandboxRequest
-	(*DeleteSandboxRequest)(nil),          // 24: agbox.v1.DeleteSandboxRequest
-	(*DeleteSandboxesRequest)(nil),        // 25: agbox.v1.DeleteSandboxesRequest
-	(*DeleteSandboxesResponse)(nil),       // 26: agbox.v1.DeleteSandboxesResponse
-	(*AcceptedResponse)(nil),              // 27: agbox.v1.AcceptedResponse
-	(*SubscribeSandboxEventsRequest)(nil), // 28: agbox.v1.SubscribeSandboxEventsRequest
-	(*CreateExecRequest)(nil),             // 29: agbox.v1.CreateExecRequest
-	(*CreateExecResponse)(nil),            // 30: agbox.v1.CreateExecResponse
-	(*CancelExecRequest)(nil),             // 31: agbox.v1.CancelExecRequest
-	(*GetExecRequest)(nil),                // 32: agbox.v1.GetExecRequest
-	(*GetExecResponse)(nil),               // 33: agbox.v1.GetExecResponse
-	(*ListActiveExecsRequest)(nil),        // 34: agbox.v1.ListActiveExecsRequest
-	(*ListActiveExecsResponse)(nil),       // 35: agbox.v1.ListActiveExecsResponse
-	nil,                                   // 36: agbox.v1.ServiceSpec.EnvsEntry
-	nil,                                   // 37: agbox.v1.CreateSpec.LabelsEntry
-	nil,                                   // 38: agbox.v1.CreateSpec.EnvsEntry
-	nil,                                   // 39: agbox.v1.SandboxHandle.LabelsEntry
-	nil,                                   // 40: agbox.v1.ExecStatus.EnvOverridesEntry
-	nil,                                   // 41: agbox.v1.ListSandboxesRequest.LabelSelectorEntry
-	nil,                                   // 42: agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
-	nil,                                   // 43: agbox.v1.CreateExecRequest.EnvOverridesEntry
-	(*durationpb.Duration)(nil),           // 44: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),         // 45: google.protobuf.Timestamp
+	(SandboxState)(0),                      // 0: agbox.v1.SandboxState
+	(EventType)(0),                         // 1: agbox.v1.EventType
+	(ExecState)(0),                         // 2: agbox.v1.ExecState
+	(*PingRequest)(nil),                    // 3: agbox.v1.PingRequest
+	(*PingResponse)(nil),                   // 4: agbox.v1.PingResponse
+	(*MountSpec)(nil),                      // 5: agbox.v1.MountSpec
+	(*CopySpec)(nil),                       // 6: agbox.v1.CopySpec
+	(*HealthcheckConfig)(nil),              // 7: agbox.v1.HealthcheckConfig
+	(*CompanionContainerSpec)(nil),         // 8: agbox.v1.CompanionContainerSpec
+	(*CreateSpec)(nil),                     // 9: agbox.v1.CreateSpec
+	(*SandboxHandle)(nil),                  // 10: agbox.v1.SandboxHandle
+	(*SandboxPhaseDetails)(nil),            // 11: agbox.v1.SandboxPhaseDetails
+	(*ExecEventDetails)(nil),               // 12: agbox.v1.ExecEventDetails
+	(*CompanionContainerEventDetails)(nil), // 13: agbox.v1.CompanionContainerEventDetails
+	(*SandboxEvent)(nil),                   // 14: agbox.v1.SandboxEvent
+	(*ExecStatus)(nil),                     // 15: agbox.v1.ExecStatus
+	(*CreateSandboxRequest)(nil),           // 16: agbox.v1.CreateSandboxRequest
+	(*CreateSandboxResponse)(nil),          // 17: agbox.v1.CreateSandboxResponse
+	(*GetSandboxRequest)(nil),              // 18: agbox.v1.GetSandboxRequest
+	(*GetSandboxResponse)(nil),             // 19: agbox.v1.GetSandboxResponse
+	(*ListSandboxesRequest)(nil),           // 20: agbox.v1.ListSandboxesRequest
+	(*ListSandboxesResponse)(nil),          // 21: agbox.v1.ListSandboxesResponse
+	(*ResumeSandboxRequest)(nil),           // 22: agbox.v1.ResumeSandboxRequest
+	(*StopSandboxRequest)(nil),             // 23: agbox.v1.StopSandboxRequest
+	(*DeleteSandboxRequest)(nil),           // 24: agbox.v1.DeleteSandboxRequest
+	(*DeleteSandboxesRequest)(nil),         // 25: agbox.v1.DeleteSandboxesRequest
+	(*DeleteSandboxesResponse)(nil),        // 26: agbox.v1.DeleteSandboxesResponse
+	(*AcceptedResponse)(nil),               // 27: agbox.v1.AcceptedResponse
+	(*SubscribeSandboxEventsRequest)(nil),  // 28: agbox.v1.SubscribeSandboxEventsRequest
+	(*CreateExecRequest)(nil),              // 29: agbox.v1.CreateExecRequest
+	(*CreateExecResponse)(nil),             // 30: agbox.v1.CreateExecResponse
+	(*CancelExecRequest)(nil),              // 31: agbox.v1.CancelExecRequest
+	(*GetExecRequest)(nil),                 // 32: agbox.v1.GetExecRequest
+	(*GetExecResponse)(nil),                // 33: agbox.v1.GetExecResponse
+	(*ListActiveExecsRequest)(nil),         // 34: agbox.v1.ListActiveExecsRequest
+	(*ListActiveExecsResponse)(nil),        // 35: agbox.v1.ListActiveExecsResponse
+	nil,                                    // 36: agbox.v1.CompanionContainerSpec.EnvsEntry
+	nil,                                    // 37: agbox.v1.CreateSpec.LabelsEntry
+	nil,                                    // 38: agbox.v1.CreateSpec.EnvsEntry
+	nil,                                    // 39: agbox.v1.SandboxHandle.LabelsEntry
+	nil,                                    // 40: agbox.v1.ExecStatus.EnvOverridesEntry
+	nil,                                    // 41: agbox.v1.ListSandboxesRequest.LabelSelectorEntry
+	nil,                                    // 42: agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
+	nil,                                    // 43: agbox.v1.CreateExecRequest.EnvOverridesEntry
+	(*durationpb.Duration)(nil),            // 44: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),          // 45: google.protobuf.Timestamp
 }
 var file_service_proto_depIdxs = []int32{
 	44, // 0: agbox.v1.HealthcheckConfig.interval:type_name -> google.protobuf.Duration
 	44, // 1: agbox.v1.HealthcheckConfig.timeout:type_name -> google.protobuf.Duration
 	44, // 2: agbox.v1.HealthcheckConfig.start_period:type_name -> google.protobuf.Duration
 	44, // 3: agbox.v1.HealthcheckConfig.start_interval:type_name -> google.protobuf.Duration
-	36, // 4: agbox.v1.ServiceSpec.envs:type_name -> agbox.v1.ServiceSpec.EnvsEntry
-	7,  // 5: agbox.v1.ServiceSpec.healthcheck:type_name -> agbox.v1.HealthcheckConfig
+	36, // 4: agbox.v1.CompanionContainerSpec.envs:type_name -> agbox.v1.CompanionContainerSpec.EnvsEntry
+	7,  // 5: agbox.v1.CompanionContainerSpec.healthcheck:type_name -> agbox.v1.HealthcheckConfig
 	5,  // 6: agbox.v1.CreateSpec.mounts:type_name -> agbox.v1.MountSpec
 	6,  // 7: agbox.v1.CreateSpec.copies:type_name -> agbox.v1.CopySpec
-	8,  // 8: agbox.v1.CreateSpec.required_services:type_name -> agbox.v1.ServiceSpec
-	8,  // 9: agbox.v1.CreateSpec.optional_services:type_name -> agbox.v1.ServiceSpec
-	37, // 10: agbox.v1.CreateSpec.labels:type_name -> agbox.v1.CreateSpec.LabelsEntry
-	38, // 11: agbox.v1.CreateSpec.envs:type_name -> agbox.v1.CreateSpec.EnvsEntry
-	44, // 12: agbox.v1.CreateSpec.idle_ttl:type_name -> google.protobuf.Duration
-	0,  // 13: agbox.v1.SandboxHandle.state:type_name -> agbox.v1.SandboxState
-	8,  // 14: agbox.v1.SandboxHandle.required_services:type_name -> agbox.v1.ServiceSpec
-	8,  // 15: agbox.v1.SandboxHandle.optional_services:type_name -> agbox.v1.ServiceSpec
-	39, // 16: agbox.v1.SandboxHandle.labels:type_name -> agbox.v1.SandboxHandle.LabelsEntry
-	45, // 17: agbox.v1.SandboxHandle.created_at:type_name -> google.protobuf.Timestamp
-	45, // 18: agbox.v1.SandboxHandle.state_changed_at:type_name -> google.protobuf.Timestamp
-	2,  // 19: agbox.v1.ExecEventDetails.exec_state:type_name -> agbox.v1.ExecState
-	1,  // 20: agbox.v1.SandboxEvent.event_type:type_name -> agbox.v1.EventType
-	45, // 21: agbox.v1.SandboxEvent.occurred_at:type_name -> google.protobuf.Timestamp
-	0,  // 22: agbox.v1.SandboxEvent.sandbox_state:type_name -> agbox.v1.SandboxState
-	11, // 23: agbox.v1.SandboxEvent.sandbox_phase:type_name -> agbox.v1.SandboxPhaseDetails
-	12, // 24: agbox.v1.SandboxEvent.exec:type_name -> agbox.v1.ExecEventDetails
-	13, // 25: agbox.v1.SandboxEvent.service:type_name -> agbox.v1.ServiceEventDetails
-	2,  // 26: agbox.v1.ExecStatus.state:type_name -> agbox.v1.ExecState
-	40, // 27: agbox.v1.ExecStatus.env_overrides:type_name -> agbox.v1.ExecStatus.EnvOverridesEntry
-	9,  // 28: agbox.v1.CreateSandboxRequest.create_spec:type_name -> agbox.v1.CreateSpec
-	10, // 29: agbox.v1.CreateSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
-	10, // 30: agbox.v1.GetSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
-	41, // 31: agbox.v1.ListSandboxesRequest.label_selector:type_name -> agbox.v1.ListSandboxesRequest.LabelSelectorEntry
-	10, // 32: agbox.v1.ListSandboxesResponse.sandboxes:type_name -> agbox.v1.SandboxHandle
-	42, // 33: agbox.v1.DeleteSandboxesRequest.label_selector:type_name -> agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
-	43, // 34: agbox.v1.CreateExecRequest.env_overrides:type_name -> agbox.v1.CreateExecRequest.EnvOverridesEntry
-	15, // 35: agbox.v1.GetExecResponse.exec:type_name -> agbox.v1.ExecStatus
-	15, // 36: agbox.v1.ListActiveExecsResponse.execs:type_name -> agbox.v1.ExecStatus
-	3,  // 37: agbox.v1.SandboxService.Ping:input_type -> agbox.v1.PingRequest
-	16, // 38: agbox.v1.SandboxService.CreateSandbox:input_type -> agbox.v1.CreateSandboxRequest
-	18, // 39: agbox.v1.SandboxService.GetSandbox:input_type -> agbox.v1.GetSandboxRequest
-	20, // 40: agbox.v1.SandboxService.ListSandboxes:input_type -> agbox.v1.ListSandboxesRequest
-	22, // 41: agbox.v1.SandboxService.ResumeSandbox:input_type -> agbox.v1.ResumeSandboxRequest
-	23, // 42: agbox.v1.SandboxService.StopSandbox:input_type -> agbox.v1.StopSandboxRequest
-	24, // 43: agbox.v1.SandboxService.DeleteSandbox:input_type -> agbox.v1.DeleteSandboxRequest
-	25, // 44: agbox.v1.SandboxService.DeleteSandboxes:input_type -> agbox.v1.DeleteSandboxesRequest
-	28, // 45: agbox.v1.SandboxService.SubscribeSandboxEvents:input_type -> agbox.v1.SubscribeSandboxEventsRequest
-	29, // 46: agbox.v1.SandboxService.CreateExec:input_type -> agbox.v1.CreateExecRequest
-	31, // 47: agbox.v1.SandboxService.CancelExec:input_type -> agbox.v1.CancelExecRequest
-	32, // 48: agbox.v1.SandboxService.GetExec:input_type -> agbox.v1.GetExecRequest
-	34, // 49: agbox.v1.SandboxService.ListActiveExecs:input_type -> agbox.v1.ListActiveExecsRequest
-	4,  // 50: agbox.v1.SandboxService.Ping:output_type -> agbox.v1.PingResponse
-	17, // 51: agbox.v1.SandboxService.CreateSandbox:output_type -> agbox.v1.CreateSandboxResponse
-	19, // 52: agbox.v1.SandboxService.GetSandbox:output_type -> agbox.v1.GetSandboxResponse
-	21, // 53: agbox.v1.SandboxService.ListSandboxes:output_type -> agbox.v1.ListSandboxesResponse
-	27, // 54: agbox.v1.SandboxService.ResumeSandbox:output_type -> agbox.v1.AcceptedResponse
-	27, // 55: agbox.v1.SandboxService.StopSandbox:output_type -> agbox.v1.AcceptedResponse
-	27, // 56: agbox.v1.SandboxService.DeleteSandbox:output_type -> agbox.v1.AcceptedResponse
-	26, // 57: agbox.v1.SandboxService.DeleteSandboxes:output_type -> agbox.v1.DeleteSandboxesResponse
-	14, // 58: agbox.v1.SandboxService.SubscribeSandboxEvents:output_type -> agbox.v1.SandboxEvent
-	30, // 59: agbox.v1.SandboxService.CreateExec:output_type -> agbox.v1.CreateExecResponse
-	27, // 60: agbox.v1.SandboxService.CancelExec:output_type -> agbox.v1.AcceptedResponse
-	33, // 61: agbox.v1.SandboxService.GetExec:output_type -> agbox.v1.GetExecResponse
-	35, // 62: agbox.v1.SandboxService.ListActiveExecs:output_type -> agbox.v1.ListActiveExecsResponse
-	50, // [50:63] is the sub-list for method output_type
-	37, // [37:50] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	8,  // 8: agbox.v1.CreateSpec.companion_containers:type_name -> agbox.v1.CompanionContainerSpec
+	37, // 9: agbox.v1.CreateSpec.labels:type_name -> agbox.v1.CreateSpec.LabelsEntry
+	38, // 10: agbox.v1.CreateSpec.envs:type_name -> agbox.v1.CreateSpec.EnvsEntry
+	44, // 11: agbox.v1.CreateSpec.idle_ttl:type_name -> google.protobuf.Duration
+	0,  // 12: agbox.v1.SandboxHandle.state:type_name -> agbox.v1.SandboxState
+	8,  // 13: agbox.v1.SandboxHandle.companion_containers:type_name -> agbox.v1.CompanionContainerSpec
+	39, // 14: agbox.v1.SandboxHandle.labels:type_name -> agbox.v1.SandboxHandle.LabelsEntry
+	45, // 15: agbox.v1.SandboxHandle.created_at:type_name -> google.protobuf.Timestamp
+	45, // 16: agbox.v1.SandboxHandle.state_changed_at:type_name -> google.protobuf.Timestamp
+	2,  // 17: agbox.v1.ExecEventDetails.exec_state:type_name -> agbox.v1.ExecState
+	1,  // 18: agbox.v1.SandboxEvent.event_type:type_name -> agbox.v1.EventType
+	45, // 19: agbox.v1.SandboxEvent.occurred_at:type_name -> google.protobuf.Timestamp
+	0,  // 20: agbox.v1.SandboxEvent.sandbox_state:type_name -> agbox.v1.SandboxState
+	11, // 21: agbox.v1.SandboxEvent.sandbox_phase:type_name -> agbox.v1.SandboxPhaseDetails
+	12, // 22: agbox.v1.SandboxEvent.exec:type_name -> agbox.v1.ExecEventDetails
+	13, // 23: agbox.v1.SandboxEvent.companion_container:type_name -> agbox.v1.CompanionContainerEventDetails
+	2,  // 24: agbox.v1.ExecStatus.state:type_name -> agbox.v1.ExecState
+	40, // 25: agbox.v1.ExecStatus.env_overrides:type_name -> agbox.v1.ExecStatus.EnvOverridesEntry
+	9,  // 26: agbox.v1.CreateSandboxRequest.create_spec:type_name -> agbox.v1.CreateSpec
+	10, // 27: agbox.v1.CreateSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
+	10, // 28: agbox.v1.GetSandboxResponse.sandbox:type_name -> agbox.v1.SandboxHandle
+	41, // 29: agbox.v1.ListSandboxesRequest.label_selector:type_name -> agbox.v1.ListSandboxesRequest.LabelSelectorEntry
+	10, // 30: agbox.v1.ListSandboxesResponse.sandboxes:type_name -> agbox.v1.SandboxHandle
+	42, // 31: agbox.v1.DeleteSandboxesRequest.label_selector:type_name -> agbox.v1.DeleteSandboxesRequest.LabelSelectorEntry
+	43, // 32: agbox.v1.CreateExecRequest.env_overrides:type_name -> agbox.v1.CreateExecRequest.EnvOverridesEntry
+	15, // 33: agbox.v1.GetExecResponse.exec:type_name -> agbox.v1.ExecStatus
+	15, // 34: agbox.v1.ListActiveExecsResponse.execs:type_name -> agbox.v1.ExecStatus
+	3,  // 35: agbox.v1.SandboxService.Ping:input_type -> agbox.v1.PingRequest
+	16, // 36: agbox.v1.SandboxService.CreateSandbox:input_type -> agbox.v1.CreateSandboxRequest
+	18, // 37: agbox.v1.SandboxService.GetSandbox:input_type -> agbox.v1.GetSandboxRequest
+	20, // 38: agbox.v1.SandboxService.ListSandboxes:input_type -> agbox.v1.ListSandboxesRequest
+	22, // 39: agbox.v1.SandboxService.ResumeSandbox:input_type -> agbox.v1.ResumeSandboxRequest
+	23, // 40: agbox.v1.SandboxService.StopSandbox:input_type -> agbox.v1.StopSandboxRequest
+	24, // 41: agbox.v1.SandboxService.DeleteSandbox:input_type -> agbox.v1.DeleteSandboxRequest
+	25, // 42: agbox.v1.SandboxService.DeleteSandboxes:input_type -> agbox.v1.DeleteSandboxesRequest
+	28, // 43: agbox.v1.SandboxService.SubscribeSandboxEvents:input_type -> agbox.v1.SubscribeSandboxEventsRequest
+	29, // 44: agbox.v1.SandboxService.CreateExec:input_type -> agbox.v1.CreateExecRequest
+	31, // 45: agbox.v1.SandboxService.CancelExec:input_type -> agbox.v1.CancelExecRequest
+	32, // 46: agbox.v1.SandboxService.GetExec:input_type -> agbox.v1.GetExecRequest
+	34, // 47: agbox.v1.SandboxService.ListActiveExecs:input_type -> agbox.v1.ListActiveExecsRequest
+	4,  // 48: agbox.v1.SandboxService.Ping:output_type -> agbox.v1.PingResponse
+	17, // 49: agbox.v1.SandboxService.CreateSandbox:output_type -> agbox.v1.CreateSandboxResponse
+	19, // 50: agbox.v1.SandboxService.GetSandbox:output_type -> agbox.v1.GetSandboxResponse
+	21, // 51: agbox.v1.SandboxService.ListSandboxes:output_type -> agbox.v1.ListSandboxesResponse
+	27, // 52: agbox.v1.SandboxService.ResumeSandbox:output_type -> agbox.v1.AcceptedResponse
+	27, // 53: agbox.v1.SandboxService.StopSandbox:output_type -> agbox.v1.AcceptedResponse
+	27, // 54: agbox.v1.SandboxService.DeleteSandbox:output_type -> agbox.v1.AcceptedResponse
+	26, // 55: agbox.v1.SandboxService.DeleteSandboxes:output_type -> agbox.v1.DeleteSandboxesResponse
+	14, // 56: agbox.v1.SandboxService.SubscribeSandboxEvents:output_type -> agbox.v1.SandboxEvent
+	30, // 57: agbox.v1.SandboxService.CreateExec:output_type -> agbox.v1.CreateExecResponse
+	27, // 58: agbox.v1.SandboxService.CancelExec:output_type -> agbox.v1.AcceptedResponse
+	33, // 59: agbox.v1.SandboxService.GetExec:output_type -> agbox.v1.GetExecResponse
+	35, // 60: agbox.v1.SandboxService.ListActiveExecs:output_type -> agbox.v1.ListActiveExecsResponse
+	48, // [48:61] is the sub-list for method output_type
+	35, // [35:48] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_service_proto_init() }
@@ -2657,7 +2637,7 @@ func file_service_proto_init() {
 	file_service_proto_msgTypes[11].OneofWrappers = []any{
 		(*SandboxEvent_SandboxPhase)(nil),
 		(*SandboxEvent_Exec)(nil),
-		(*SandboxEvent_Service)(nil),
+		(*SandboxEvent_CompanionContainer)(nil),
 	}
 	file_service_proto_msgTypes[31].OneofWrappers = []any{}
 	type x struct{}

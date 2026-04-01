@@ -88,13 +88,14 @@ func assertMessageFieldNumbers(t *testing.T, descriptor protoreflect.MessageDesc
 	}
 }
 
-func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
+func TestCompanionContainerStartupAndReadyEvent(t *testing.T) {
+	ccStatuses := make(chan companionContainerStatus, 1)
+	ccStatuses <- companionContainerStatus{Name: "db", Ready: true}
+	close(ccStatuses)
 	backend := &scriptedRuntimeBackend{
 		createResult: runtimeCreateResult{
-			RuntimeState: &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
-			ServiceStatuses: []runtimeServiceStatus{
-				{Name: "db", Required: true, Ready: true},
-			},
+			RuntimeState:               &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
+			CompanionContainerStatuses: ccStatuses,
 		},
 	}
 	client := newBufconnClient(t, ServiceConfig{
@@ -104,10 +105,10 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxId: "required-ready",
+		SandboxId: "cc-ready",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			RequiredServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{
 					Name:  "db",
 					Image: "postgres:16",
@@ -139,33 +140,33 @@ func TestRequiredServiceStartupAndReadyEvent(t *testing.T) {
 		return false
 	})
 
-	serviceReadyIndex := -1
+	ccReadyIndex := -1
 	sandboxReadyIndex := -1
 	for index, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "db" {
-			serviceReadyIndex = index
+		if event.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_READY && eventCompanionContainerName(event) == "db" {
+			ccReadyIndex = index
 		}
 		if event.GetEventType() == agboxv1.EventType_SANDBOX_READY {
 			sandboxReadyIndex = index
 		}
 	}
-	if serviceReadyIndex == -1 {
-		t.Fatalf("missing SANDBOX_SERVICE_READY event for required service: %#v", events)
+	if ccReadyIndex == -1 {
+		t.Fatalf("missing COMPANION_CONTAINER_READY event: %#v", events)
 	}
-	if sandboxReadyIndex == -1 || serviceReadyIndex > sandboxReadyIndex {
-		t.Fatalf("service ready event must be emitted before SANDBOX_READY: %#v", events)
+	if sandboxReadyIndex == -1 || ccReadyIndex > sandboxReadyIndex {
+		t.Fatalf("companion container ready event must be emitted before SANDBOX_READY: %#v", events)
 	}
 
 	sandboxResp, err := client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: createResp.GetSandbox().GetSandboxId()})
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
-	if len(sandboxResp.GetSandbox().GetRequiredServices()) != 1 || sandboxResp.GetSandbox().GetRequiredServices()[0].GetName() != "db" {
-		t.Fatalf("required services were not preserved in handle: %#v", sandboxResp.GetSandbox().GetRequiredServices())
+	if len(sandboxResp.GetSandbox().GetCompanionContainers()) != 1 || sandboxResp.GetSandbox().GetCompanionContainers()[0].GetName() != "db" {
+		t.Fatalf("companion containers were not preserved in handle: %#v", sandboxResp.GetSandbox().GetCompanionContainers())
 	}
 }
 
-func TestRequiredServiceFailureAndCleanup(t *testing.T) {
+func TestCompanionContainerCreateFailureAndCleanup(t *testing.T) {
 	cases := []struct {
 		name       string
 		health     *agboxv1.HealthcheckConfig
@@ -218,9 +219,9 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			window, err := requiredServiceHealthWaitUpperBound(testCase.health)
+			window, err := companionContainerHealthWaitUpperBound(testCase.health)
 			if err != nil {
-				t.Fatalf("requiredServiceHealthWaitUpperBound failed: %v", err)
+				t.Fatalf("companionContainerHealthWaitUpperBound failed: %v", err)
 			}
 			if window != testCase.wantWindow {
 				t.Fatalf("unexpected wait window: got %s want %s", window, testCase.wantWindow)
@@ -229,7 +230,7 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 	}
 
 	backend := &scriptedRuntimeBackend{
-		createErr: errors.New("required service did not become healthy"),
+		createErr: errors.New("companion container did not become healthy"),
 	}
 	client := newBufconnClient(t, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -238,10 +239,10 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxId: "required-failure",
+		SandboxId: "cc-failure",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			RequiredServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{
 					Name:  "db",
 					Image: "postgres:16",
@@ -258,12 +259,12 @@ func TestRequiredServiceFailureAndCleanup(t *testing.T) {
 	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 }
 
-func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
-	optionalStatuses := make(chan runtimeServiceStatus, 2)
+func TestCompanionContainerNonBlockingCreatePath(t *testing.T) {
+	ccStatuses := make(chan companionContainerStatus, 2)
 	backend := &scriptedRuntimeBackend{
 		createResult: runtimeCreateResult{
-			RuntimeState:            &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
-			OptionalServiceStatuses: optionalStatuses,
+			RuntimeState:               &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
+			CompanionContainerStatuses: ccStatuses,
 		},
 	}
 	client := newBufconnClient(t, ServiceConfig{
@@ -273,10 +274,10 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxId: "optional-non-blocking",
+		SandboxId: "cc-non-blocking",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			OptionalServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{Name: "cache", Image: "redis:7"},
 				{Name: "queue", Image: "rabbitmq:4"},
 			},
@@ -286,9 +287,9 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
 	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	optionalStatuses <- runtimeServiceStatus{Name: "cache", Required: false, Ready: false, Message: "image pull failed"}
-	optionalStatuses <- runtimeServiceStatus{Name: "queue", Required: false, Ready: true}
-	close(optionalStatuses)
+	ccStatuses <- companionContainerStatus{Name: "cache", Ready: false, Message: "image pull failed"}
+	ccStatuses <- companionContainerStatus{Name: "queue", Ready: true}
+	close(ccStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
 		SandboxId:    createResp.GetSandbox().GetSandboxId(),
@@ -299,44 +300,44 @@ func TestOptionalServiceNonBlockingCreatePath(t *testing.T) {
 	}
 	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
 		var sandboxReady bool
-		var optionalReady bool
-		var optionalFailed bool
+		var ccReady bool
+		var ccFailed bool
 		for _, item := range items {
 			if item.GetEventType() == agboxv1.EventType_SANDBOX_READY {
 				sandboxReady = true
 			}
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(item) == "queue" {
-				optionalReady = true
+			if item.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_READY && eventCompanionContainerName(item) == "queue" {
+				ccReady = true
 			}
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && eventServiceName(item) == "cache" {
-				optionalFailed = true
+			if item.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_FAILED && eventCompanionContainerName(item) == "cache" {
+				ccFailed = true
 			}
 		}
-		return sandboxReady && optionalReady && optionalFailed
+		return sandboxReady && ccReady && ccFailed
 	})
 
-	var optionalReady bool
-	var optionalFailed bool
+	var ccReady bool
+	var ccFailed bool
 	for _, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "queue" {
-			optionalReady = true
+		if event.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_READY && eventCompanionContainerName(event) == "queue" {
+			ccReady = true
 		}
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_FAILED && eventServiceName(event) == "cache" {
-			optionalFailed = true
+		if event.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_FAILED && eventCompanionContainerName(event) == "cache" {
+			ccFailed = true
 		}
 	}
-	if !optionalReady || !optionalFailed {
-		t.Fatalf("optional service events are incomplete: %#v", events)
+	if !ccReady || !ccFailed {
+		t.Fatalf("companion container events are incomplete: %#v", events)
 	}
 }
 
-func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.T) {
-	optionalStatuses := make(chan runtimeServiceStatus, 1)
-	optionalStatuses <- runtimeServiceStatus{Name: "cache", Required: false, Ready: true}
+func TestCompanionContainerEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.T) {
+	ccStatuses := make(chan companionContainerStatus, 1)
+	ccStatuses <- companionContainerStatus{Name: "cache", Ready: true}
 	backend := &scriptedRuntimeBackend{
 		createResult: runtimeCreateResult{
-			RuntimeState:            &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
-			OptionalServiceStatuses: optionalStatuses,
+			RuntimeState:               &sandboxRuntimeState{PrimaryContainerName: "primary", NetworkName: "network"},
+			CompanionContainerStatuses: ccStatuses,
 		},
 	}
 	client := newBufconnClient(t, ServiceConfig{
@@ -346,10 +347,10 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 	})
 
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
-		SandboxId: "optional-ready-order",
+		SandboxId: "cc-ready-order",
 		CreateSpec: &agboxv1.CreateSpec{
 			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
-			OptionalServices: []*agboxv1.ServiceSpec{
+			CompanionContainers: []*agboxv1.CompanionContainerSpec{
 				{Name: "cache", Image: "redis:7"},
 			},
 		},
@@ -358,7 +359,7 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 		t.Fatalf("CreateSandbox failed: %v", err)
 	}
 	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
-	close(optionalStatuses)
+	close(ccStatuses)
 
 	stream, err := client.SubscribeSandboxEvents(context.Background(), &agboxv1.SubscribeSandboxEventsRequest{
 		SandboxId:    createResp.GetSandbox().GetSandboxId(),
@@ -369,47 +370,47 @@ func TestOptionalServiceEventsAlreadyCompletedEmitBeforeSandboxReady(t *testing.
 	}
 	events := collectEventsUntil(t, stream, func(items []*agboxv1.SandboxEvent) bool {
 		var sawReady bool
-		var sawOptionalReady bool
+		var sawCCReady bool
 		for _, item := range items {
-			if item.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(item) == "cache" {
-				sawOptionalReady = true
+			if item.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_READY && eventCompanionContainerName(item) == "cache" {
+				sawCCReady = true
 			}
 			if item.GetEventType() == agboxv1.EventType_SANDBOX_READY {
 				sawReady = true
 			}
 		}
-		return sawOptionalReady && sawReady
+		return sawCCReady && sawReady
 	})
 	if len(events) < 3 {
 		t.Fatalf("unexpected event sequence: %#v", events)
 	}
-	optionalIndex := -1
+	ccIndex := -1
 	readyIndex := -1
 	for index, event := range events {
-		if event.GetEventType() == agboxv1.EventType_SANDBOX_SERVICE_READY && eventServiceName(event) == "cache" {
-			optionalIndex = index
+		if event.GetEventType() == agboxv1.EventType_COMPANION_CONTAINER_READY && eventCompanionContainerName(event) == "cache" {
+			ccIndex = index
 			if event.GetSandboxState() != agboxv1.SandboxState_SANDBOX_STATE_PENDING {
-				t.Fatalf("expected optional service event to keep pending sandbox state, got %#v", event)
+				t.Fatalf("expected companion container event to keep pending sandbox state, got %#v", event)
 			}
 		}
 		if event.GetEventType() == agboxv1.EventType_SANDBOX_READY {
 			readyIndex = index
 		}
 	}
-	if optionalIndex == -1 || readyIndex == -1 || optionalIndex >= readyIndex {
-		t.Fatalf("expected optional service event before sandbox ready, got %#v", events)
+	if ccIndex == -1 || readyIndex == -1 || ccIndex >= readyIndex {
+		t.Fatalf("expected companion container event before sandbox ready, got %#v", events)
 	}
 }
 
-func TestOptionalServicesLaunchInParallelWithPrimaryPath(t *testing.T) {
-	services := []*agboxv1.ServiceSpec{
+func TestCompanionContainersLaunchInParallel(t *testing.T) {
+	containers := []*agboxv1.CompanionContainerSpec{
 		{Name: "cache", Image: "redis:7"},
 		{Name: "queue", Image: "rabbitmq:4"},
 	}
-	started := make(chan string, len(services))
+	started := make(chan string, len(containers)*2)
 	release := make(chan struct{})
 
-	starts := startOptionalServicesAsync(context.Background(), "parallel-optional", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "parallel-cc", "network", "primary", containers, nil, nil, func(context.Context, dockerContainerSpec) error {
 		started <- "create"
 		return nil
 	}, func(_ context.Context, name string) error {
@@ -419,23 +420,23 @@ func TestOptionalServicesLaunchInParallelWithPrimaryPath(t *testing.T) {
 	})
 
 	observed := []string{<-started, <-started, <-started, <-started}
-	if !slices.Contains(observed, dockerServiceContainerName("parallel-optional", "cache")) || !slices.Contains(observed, dockerServiceContainerName("parallel-optional", "queue")) {
-		t.Fatalf("optional services did not both begin startup before primary would continue: %v", observed)
+	if !slices.Contains(observed, dockerCompanionContainerName("parallel-cc", "cache")) || !slices.Contains(observed, dockerCompanionContainerName("parallel-cc", "queue")) {
+		t.Fatalf("companion containers did not both begin startup: %v", observed)
 	}
 
 	close(release)
-	statuses := collectRuntimeServiceStatuses(starts.Statuses)
+	statuses := collectCompanionContainerStatuses(starts.Statuses)
 	if len(statuses) != 2 || !statuses[0].Ready || !statuses[1].Ready {
-		t.Fatalf("unexpected optional statuses: %#v", statuses)
+		t.Fatalf("unexpected companion container statuses: %#v", statuses)
 	}
 }
 
-func TestOptionalServiceStartupCancellationStopsWorkers(t *testing.T) {
-	services := []*agboxv1.ServiceSpec{
+func TestCompanionContainerStartupCancellationStopsWorkers(t *testing.T) {
+	containers := []*agboxv1.CompanionContainerSpec{
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "cancel-optional", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "cancel-cc", "network", "primary", containers, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -445,24 +446,24 @@ func TestOptionalServiceStartupCancellationStopsWorkers(t *testing.T) {
 
 	<-started
 	starts.CancelAndWait()
-	statuses := collectRuntimeServiceStatuses(starts.Statuses)
+	statuses := collectCompanionContainerStatuses(starts.Statuses)
 	if len(statuses) != 1 {
-		t.Fatalf("unexpected optional status count: %#v", statuses)
+		t.Fatalf("unexpected companion container status count: %#v", statuses)
 	}
 	if statuses[0].Ready {
-		t.Fatalf("expected canceled optional startup to fail, got %#v", statuses[0])
+		t.Fatalf("expected canceled companion container startup to fail, got %#v", statuses[0])
 	}
 	if !strings.Contains(statuses[0].Message, context.Canceled.Error()) {
-		t.Fatalf("unexpected optional cancellation message: %q", statuses[0].Message)
+		t.Fatalf("unexpected companion container cancellation message: %q", statuses[0].Message)
 	}
 }
 
-func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
-	services := []*agboxv1.ServiceSpec{
+func TestDeleteSandboxCancelsOutstandingCompanionContainerStarts(t *testing.T) {
+	containers := []*agboxv1.CompanionContainerSpec{
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startOptionalServicesAsync(context.Background(), "delete-cancel", "network", "primary", services, nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "delete-cancel", "network", "primary", containers, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -474,14 +475,14 @@ func TestDeleteSandboxCancelsOutstandingOptionalStarts(t *testing.T) {
 	backend := &dockerRuntimeBackend{config: ServiceConfig{}}
 	if err := backend.DeleteSandbox(context.Background(), &sandboxRecord{
 		runtimeState: &sandboxRuntimeState{
-			OptionalServiceStarts: starts,
+			CompanionContainerStarts: starts,
 		},
 	}); err != nil {
 		t.Fatalf("DeleteSandbox failed: %v", err)
 	}
-	statuses := collectRuntimeServiceStatuses(starts.Statuses)
+	statuses := collectCompanionContainerStatuses(starts.Statuses)
 	if len(statuses) != 1 || statuses[0].Ready || !strings.Contains(statuses[0].Message, context.Canceled.Error()) {
-		t.Fatalf("expected delete to cancel optional startup, got %#v", statuses)
+		t.Fatalf("expected delete to cancel companion container startup, got %#v", statuses)
 	}
 }
 

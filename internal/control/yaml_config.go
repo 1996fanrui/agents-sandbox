@@ -15,14 +15,13 @@ import (
 // YAMLConfig is the top-level schema for declarative sandbox configuration
 // supplied via the config_yaml field in CreateSandboxRequest.
 type YAMLConfig struct {
-	Image            string                     `yaml:"image"`
-	Mounts           []YAMLMountSpec            `yaml:"mounts"`
-	Copies           []YAMLCopySpec             `yaml:"copies"`
-	BuiltinTools     []string                   `yaml:"builtin_tools"`
-	RequiredServices map[string]YAMLServiceSpec `yaml:"required_services"`
-	OptionalServices map[string]YAMLServiceSpec `yaml:"optional_services"`
-	Labels           map[string]string          `yaml:"labels"`
-	Envs             map[string]string          `yaml:"envs"`
+	Image               string                                  `yaml:"image"`
+	Mounts              []YAMLMountSpec                         `yaml:"mounts"`
+	Copies              []YAMLCopySpec                          `yaml:"copies"`
+	BuiltinTools        []string                                `yaml:"builtin_tools"`
+	CompanionContainers map[string]YAMLCompanionContainerSpec   `yaml:"companion_containers"`
+	Labels              map[string]string                       `yaml:"labels"`
+	Envs                map[string]string                       `yaml:"envs"`
 	// IdleTTL is the per-sandbox idle TTL override. Empty = use global daemon
 	// default; "0" = disable idle stop for this sandbox.
 	IdleTTL string `yaml:"idle_ttl"`
@@ -42,15 +41,15 @@ type YAMLCopySpec struct {
 	ExcludePatterns []string `yaml:"exclude_patterns"`
 }
 
-// YAMLServiceSpec describes a sidecar service container.
-type YAMLServiceSpec struct {
+// YAMLCompanionContainerSpec describes a companion container.
+type YAMLCompanionContainerSpec struct {
 	Image              string                 `yaml:"image"`
 	Envs               map[string]string      `yaml:"envs"`
 	Healthcheck        *YAMLHealthcheckConfig `yaml:"healthcheck"`
 	PostStartOnPrimary []string               `yaml:"post_start_on_primary"`
 }
 
-// YAMLHealthcheckConfig describes the healthcheck for a service container.
+// YAMLHealthcheckConfig describes the healthcheck for a companion container.
 type YAMLHealthcheckConfig struct {
 	Test          []string `yaml:"test"`
 	Interval      string   `yaml:"interval"`
@@ -74,8 +73,8 @@ func parseYAMLConfig(raw []byte) (*YAMLConfig, error) {
 }
 
 // yamlConfigToCreateSpec converts a parsed YAMLConfig into a proto CreateSpec.
-// Map keys for services are sorted alphabetically to produce deterministic output.
-// Returns an error if any duration field in a service healthcheck is unparseable.
+// Map keys for companion containers are sorted alphabetically to produce deterministic output.
+// Returns an error if any duration field in a companion container healthcheck is unparseable.
 func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 	spec := &agboxv1.CreateSpec{
 		Image:        cfg.Image,
@@ -99,10 +98,7 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 	}
 
 	var err error
-	if spec.RequiredServices, err = convertServiceMap(cfg.RequiredServices); err != nil {
-		return nil, err
-	}
-	if spec.OptionalServices, err = convertServiceMap(cfg.OptionalServices); err != nil {
+	if spec.CompanionContainers, err = convertCompanionContainerMap(cfg.CompanionContainers); err != nil {
 		return nil, err
 	}
 
@@ -131,58 +127,58 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 	return spec, nil
 }
 
-// convertServiceMap converts a map of service name to YAMLServiceSpec into
-// a sorted slice of proto ServiceSpec. The map key becomes ServiceSpec.Name.
+// convertCompanionContainerMap converts a map of container name to YAMLCompanionContainerSpec
+// into a sorted slice of proto CompanionContainerSpec. The map key becomes CompanionContainerSpec.Name.
 // Returns an error if any healthcheck duration field contains an unparseable value.
-func convertServiceMap(services map[string]YAMLServiceSpec) ([]*agboxv1.ServiceSpec, error) {
-	if len(services) == 0 {
+func convertCompanionContainerMap(containers map[string]YAMLCompanionContainerSpec) ([]*agboxv1.CompanionContainerSpec, error) {
+	if len(containers) == 0 {
 		return nil, nil
 	}
 
-	keys := make([]string, 0, len(services))
-	for k := range services {
+	keys := make([]string, 0, len(containers))
+	for k := range containers {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
-	result := make([]*agboxv1.ServiceSpec, 0, len(keys))
+	result := make([]*agboxv1.CompanionContainerSpec, 0, len(keys))
 	for _, name := range keys {
-		svc := services[name]
-		protoSvc := &agboxv1.ServiceSpec{
+		cc := containers[name]
+		protoCC := &agboxv1.CompanionContainerSpec{
 			Name:               name,
-			Image:              svc.Image,
-			PostStartOnPrimary: svc.PostStartOnPrimary,
+			Image:              cc.Image,
+			PostStartOnPrimary: cc.PostStartOnPrimary,
 		}
 
-		if len(svc.Envs) > 0 {
-			protoSvc.Envs = make(map[string]string, len(svc.Envs))
-			for k, v := range svc.Envs {
-				protoSvc.Envs[k] = v
+		if len(cc.Envs) > 0 {
+			protoCC.Envs = make(map[string]string, len(cc.Envs))
+			for k, v := range cc.Envs {
+				protoCC.Envs[k] = v
 			}
 		}
 
-		if svc.Healthcheck != nil {
+		if cc.Healthcheck != nil {
 			hc := &agboxv1.HealthcheckConfig{
-				Test:    svc.Healthcheck.Test,
-				Retries: svc.Healthcheck.Retries,
+				Test:    cc.Healthcheck.Test,
+				Retries: cc.Healthcheck.Retries,
 			}
 			var err error
-			if hc.Interval, err = parseOptionalDuration("interval", svc.Healthcheck.Interval); err != nil {
-				return nil, fmt.Errorf("service %q: %w", name, err)
+			if hc.Interval, err = parseOptionalDuration("interval", cc.Healthcheck.Interval); err != nil {
+				return nil, fmt.Errorf("companion container %q: %w", name, err)
 			}
-			if hc.Timeout, err = parseOptionalDuration("timeout", svc.Healthcheck.Timeout); err != nil {
-				return nil, fmt.Errorf("service %q: %w", name, err)
+			if hc.Timeout, err = parseOptionalDuration("timeout", cc.Healthcheck.Timeout); err != nil {
+				return nil, fmt.Errorf("companion container %q: %w", name, err)
 			}
-			if hc.StartPeriod, err = parseOptionalDuration("start_period", svc.Healthcheck.StartPeriod); err != nil {
-				return nil, fmt.Errorf("service %q: %w", name, err)
+			if hc.StartPeriod, err = parseOptionalDuration("start_period", cc.Healthcheck.StartPeriod); err != nil {
+				return nil, fmt.Errorf("companion container %q: %w", name, err)
 			}
-			if hc.StartInterval, err = parseOptionalDuration("start_interval", svc.Healthcheck.StartInterval); err != nil {
-				return nil, fmt.Errorf("service %q: %w", name, err)
+			if hc.StartInterval, err = parseOptionalDuration("start_interval", cc.Healthcheck.StartInterval); err != nil {
+				return nil, fmt.Errorf("companion container %q: %w", name, err)
 			}
-			protoSvc.Healthcheck = hc
+			protoCC.Healthcheck = hc
 		}
 
-		result = append(result, protoSvc)
+		result = append(result, protoCC)
 	}
 
 	return result, nil
@@ -233,11 +229,8 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	if len(override.GetBuiltinTools()) > 0 {
 		result.BuiltinTools = append([]string(nil), override.GetBuiltinTools()...)
 	}
-	if len(override.GetRequiredServices()) > 0 {
-		result.RequiredServices = cloneServiceSpecs(override.GetRequiredServices())
-	}
-	if len(override.GetOptionalServices()) > 0 {
-		result.OptionalServices = cloneServiceSpecs(override.GetOptionalServices())
+	if len(override.GetCompanionContainers()) > 0 {
+		result.CompanionContainers = cloneCompanionContainerSpecs(override.GetCompanionContainers())
 	}
 
 	// Map: key-level merge — override keys overwrite, base-only keys preserved.
