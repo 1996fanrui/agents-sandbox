@@ -46,11 +46,11 @@ a:hover { color: var(--primary); }
 .navbar {
   position: sticky; top: 0; z-index: 1000;
   background: var(--bg); border-bottom: 1px solid var(--border);
-  height: 52px; transition: background 0.15s, border-color 0.15s;
+  height: 60px; overflow: visible; transition: background 0.15s, border-color 0.15s;
 }
 .navbar .inner {
   max-width: 1100px; margin: 0 auto; padding: 0 24px;
-  display: flex; align-items: center; justify-content: space-between; height: 56px;
+  display: flex; align-items: center; justify-content: space-between; height: 60px;
 }
 .nav-left { display: flex; align-items: center; gap: 24px; }
 .nav-logo {
@@ -58,7 +58,7 @@ a:hover { color: var(--primary); }
   color: var(--primary); letter-spacing: -0.02em; text-decoration: none;
   display: flex; align-items: center; gap: 8px;
 }
-.nav-logo-box { width: 22px; height: 22px; border-radius: 5px; background: var(--accent); flex-shrink: 0; }
+.nav-logo-img { width: 100px; height: 100px; flex-shrink: 0; position: relative; top: 0px; }
 .nav-links { display: flex; gap: 24px; }
 .nav-links a { font-size: 14px; color: var(--muted); transition: color 0.15s; }
 .nav-links a:hover { color: var(--primary); }
