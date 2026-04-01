@@ -67,7 +67,7 @@
 <section class="hero">
   <div class="container">
     <h1>Full power.<br>Full safety.<br>No compromise.</h1>
-    <p class="sub">The sandbox runtime that ends the AI agent dilemma &mdash; agents run without restrictions, your host stays completely untouched.</p>
+    <p class="sub">The sandbox runtime that ends the AI agent dilemma &mdash; agents run without restrictions, your host stays completely untouched. Powered by your existing Claude Code &amp; Codex subscriptions, not per-token API billing.</p>
     <div class="hero-buttons">
       <a class="btn-primary" href="#quickstart">Get Started</a>
       <a class="btn-outline" href="https://github.com/1996fanrui/agents-sandbox" target="_blank">GitHub &rarr;</a>
@@ -201,8 +201,8 @@
         <div class="bento-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
         </div>
-        <div class="bento-title">Credential Inheritance</div>
-        <div class="bento-desc">SSH agent forwarding and GitHub CLI auth inherited automatically. Claude Code and Codex work immediately &mdash; no manual token wiring.</div>
+        <div class="bento-title">Subscriptions Work Out of the Box</div>
+        <div class="bento-desc">Your Claude Code and Codex CLI subscriptions work immediately inside sandboxes &mdash; one command to launch, no API keys, no per-token billing. SSH agent and GitHub CLI auth inherited automatically.</div>
       </div>
 
       <div class="bento-cell bento-4">
@@ -217,8 +217,8 @@
         <div class="bento-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </div>
-        <div class="bento-title">Local-First</div>
-        <div class="bento-desc">Runs on your machine. Zero latency, zero cost, data never leaves. Same daemon and SDK work in cloud deployments when you need to scale.</div>
+        <div class="bento-title">Local-First &mdash; No Dedicated Machine</div>
+        <div class="bento-desc">No need for a dedicated Mac Mini or remote VPS. Sandboxes run on your existing machine with VM-level isolation. Zero latency, zero cost, data never leaves. Same daemon and SDK work in cloud deployments when you need to scale.</div>
       </div>
 
     </div>
@@ -315,6 +315,18 @@
             <td><span class="cmp-val-bad">Entire host machine</span></td>
             <td><span class="cmp-val-ok">Only the disposable sandbox</span></td>
           </tr>
+          <tr>
+            <td>Dedicated hardware required</td>
+            <td><span class="cmp-val-bad">Runs on bare host &mdash; needs separate machine for safety</span></td>
+            <td><span class="cmp-val-bad">Runs on bare host &mdash; needs separate machine for safety</span></td>
+            <td><span class="cmp-val-ok">No &mdash; VM-level isolation on your existing machine</span></td>
+          </tr>
+          <tr>
+            <td>Cost model</td>
+            <td><span class="cmp-val-bad">Flat-rate subscription, but host at risk</span></td>
+            <td><span class="cmp-val-bad">Flat-rate subscription, but host at risk</span></td>
+            <td><span class="cmp-val-ok">Same subscriptions, fully isolated &mdash; no extra cost</span></td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -325,7 +337,7 @@
 <section class="quickstart" id="quickstart">
   <div class="container">
     <h2 class="section-title reveal">Quick Start</h2>
-    <p class="section-sub reveal">Install and start sandboxing your agents in seconds</p>
+    <p class="section-sub reveal">Your Claude Code &amp; Codex subscriptions, fully isolated in one command</p>
     <div class="quickstart-terminal reveal">
       <div class="qs-bar">
         <div style="display:flex;gap:6px;">
