@@ -118,7 +118,7 @@ func resolveAgentSessionArgs(
 	}
 
 	if realWorkspace == "/" {
-		return agentSessionArgs{}, usageErrorf("--workspace rejects root directory: copying the entire filesystem is not supported")
+		return agentSessionArgs{}, usageErrorf("--workspace rejects root directory: copying the entire filesystem is not allowed; please specify a project directory instead")
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -130,7 +130,7 @@ func resolveAgentSessionArgs(
 		return agentSessionArgs{}, usageErrorf("--workspace: cannot resolve home directory: %v", err)
 	}
 	if realWorkspace == realHome {
-		return agentSessionArgs{}, usageErrorf("--workspace rejects home directory: copying the entire home directory is not supported")
+		return agentSessionArgs{}, usageErrorf("--workspace rejects home directory: copying the entire home directory is not allowed; please specify a project directory instead")
 	}
 
 	parsed.workspace = realWorkspace
