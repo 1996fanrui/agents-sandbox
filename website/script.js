@@ -126,7 +126,7 @@
 function closeMobileMenu() { document.getElementById('mobileMenu').classList.remove('open'); }
 function copyCommands() {
   navigator.clipboard.writeText(
-    'curl -fsSL https://agents-sandbox.com/install.sh | bash\nagbox agent claude'
+    'curl -fsSL https://agents-sandbox.com/install.sh | bash\nagbox agent claude\nagbox agent codex'
   ).then(function() {
     var btn = document.querySelector('.copy-btn');
     btn.textContent = 'Copied!';

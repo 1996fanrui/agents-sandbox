@@ -371,8 +371,6 @@ section { padding: 96px 0; }
   color: var(--primary); display: block; letter-spacing: -0.03em;
 }
 .oss-stat-label { font-size: 0.8rem; color: var(--muted); }
-.oss-contributors { display: flex; gap: 8px; justify-content: center; margin-bottom: 28px; }
-.oss-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--border); border: 2px solid var(--bg); }
 
 /* ── Scroll Reveal ── */
 .reveal { opacity:0; transform:translateY(18px); transition:opacity .55s ease,transform .55s ease; }
