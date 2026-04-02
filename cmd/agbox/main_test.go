@@ -246,7 +246,7 @@ func TestAgentHelpFlag(t *testing.T) {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
 	output := stdout.String()
-	for _, want := range []string{"--command", "--mount"} {
+	for _, want := range []string{"--command", "--workspace"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("agent help output missing %q: %q", want, output)
 		}

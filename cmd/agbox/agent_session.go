@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -79,8 +80,15 @@ func runAgentSession(
 		return usageErrorf("stdin is not a TTY; agbox agent requires an interactive terminal")
 	}
 
-	if _, err := os.Stat(parsed.mount); err != nil {
-		return usageErrorf("--mount path %q: %v", parsed.mount, err)
+	if _, err := os.Stat(parsed.workspace); err != nil {
+		return usageErrorf("--workspace path %q: %v", parsed.workspace, err)
+	}
+
+	// Prompt for confirmation when the workspace lacks a top-level .git directory.
+	if _, err := os.Stat(filepath.Join(parsed.workspace, ".git")); os.IsNotExist(err) {
+		if confirmErr := confirmWorkspaceCopy(os.Stdin, stderr, parsed.workspace); confirmErr != nil {
+			return confirmErr
+		}
 	}
 
 	// Derive label for sandbox metadata. For registered agent types use the type name;
@@ -116,8 +124,8 @@ func runAgentSession(
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:        defaultImage,
 			BuiltinTools: parsed.builtinTools,
-			Mounts: []*agboxv1.MountSpec{
-				{Source: parsed.mount, Target: "/workspace", Writable: true},
+			Copies: []*agboxv1.CopySpec{
+				{Source: parsed.workspace, Target: "/workspace"},
 			},
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
@@ -381,4 +389,17 @@ func pumpSandboxEvents(stream rawclient.SandboxEventStream, eventCh chan<- sandb
 		}
 		eventCh <- sandboxEventResult{event: event}
 	}
+}
+
+// confirmWorkspaceCopy prompts the user to confirm copying a workspace that lacks
+// a top-level .git directory. It reads a single line from stdin; only "y" or "Y"
+// is accepted. Any other input (including empty/EOF) is treated as rejection.
+func confirmWorkspaceCopy(stdin io.Reader, stderr io.Writer, path string) error {
+	_, _ = fmt.Fprintf(stderr, "Warning: no .git directory found in %s. This directory will be copied into the sandbox.\nContinue? [y/N] ", path)
+	var response string
+	_, err := fmt.Fscanln(stdin, &response)
+	if err != nil || (response != "y" && response != "Y") {
+		return exitCodeError(1)
+	}
+	return nil
 }
