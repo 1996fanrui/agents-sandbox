@@ -107,7 +107,7 @@ This subcommand creates a sandbox via gRPC, waits for it to become READY, then c
 
 Two modes are supported:
 - **Pre-registered tool:** `agbox agent claude`, `agbox agent codex` — uses built-in command and builtin-tool defaults from the agent tool registry.
-- **Custom command:** `agbox agent --command "aider --yes" --mount /path/to/aider:/usr/local/bin/aider` — user provides the full command and mounts the tool binary into the container.
+- **Custom command:** `agbox agent --command "aider --yes" --workspace /path/to/project` — user provides the full command and specifies the workspace directory.
 
 **Why this is necessary:**
 
