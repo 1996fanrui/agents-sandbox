@@ -743,3 +743,32 @@ func TestCreateSandboxWithYAML(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateCreateSpec_RejectRootCopySource(t *testing.T) {
+	testCases := []struct {
+		name   string
+		source string
+	}{
+		{name: "bare_root", source: "/"},
+		{name: "double_slash", source: "//"},
+		{name: "triple_slash", source: "///"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &agboxv1.CreateSpec{
+				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
+				Copies: []*agboxv1.CopySpec{
+					{Source: tc.source, Target: "/workspace"},
+				},
+			}
+			err := validateCreateSpec(spec)
+			if err == nil {
+				t.Fatalf("expected error for copy source %q, got nil", tc.source)
+			}
+			if !strings.Contains(err.Error(), "root directory") {
+				t.Fatalf("expected error to contain 'root directory', got %v", err)
+			}
+		})
+	}
+}

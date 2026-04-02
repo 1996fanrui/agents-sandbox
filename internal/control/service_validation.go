@@ -48,6 +48,9 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 		if err := validateGenericSourcePath("copy", copy.GetSource()); err != nil {
 			return err
 		}
+		if filepath.Clean(copy.GetSource()) == "/" {
+			return errors.New("copy source must not be the root directory")
+		}
 		if err := registerTarget("copy", copy.GetTarget()); err != nil {
 			return err
 		}
