@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Glass dome over agent - protection metaphor -->
+  <defs>
+    <linearGradient id="g4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#14B8A6"/>
+      <stop offset="100%" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="g4b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5EEAD4" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#14B8A6" stop-opacity="0.1"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(256,256) scale(1.4) translate(-256,-246)">
+  <!-- Base platform -->
+  <!-- Top half (inside dome, lighter) -->
+  <path d="M76,360 A180,30 0 0,1 436,360" fill="none" stroke="#5EEAD4" stroke-width="3" opacity="0.3"/>
+  <!-- Bottom half (outside dome, bright) -->
+  <path d="M76,360 A180,30 0 0,0 436,360" fill="none" stroke="#5EEAD4" stroke-width="3"/>
+  <!-- Dome -->
+  <path d="M96,360 Q96,140 256,120 Q416,140 416,360" fill="url(#g4b)" stroke="#5EEAD4" stroke-width="3"/>
+  <!-- Grid lines on dome -->
+  <path d="M140,360 Q140,190 256,160 Q372,190 372,360" fill="none" stroke="#5EEAD4" stroke-width="1" opacity="0.3"/>
+  <path d="M186,360 Q186,220 256,200 Q326,220 326,360" fill="none" stroke="#5EEAD4" stroke-width="1" opacity="0.3"/>
+  <path d="M96,300 Q256,250 416,300" fill="none" stroke="#5EEAD4" stroke-width="1" opacity="0.3"/>
+  <path d="M116,250 Q256,200 396,250" fill="none" stroke="#5EEAD4" stroke-width="1" opacity="0.3"/>
+  <!-- Robot agent inside dome (scaled ~1.35x, bottom-aligned to platform) -->
+  <!-- Head -->
+  <rect x="216" y="166" width="81" height="68" rx="14" fill="url(#g4)"/>
+  <!-- Eyes -->
+  <circle cx="240" cy="196" r="9" fill="#F0FDFA"/>
+  <circle cx="272" cy="196" r="9" fill="#F0FDFA"/>
+  <circle cx="240" cy="196" r="4" fill="#134E4A"/>
+  <circle cx="272" cy="196" r="4" fill="#134E4A"/>
+  <!-- Antenna -->
+  <line x1="256" y1="166" x2="256" y2="146" stroke="#5EEAD4" stroke-width="4"/>
+  <circle cx="256" cy="141" r="8" fill="#5EEAD4"/>
+  <!-- Body -->
+  <rect x="207" y="241" width="97" height="81" rx="11" fill="url(#g4)"/>
+  <!-- Arms -->
+  <rect x="175" y="247" width="27" height="54" rx="8" fill="#0F766E"/>
+  <rect x="310" y="247" width="27" height="54" rx="8" fill="#0F766E"/>
+  <!-- Legs -->
+  <rect x="224" y="326" width="24" height="50" rx="5" fill="#0F766E"/>
+  <rect x="264" y="326" width="24" height="50" rx="5" fill="#0F766E"/>
+  </g>
+</svg>
