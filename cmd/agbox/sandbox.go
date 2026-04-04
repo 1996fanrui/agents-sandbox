@@ -16,6 +16,14 @@ const (
 	defaultImage = "ghcr.io/agents-sandbox/coding-runtime:latest"
 )
 
+// CLI wait output convention (all messages go to stderr):
+//
+//   Waiting for sandbox <id> to be <action>...
+//   Sandbox <action> in <duration>.
+//     <tip label>:  <command>
+//
+// On failure, a newline is printed after "..." and the error is returned.
+
 type sandboxClient interface {
 	CreateSandbox(context.Context, *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error)
 	ListSandboxes(context.Context, *agboxv1.ListSandboxesRequest) (*agboxv1.ListSandboxesResponse, error)
@@ -53,7 +61,6 @@ type sandboxGetArgs struct {
 type sandboxDeleteArgs struct {
 	sandboxID string
 	labels    map[string]string
-	json      bool
 }
 
 type sandboxExecArgs struct {
@@ -63,7 +70,7 @@ type sandboxExecArgs struct {
 	command      []string
 }
 
-func runSandboxCreate(ctx context.Context, client sandboxClient, parsed sandboxCreateArgs, stdout io.Writer) error {
+func runSandboxCreate(ctx context.Context, client sandboxExecClient, parsed sandboxCreateArgs, stdout io.Writer, stderr io.Writer) error {
 	createSpec := &agboxv1.CreateSpec{
 		Image:  parsed.image,
 		Labels: parsed.labels,
@@ -78,6 +85,10 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, parsed sandboxC
 		return runtimeErrorf("create sandbox: %v", err)
 	}
 
+	sandbox := response.GetSandbox()
+	sandboxID := sandbox.GetSandboxId()
+
+	// JSON mode: return immediately without waiting.
 	if parsed.json {
 		data, err := formatSandboxCreateResponse(response)
 		if err != nil {
@@ -87,7 +98,18 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, parsed sandboxC
 		return nil
 	}
 
-	_, _ = fmt.Fprint(stdout, formatSandboxHandleText(response.GetSandbox()))
+	// Wait for sandbox to become ready.
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be ready...", sandboxID)
+	waitStart := time.Now()
+	if err := waitForSandboxReady(ctx, client, sandboxID, sandbox.GetLastEventSequence(), nil, nil); err != nil {
+		_, _ = fmt.Fprintln(stderr)
+		return err
+	}
+
+	containerName := primaryContainerName(sandboxID)
+	_, _ = fmt.Fprintf(stderr, "\nSandbox ready in %.1fs.\n", time.Since(waitStart).Seconds())
+	_, _ = fmt.Fprintf(stderr, "  Open a shell:       docker exec -it --user agbox %s bash\n", containerName)
+	_, _ = fmt.Fprintf(stderr, "  Delete sandbox:     agbox sandbox delete %s\n", sandboxID)
 	return nil
 }
 
@@ -132,10 +154,7 @@ func runSandboxGet(ctx context.Context, client sandboxClient, parsed sandboxGetA
 	return nil
 }
 
-func runSandboxDelete(ctx context.Context, client sandboxClient, parsed sandboxDeleteArgs, stdout io.Writer) error {
-	if parsed.json {
-		return usageErrorf("sandbox delete does not support --json")
-	}
+func runSandboxDelete(ctx context.Context, client sandboxExecClient, parsed sandboxDeleteArgs, stdout io.Writer, stderr io.Writer) error {
 	if parsed.sandboxID != "" && len(parsed.labels) > 0 {
 		return usageErrorf("sandbox delete <sandbox_id> and --label are mutually exclusive")
 	}
@@ -144,20 +163,107 @@ func runSandboxDelete(ctx context.Context, client sandboxClient, parsed sandboxD
 	}
 
 	if parsed.sandboxID != "" {
-		response, err := client.DeleteSandbox(ctx, parsed.sandboxID)
-		if err != nil {
-			return runtimeErrorf("delete sandbox: %v", err)
-		}
-		_, _ = fmt.Fprint(stdout, formatSandboxDeleteAccepted(response))
-		return nil
+		return deleteSingleSandbox(ctx, client, parsed.sandboxID, stdout, stderr)
 	}
 
+	return deleteSandboxesByLabel(ctx, client, parsed.labels, stdout, stderr)
+}
+
+func deleteSingleSandbox(ctx context.Context, client sandboxExecClient, sandboxID string, _ io.Writer, stderr io.Writer) error {
+	if _, err := client.DeleteSandbox(ctx, sandboxID); err != nil {
+		return runtimeErrorf("delete sandbox: %v", err)
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be deleted...\n", sandboxID)
+	waitStart := time.Now()
+	if err := waitForSandboxDeleted(ctx, client, sandboxID); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stderr, "Sandbox deleted in %.1fs.\n", time.Since(waitStart).Seconds())
+	return nil
+}
+
+func deleteSandboxesByLabel(ctx context.Context, client sandboxExecClient, labels map[string]string, _ io.Writer, stderr io.Writer) error {
 	response, err := client.DeleteSandboxes(ctx, &agboxv1.DeleteSandboxesRequest{
-		LabelSelector: parsed.labels,
+		LabelSelector: labels,
 	})
 	if err != nil {
 		return runtimeErrorf("delete sandboxes: %v", err)
 	}
-	_, _ = fmt.Fprint(stdout, formatSandboxDeleteByLabel(response))
+
+	ids := response.GetDeletedSandboxIds()
+	if len(ids) == 0 {
+		_, _ = fmt.Fprintln(stderr, "No sandboxes matched the label selector.")
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Waiting for %d sandbox(es) to be deleted...\n", len(ids))
+	waitStart := time.Now()
+	for _, id := range ids {
+		if err := waitForSandboxDeleted(ctx, client, id); err != nil {
+			return err
+		}
+	}
+	_, _ = fmt.Fprintf(stderr, "%d sandbox(es) deleted in %.1fs.\n", len(ids), time.Since(waitStart).Seconds())
 	return nil
+}
+
+// waitForSandboxDeleted waits for a sandbox to reach DELETED state using event subscription.
+func waitForSandboxDeleted(ctx context.Context, client sandboxExecClient, sandboxID string) error {
+	getResp, err := client.GetSandbox(ctx, sandboxID)
+	if err != nil {
+		return runtimeErrorf("get sandbox: %v", err)
+	}
+	sandbox := getResp.GetSandbox()
+	if sandbox.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+		return nil
+	}
+
+	cursorSeq := sandbox.GetLastEventSequence()
+	stream, err := client.SubscribeSandboxEvents(ctx, sandboxID, cursorSeq, false)
+	if err != nil {
+		return runtimeErrorf("subscribe sandbox events: %v", err)
+	}
+	defer stream.Close()
+
+	eventCh := make(chan sandboxEventResult, 1)
+	go pumpSandboxEvents(stream, eventCh)
+
+	for {
+		select {
+		case result, ok := <-eventCh:
+			if !ok {
+				return runtimeErrorf("sandbox event stream closed unexpectedly")
+			}
+			if result.err != nil {
+				return runtimeErrorf("wait for sandbox deleted: %v", result.err)
+			}
+			if result.event.GetSandboxState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+				return nil
+			}
+		case <-ctx.Done():
+			return runtimeErrorf("wait for sandbox deleted: %v", ctx.Err())
+		}
+	}
+}
+
+// sandboxErrorDetail returns the error message from a sandbox handle,
+// falling back to the error code or a generic message.
+func sandboxErrorDetail(sandbox *agboxv1.SandboxHandle) string {
+	if msg := sandbox.GetErrorMessage(); msg != "" {
+		return msg
+	}
+	if code := sandbox.GetErrorCode(); code != "" {
+		return code
+	}
+	return "unknown error"
+}
+
+// sandboxFailedError fetches the sandbox to get error details and returns a formatted error.
+func sandboxFailedError(ctx context.Context, client sandboxExecClient, sandboxID string) error {
+	getResp, err := client.GetSandbox(ctx, sandboxID)
+	if err != nil {
+		return runtimeErrorf("sandbox %s failed (could not fetch details: %v)", sandboxID, err)
+	}
+	return runtimeErrorf("sandbox %s failed: %s", sandboxID, sandboxErrorDetail(getResp.GetSandbox()))
 }

@@ -71,13 +71,13 @@ func newSandboxCreateCommand() *cobra.Command {
 				parsed.idleTTL = &d
 			}
 
-			client, cleanup, err := newSandboxClient(cmd)
+			client, cleanup, err := newSandboxStreamingClient(cmd)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
 
-			return runSandboxCreate(cmd.Context(), client, parsed, cmd.OutOrStdout())
+			return runSandboxCreate(cmd.Context(), client, parsed, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 
@@ -158,10 +158,7 @@ func newSandboxGetCommand() *cobra.Command {
 }
 
 func newSandboxDeleteCommand() *cobra.Command {
-	var (
-		labels     []string
-		jsonOutput bool
-	)
+	var labels []string
 
 	cmd := &cobra.Command{
 		Use:   "delete [sandbox_id]",
@@ -175,24 +172,22 @@ func newSandboxDeleteCommand() *cobra.Command {
 
 			parsed := sandboxDeleteArgs{
 				labels: labelMap,
-				json:   jsonOutput,
 			}
 			if len(args) > 0 {
 				parsed.sandboxID = args[0]
 			}
 
-			client, cleanup, err := newSandboxClient(cmd)
+			client, cleanup, err := newSandboxStreamingClient(cmd)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
 
-			return runSandboxDelete(cmd.Context(), client, parsed, cmd.OutOrStdout())
+			return runSandboxDelete(cmd.Context(), client, parsed, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 
 	cmd.Flags().StringArrayVar(&labels, "label", nil, "Label filter in key=value form (repeatable)")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 
 	return cmd
 }
@@ -271,6 +266,24 @@ func newSandboxClient(cmd *cobra.Command) (*rawclient.RawClient, func(), error) 
 	}
 
 	client, err := rawclient.New(socketPath)
+	if err != nil {
+		return nil, nil, runtimeErrorf("connect daemon: %v", err)
+	}
+
+	return client, func() { client.Close() }, nil
+}
+
+// newSandboxStreamingClient creates a rawclient with no timeout, suitable for
+// commands that subscribe to event streams (create with wait, delete with wait).
+func newSandboxStreamingClient(cmd *cobra.Command) (*rawclient.RawClient, func(), error) {
+	lookupEnv := lookupEnvFromCmd(cmd)
+
+	socketPath, err := platform.SocketPath(lookupEnv)
+	if err != nil {
+		return nil, nil, runtimeErrorf("resolve daemon socket: %v", err)
+	}
+
+	client, err := rawclient.New(socketPath, rawclient.WithTimeout(0))
 	if err != nil {
 		return nil, nil, runtimeErrorf("connect daemon: %v", err)
 	}
