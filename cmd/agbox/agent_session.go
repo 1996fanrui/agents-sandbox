@@ -20,11 +20,6 @@ import (
 )
 
 const (
-	// defaultImage is the coding runtime image used for interactive agent sessions.
-	// Pre-registered agent types are designed for this image; the commands inside it
-	// may not be available in other images.
-	defaultImage = "ghcr.io/agents-sandbox/coding-runtime:latest"
-
 	// deleteAndWaitTimeout is the maximum time to wait for sandbox deletion to complete.
 	deleteAndWaitTimeout = 30 * time.Second
 

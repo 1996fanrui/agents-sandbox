@@ -81,8 +81,7 @@ func newSandboxCreateCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&image, "image", "", "Container image for the sandbox")
-	_ = cmd.MarkFlagRequired("image")
+	cmd.Flags().StringVar(&image, "image", defaultImage, "Container image for the sandbox")
 	cmd.Flags().StringArrayVar(&labels, "label", nil, "Label in key=value form (repeatable)")
 	cmd.Flags().StringVar(&idleTTLStr, "idle-ttl", "", "Idle TTL duration (e.g. 5m, 0 to disable)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
