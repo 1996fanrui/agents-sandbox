@@ -20,7 +20,7 @@ func newSandboxCommand() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return usageErrorf(
-				"sandbox command requires a subcommand\navailable subcommands: create, list, get, delete, exec",
+				"sandbox command requires a subcommand\navailable subcommands: create, list, get, delete, stop, resume",
 			)
 		},
 	}
@@ -30,7 +30,8 @@ func newSandboxCommand() *cobra.Command {
 		newSandboxListCommand(),
 		newSandboxGetCommand(),
 		newSandboxDeleteCommand(),
-		newSandboxExecCommand(),
+		newSandboxStopCommand(),
+		newSandboxResumeCommand(),
 	)
 
 	return cmd
@@ -192,65 +193,40 @@ func newSandboxDeleteCommand() *cobra.Command {
 	return cmd
 }
 
-func newSandboxExecCommand() *cobra.Command {
-	var (
-		cwd          string
-		envOverrides []string
-		jsonOutput   bool
-	)
-
+func newSandboxStopCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "exec <sandbox_id> [options] -- <command> [args...]",
-		Short: "Execute a command in a sandbox",
-		// Disable flag parsing after -- so that the command after -- is captured as args.
-		DisableFlagParsing: false,
+		Use:   "stop <sandbox_id>",
+		Short: "Stop a sandbox",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if jsonOutput {
-				return usageErrorf("sandbox exec does not support --json")
+			client, cleanup, err := newSandboxStreamingClient(cmd)
+			if err != nil {
+				return err
 			}
+			defer cleanup()
 
-			// Use ArgsLenAtDash to split positional args before and after --.
-			dashIndex := cmd.ArgsLenAtDash()
-			if dashIndex < 0 {
-				return usageErrorf("sandbox exec requires -- <command> [args...]")
-			}
-
-			beforeDash := args[:dashIndex]
-			afterDash := args[dashIndex:]
-
-			if len(beforeDash) == 0 {
-				return usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
-			}
-			if len(beforeDash) > 1 {
-				return usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
-			}
-			if len(afterDash) == 0 {
-				return usageErrorf("sandbox exec requires <sandbox_id> -- <command> [args...]")
-			}
-
-			envMap := make(map[string]string)
-			for _, raw := range envOverrides {
-				key, value, err := parseKeyValueAssignment(raw, "--env-overrides")
-				if err != nil {
-					return err
-				}
-				envMap[key] = value
-			}
-
-			parsed := sandboxExecArgs{
-				sandboxID:    beforeDash[0],
-				cwd:          cwd,
-				envOverrides: envMap,
-				command:      afterDash,
-			}
-
-			return runSandboxExec(cmd.Context(), cmd, parsed)
+			return runSandboxStop(cmd.Context(), client, args[0], cmd.ErrOrStderr())
 		},
 	}
 
-	cmd.Flags().StringVar(&cwd, "cwd", "", "Working directory inside the sandbox")
-	cmd.Flags().StringArrayVar(&envOverrides, "env-overrides", nil, "Environment override in key=value form (repeatable)")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+	return cmd
+}
+
+func newSandboxResumeCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "resume <sandbox_id>",
+		Short: "Resume a stopped sandbox",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, cleanup, err := newSandboxStreamingClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			return runSandboxResume(cmd.Context(), client, args[0], cmd.ErrOrStderr())
+		},
+	}
 
 	return cmd
 }

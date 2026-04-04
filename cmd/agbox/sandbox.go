@@ -38,6 +38,8 @@ type sandboxExecClient interface {
 	SubscribeSandboxEvents(context.Context, string, uint64, bool) (rawclient.SandboxEventStream, error)
 	GetExec(context.Context, string) (*agboxv1.GetExecResponse, error)
 	CancelExec(context.Context, string) (*agboxv1.AcceptedResponse, error)
+	StopSandbox(context.Context, string) (*agboxv1.AcceptedResponse, error)
+	ResumeSandbox(context.Context, string) (*agboxv1.AcceptedResponse, error)
 }
 
 type sandboxCreateArgs struct {
@@ -176,7 +178,7 @@ func deleteSingleSandbox(ctx context.Context, client sandboxExecClient, sandboxI
 
 	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be deleted...\n", sandboxID)
 	waitStart := time.Now()
-	if err := waitForSandboxDeleted(ctx, client, sandboxID); err != nil {
+	if err := waitForSandboxState(ctx, client, sandboxID, classifyDeleted); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(stderr, "Sandbox deleted in %.1fs.\n", time.Since(waitStart).Seconds())
@@ -200,51 +202,12 @@ func deleteSandboxesByLabel(ctx context.Context, client sandboxExecClient, label
 	_, _ = fmt.Fprintf(stderr, "Waiting for %d sandbox(es) to be deleted...\n", len(ids))
 	waitStart := time.Now()
 	for _, id := range ids {
-		if err := waitForSandboxDeleted(ctx, client, id); err != nil {
+		if err := waitForSandboxState(ctx, client, id, classifyDeleted); err != nil {
 			return err
 		}
 	}
 	_, _ = fmt.Fprintf(stderr, "%d sandbox(es) deleted in %.1fs.\n", len(ids), time.Since(waitStart).Seconds())
 	return nil
-}
-
-// waitForSandboxDeleted waits for a sandbox to reach DELETED state using event subscription.
-func waitForSandboxDeleted(ctx context.Context, client sandboxExecClient, sandboxID string) error {
-	getResp, err := client.GetSandbox(ctx, sandboxID)
-	if err != nil {
-		return runtimeErrorf("get sandbox: %v", err)
-	}
-	sandbox := getResp.GetSandbox()
-	if sandbox.GetState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
-		return nil
-	}
-
-	cursorSeq := sandbox.GetLastEventSequence()
-	stream, err := client.SubscribeSandboxEvents(ctx, sandboxID, cursorSeq, false)
-	if err != nil {
-		return runtimeErrorf("subscribe sandbox events: %v", err)
-	}
-	defer stream.Close()
-
-	eventCh := make(chan sandboxEventResult, 1)
-	go pumpSandboxEvents(stream, eventCh)
-
-	for {
-		select {
-		case result, ok := <-eventCh:
-			if !ok {
-				return runtimeErrorf("sandbox event stream closed unexpectedly")
-			}
-			if result.err != nil {
-				return runtimeErrorf("wait for sandbox deleted: %v", result.err)
-			}
-			if result.event.GetSandboxState() == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
-				return nil
-			}
-		case <-ctx.Done():
-			return runtimeErrorf("wait for sandbox deleted: %v", ctx.Err())
-		}
-	}
 }
 
 // sandboxErrorDetail returns the error message from a sandbox handle,
@@ -266,4 +229,144 @@ func sandboxFailedError(ctx context.Context, client sandboxExecClient, sandboxID
 		return runtimeErrorf("sandbox %s failed (could not fetch details: %v)", sandboxID, err)
 	}
 	return runtimeErrorf("sandbox %s failed: %s", sandboxID, sandboxErrorDetail(getResp.GetSandbox()))
+}
+
+func runSandboxStop(ctx context.Context, client sandboxExecClient, sandboxID string, stderr io.Writer) error {
+	if _, err := client.StopSandbox(ctx, sandboxID); err != nil {
+		return runtimeErrorf("stop sandbox: %v", err)
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be stopped...", sandboxID)
+	waitStart := time.Now()
+	if err := waitForSandboxState(ctx, client, sandboxID, classifyStopped); err != nil {
+		_, _ = fmt.Fprintln(stderr)
+		return err
+	}
+	_, _ = fmt.Fprintf(stderr, "\nSandbox stopped in %.1fs.\n", time.Since(waitStart).Seconds())
+	return nil
+}
+
+func runSandboxResume(ctx context.Context, client sandboxExecClient, sandboxID string, stderr io.Writer) error {
+	if _, err := client.ResumeSandbox(ctx, sandboxID); err != nil {
+		return runtimeErrorf("resume sandbox: %v", err)
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be resumed...", sandboxID)
+	waitStart := time.Now()
+	if err := waitForSandboxState(ctx, client, sandboxID, classifyResumed); err != nil {
+		_, _ = fmt.Fprintln(stderr)
+		return err
+	}
+	_, _ = fmt.Fprintf(stderr, "\nSandbox resumed in %.1fs.\n", time.Since(waitStart).Seconds())
+	return nil
+}
+
+// stateVerdict is the result of classifying a sandbox state during a wait loop.
+type stateVerdict int
+
+const (
+	stateKeepWaiting stateVerdict = iota // not yet at target, continue polling
+	stateReached                         // target state reached, return success
+	stateFailed                          // error state, return failure
+)
+
+// stateClassifier maps a sandbox state to a verdict. The sandboxID is passed
+// so that the classifier can produce descriptive error messages.
+type stateClassifier func(state agboxv1.SandboxState, sandboxID string, detail func() string) (stateVerdict, error)
+
+// classifyDeleted is used by delete waits.
+func classifyDeleted(state agboxv1.SandboxState, _ string, _ func() string) (stateVerdict, error) {
+	if state == agboxv1.SandboxState_SANDBOX_STATE_DELETED {
+		return stateReached, nil
+	}
+	return stateKeepWaiting, nil
+}
+
+// classifyStopped is used by waitForSandboxStopped (stop waits).
+func classifyStopped(state agboxv1.SandboxState, sandboxID string, detail func() string) (stateVerdict, error) {
+	switch state {
+	case agboxv1.SandboxState_SANDBOX_STATE_STOPPED:
+		return stateReached, nil
+	case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
+		return stateFailed, runtimeErrorf("sandbox %s failed: %s", sandboxID, detail())
+	case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+		return stateFailed, runtimeErrorf("sandbox %s was deleted while waiting for stop", sandboxID)
+	default:
+		return stateKeepWaiting, nil
+	}
+}
+
+// classifyResumed is used by waitForSandboxResumed (resume waits).
+// Tolerates STOPPED and PENDING as transitional states after a resume request.
+func classifyResumed(state agboxv1.SandboxState, sandboxID string, detail func() string) (stateVerdict, error) {
+	switch state {
+	case agboxv1.SandboxState_SANDBOX_STATE_READY:
+		return stateReached, nil
+	case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
+		return stateFailed, runtimeErrorf("sandbox %s failed: %s", sandboxID, detail())
+	case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+		return stateFailed, runtimeErrorf("sandbox %s was deleted while waiting for resume", sandboxID)
+	default:
+		return stateKeepWaiting, nil
+	}
+}
+
+// waitForSandboxState is the generic wait loop for sandbox state transitions.
+// It polls GetSandbox, then subscribes to events and classifies each state
+// change using the provided classifier until the target state is reached or
+// an error state is encountered.
+func waitForSandboxState(ctx context.Context, client sandboxExecClient, sandboxID string, classify stateClassifier) error {
+	getResp, err := client.GetSandbox(ctx, sandboxID)
+	if err != nil {
+		return runtimeErrorf("get sandbox: %v", err)
+	}
+	sandbox := getResp.GetSandbox()
+
+	detailFn := func() string { return sandboxErrorDetail(sandbox) }
+	verdict, err := classify(sandbox.GetState(), sandboxID, detailFn)
+	if err != nil {
+		return err
+	}
+	if verdict == stateReached {
+		return nil
+	}
+
+	cursorSeq := sandbox.GetLastEventSequence()
+	stream, err := client.SubscribeSandboxEvents(ctx, sandboxID, cursorSeq, false)
+	if err != nil {
+		return runtimeErrorf("subscribe sandbox events: %v", err)
+	}
+	defer stream.Close()
+
+	eventCh := make(chan sandboxEventResult, 1)
+	go pumpSandboxEvents(stream, eventCh)
+
+	for {
+		select {
+		case result, ok := <-eventCh:
+			if !ok {
+				return runtimeErrorf("sandbox event stream closed unexpectedly")
+			}
+			if result.err != nil {
+				return runtimeErrorf("wait for sandbox state: %v", result.err)
+			}
+			// For event-based classification, fetch fresh sandbox details for error messages.
+			eventDetailFn := func() string {
+				resp, fetchErr := client.GetSandbox(ctx, sandboxID)
+				if fetchErr != nil {
+					return fmt.Sprintf("could not fetch details: %v", fetchErr)
+				}
+				return sandboxErrorDetail(resp.GetSandbox())
+			}
+			verdict, err := classify(result.event.GetSandboxState(), sandboxID, eventDetailFn)
+			if err != nil {
+				return err
+			}
+			if verdict == stateReached {
+				return nil
+			}
+		case <-ctx.Done():
+			return runtimeErrorf("wait for sandbox state: %v", ctx.Err())
+		}
+	}
 }
