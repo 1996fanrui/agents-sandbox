@@ -20,10 +20,6 @@ var protoJSONOptions = protojson.MarshalOptions{
 	Indent:          "  ",
 }
 
-var compactProtoJSONOptions = protojson.MarshalOptions{
-	UseProtoNames: true,
-}
-
 func writeProtoJSON(message proto.Message) (string, error) {
 	data, err := protoJSONOptions.Marshal(message)
 	if err != nil {
@@ -142,61 +138,25 @@ func formatSandboxListTable(handles []*agboxv1.SandboxHandle) string {
 	return buffer.String()
 }
 
-func formatSandboxHandleText(handle *agboxv1.SandboxHandle) (string, error) {
-	companionContainers, err := formatCompanionContainersJSON(handle.GetCompanionContainers())
-	if err != nil {
-		return "", err
-	}
-
+func formatSandboxHandleText(handle *agboxv1.SandboxHandle) string {
 	createdAt := ""
 	if ts := handle.GetCreatedAt(); ts != nil {
 		createdAt = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
 	}
 
-	stateChangedAt := ""
-	if ts := handle.GetStateChangedAt(); ts != nil {
-		stateChangedAt = ts.AsTime().UTC().Format("2006-01-02T15:04:05Z")
-	}
-
 	var builder strings.Builder
 	_, _ = fmt.Fprintf(&builder, "sandbox_id=%s\n", handle.GetSandboxId())
-	_, _ = fmt.Fprintf(&builder, "state=%s\n", handle.GetState())
+	_, _ = fmt.Fprintf(&builder, "state=%s\n", humanStateName(handle.GetState()))
 	_, _ = fmt.Fprintf(&builder, "image=%s\n", handle.GetImage())
 	_, _ = fmt.Fprintf(&builder, "created_at=%s\n", createdAt)
-	_, _ = fmt.Fprintf(&builder, "state_changed_at=%s\n", stateChangedAt)
-	_, _ = fmt.Fprintf(&builder, "last_event_sequence=%d\n", handle.GetLastEventSequence())
-	_, _ = fmt.Fprintf(&builder, "labels=%s\n", formatStringMapJSON(handle.GetLabels()))
-	_, _ = fmt.Fprintf(&builder, "companion_containers=%s\n", companionContainers)
+	if len(handle.GetLabels()) > 0 {
+		_, _ = fmt.Fprintf(&builder, "labels=%s\n", formatStringMapJSON(handle.GetLabels()))
+	}
 	if handle.GetErrorCode() != "" {
 		_, _ = fmt.Fprintf(&builder, "error_code=%s\n", handle.GetErrorCode())
 		_, _ = fmt.Fprintf(&builder, "error_message=%s\n", handle.GetErrorMessage())
 	}
-	return builder.String(), nil
-}
-
-func formatCompanionContainersJSON(containers []*agboxv1.CompanionContainerSpec) (string, error) {
-	if len(containers) == 0 {
-		return "[]", nil
-	}
-
-	var builder strings.Builder
-	builder.WriteByte('[')
-	for index, cc := range containers {
-		if index > 0 {
-			builder.WriteByte(',')
-		}
-		data, err := compactProtoJSONOptions.Marshal(cc)
-		if err != nil {
-			return "", err
-		}
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, data); err != nil {
-			return "", err
-		}
-		builder.Write(compact.Bytes())
-	}
-	builder.WriteByte(']')
-	return builder.String(), nil
+	return builder.String()
 }
 
 func formatStringMapJSON(values map[string]string) string {

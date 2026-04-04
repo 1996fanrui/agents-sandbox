@@ -11,6 +11,11 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
+const (
+	// defaultImage is the default container image used when --image is not specified.
+	defaultImage = "ghcr.io/agents-sandbox/coding-runtime:latest"
+)
+
 type sandboxClient interface {
 	CreateSandbox(context.Context, *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error)
 	ListSandboxes(context.Context, *agboxv1.ListSandboxesRequest) (*agboxv1.ListSandboxesResponse, error)
@@ -82,11 +87,7 @@ func runSandboxCreate(ctx context.Context, client sandboxClient, parsed sandboxC
 		return nil
 	}
 
-	text, err := formatSandboxHandleText(response.GetSandbox())
-	if err != nil {
-		return runtimeErrorf("format create sandbox response: %v", err)
-	}
-	_, _ = fmt.Fprint(stdout, text)
+	_, _ = fmt.Fprint(stdout, formatSandboxHandleText(response.GetSandbox()))
 	return nil
 }
 
@@ -127,11 +128,7 @@ func runSandboxGet(ctx context.Context, client sandboxClient, parsed sandboxGetA
 		return nil
 	}
 
-	text, err := formatSandboxHandleText(response.GetSandbox())
-	if err != nil {
-		return runtimeErrorf("format sandbox handle: %v", err)
-	}
-	_, _ = fmt.Fprint(stdout, text)
+	_, _ = fmt.Fprint(stdout, formatSandboxHandleText(response.GetSandbox()))
 	return nil
 }
 

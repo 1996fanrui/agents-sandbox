@@ -135,7 +135,7 @@ func TestSandboxCreate(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
-	if !strings.Contains(stdout, "sandbox_id=sandbox-123") || !strings.Contains(stdout, "state=SANDBOX_STATE_PENDING") {
+	if !strings.Contains(stdout, "sandbox_id=sandbox-123") || !strings.Contains(stdout, "state=Pending") {
 		t.Fatalf("unexpected stdout %q", stdout)
 	}
 	if service.createReq.GetCreateSpec().GetImage() != "ubuntu:latest" {
@@ -216,13 +216,27 @@ func TestSandboxCreateJSON(t *testing.T) {
 	}
 }
 
-func TestSandboxCreateMissingImage(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "create")
-	if exitCode != exitCodeUsageError {
+func TestSandboxCreateDefaultImage(t *testing.T) {
+	service := &fakeSandboxService{
+		createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			return &agboxv1.CreateSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId: "sandbox-default",
+					State:     agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+				},
+			}, nil
+		},
+	}
+
+	stdout, stderr, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create")
+	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if !strings.Contains(stderr, "image") {
-		t.Fatalf("unexpected stderr %q", stderr)
+	if service.createReq.GetCreateSpec().GetImage() != defaultImage {
+		t.Fatalf("expected default image %q, got %q", defaultImage, service.createReq.GetCreateSpec().GetImage())
+	}
+	if !strings.Contains(stdout, "sandbox_id=sandbox-default") {
+		t.Fatalf("unexpected stdout %q", stdout)
 	}
 }
 
@@ -426,13 +440,10 @@ func TestSandboxGet(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	want := []string{
 		"sandbox_id=sandbox-123",
-		"state=SANDBOX_STATE_READY",
+		"state=Ready",
 		"image=",
 		"created_at=",
-		"state_changed_at=",
-		"last_event_sequence=7",
 		`labels={"env":"dev","team":"backend"}`,
-		`companion_containers=[{"name":"db","image":"postgres:16"},{"name":"cache","image":"redis:7"}]`,
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("unexpected line count: %v", lines)
@@ -463,13 +474,9 @@ func TestSandboxGet(t *testing.T) {
 	lines = strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	want = []string{
 		"sandbox_id=sandbox-empty",
-		"state=SANDBOX_STATE_PENDING",
+		"state=Pending",
 		"image=",
 		"created_at=",
-		"state_changed_at=",
-		"last_event_sequence=0",
-		"labels={}",
-		"companion_containers=[]",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("unexpected line count: %v", lines)
