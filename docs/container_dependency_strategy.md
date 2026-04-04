@@ -28,7 +28,7 @@ Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to
 
 | Tool | Resolved Mounts (Host Source → Container Target, Mode) |
 |------|--------------------------------------------------------|
-| `claude` | `~/.claude` → `/home/agbox/.claude` (rw), `~/.claude.json` → `/home/agbox/.claude.json` (rw) |
+| `claude` | `~/.claude` → `/home/agbox/.claude` (rw), `~/.claude.json` → `/home/agbox/.claude.json` (rw), `$XDG_RUNTIME_DIR/pulse/native` → `/pulse-audio` (socket forwarding, when host socket exists) |
 | `codex` | `~/.codex` → `/home/agbox/.codex` (rw), `~/.agents` → `/home/agbox/.agents` (rw) |
 | `git` | `SSH_AUTH_SOCK` → `/ssh-agent` (socket forwarding), `~/.config/gh` → `/home/agbox/.config/gh` (read-only) |
 | `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (rw), `~/.local/share/uv` → `/home/agbox/.local/share/uv` (rw) |
@@ -39,6 +39,7 @@ Notes:
 - `codex` mounts both `~/.codex` and `~/.agents`; `~/.agents` is the shared agents state directory.
 - `git` bundles SSH agent forwarding and GitHub CLI auth; requesting `git` is equivalent to requesting both.
 - `uv` mounts both the package cache and the data directory holding Python interpreters and globally installed tools.
+- `claude` includes optional PulseAudio socket forwarding for voice support; the mount is silently skipped when the host socket does not exist.
 
 These are daemon-defined capabilities. Callers may select from this set but may not replace them with arbitrary host paths. The minimal base runtime image asset is under `images/base-runtime/`; the HOME-aligned coding runtime image is under `images/coding-runtime/`.
 
@@ -48,7 +49,7 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 
 ### Generic mounts
 
-- The mount source must be a real file or directory, not a symlink.
+- The mount source must be a real file, directory, or Unix socket, not a symlink.
 - If the mount cannot be provided safely, the daemon fails fast.
 - The daemon does not silently rewrite a mount into a copy.
 
@@ -64,7 +65,7 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 
 - Regular directories use bind mounts when safe.
 - Directory trees with escaping symlinks are bind-mounted directly from the host path.
-- Socket resources such as `ssh-agent` are forwarded only when the host path is a real Unix socket.
+- Socket resources such as `ssh-agent` and `pulse-audio` are forwarded only when the host path is a real Unix socket.
 
 ## Companion Container Model
 
