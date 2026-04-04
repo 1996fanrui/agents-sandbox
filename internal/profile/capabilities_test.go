@@ -1,6 +1,9 @@
 package profile
 
-import "testing"
+import (
+	"path"
+	"testing"
+)
 
 func TestBuiltInToolingCapabilitiesExposeRequiredIDs(t *testing.T) {
 	capabilities := BuiltInToolingCapabilities()
@@ -67,15 +70,35 @@ func TestClaudeMountsIncludePulseAudio(t *testing.T) {
 	}
 }
 
-func TestGitMountsBothAuthResources(t *testing.T) {
+func TestGitMountsAllAuthResources(t *testing.T) {
 	capability, ok := CapabilityByID(string(ToolIDGit))
 	if !ok {
 		t.Fatal("missing tool capability git")
 	}
-	if len(capability.MountIDs) != 2 {
-		t.Fatalf("expected git to have 2 mount IDs, got %d", len(capability.MountIDs))
+	if len(capability.MountIDs) != 3 {
+		t.Fatalf("expected git to have 3 mount IDs, got %d", len(capability.MountIDs))
 	}
-	if capability.MountIDs[0] != MountIDSSHAgent || capability.MountIDs[1] != MountIDGHAuth {
+	if capability.MountIDs[0] != MountIDSSHAgent || capability.MountIDs[1] != MountIDGHAuth || capability.MountIDs[2] != MountIDSSHKnownHosts {
 		t.Fatalf("unexpected git mount IDs: %v", capability.MountIDs)
+	}
+}
+
+func TestSSHKnownHostsMountAttributes(t *testing.T) {
+	mount, ok := MountByID(MountIDSSHKnownHosts)
+	if !ok {
+		t.Fatal("missing mount ssh-known-hosts")
+	}
+	if mount.DefaultHostPath != "~/.ssh/known_hosts" {
+		t.Fatalf("unexpected DefaultHostPath: got %q want %q", mount.DefaultHostPath, "~/.ssh/known_hosts")
+	}
+	want := path.Join(ContainerUserHome, ".ssh/known_hosts")
+	if mount.ContainerTarget != want {
+		t.Fatalf("unexpected ContainerTarget: got %q want %q", mount.ContainerTarget, want)
+	}
+	if mount.Mode != CapabilityModeReadWrite {
+		t.Fatalf("unexpected Mode: got %q want %q", mount.Mode, CapabilityModeReadWrite)
+	}
+	if !mount.Optional {
+		t.Fatal("expected Optional to be true")
 	}
 }
