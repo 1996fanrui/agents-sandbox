@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     openssh-client \
     ripgrep \
+    sox \
+    libsox-fmt-pulse \
     && rm -rf /var/lib/apt/lists/*
 
 ARG TARGETARCH
