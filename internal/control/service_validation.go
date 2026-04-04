@@ -167,8 +167,9 @@ func validateGenericSourcePath(kind string, source string) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%s source must not be a symlink: %s", kind, source)
 	}
-	if !info.Mode().IsRegular() && !info.IsDir() {
-		return fmt.Errorf("%s source must be a file or directory: %s", kind, source)
+	isSocket := info.Mode()&os.ModeSocket != 0
+	if !info.Mode().IsRegular() && !info.IsDir() && !isSocket {
+		return fmt.Errorf("%s source must be a file, directory, or unix socket: %s", kind, source)
 	}
 	return nil
 }

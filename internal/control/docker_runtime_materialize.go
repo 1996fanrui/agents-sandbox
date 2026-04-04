@@ -42,8 +42,9 @@ func (backend *dockerRuntimeBackend) materializeGenericMounts(
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("mount source must not be a symlink: %s", sourcePath)
 		}
-		if !info.Mode().IsRegular() && !info.IsDir() {
-			return nil, fmt.Errorf("mount source must be a file or directory: %s", sourcePath)
+		isSocket := info.Mode()&os.ModeSocket != 0
+		if !info.Mode().IsRegular() && !info.IsDir() && !isSocket {
+			return nil, fmt.Errorf("mount source must be a file, directory, or unix socket: %s", sourcePath)
 		}
 		mounts = append(mounts, dockerMount{
 			Source:   sourcePath,
@@ -121,7 +122,8 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 		for _, mountID := range capability.MountIDs {
 			if _, exists := seen[mountID]; !exists {
 				seen[mountID] = struct{}{}
-				entries = append(entries, mountEntry{mountID: mountID, optional: capability.Optional})
+				mountDef, _ := profile.MountByID(mountID)
+				entries = append(entries, mountEntry{mountID: mountID, optional: mountDef.Optional})
 			}
 		}
 	}
@@ -228,6 +230,14 @@ func resolveCapabilityMountSource(mount profile.CapabilityMount) (string, error)
 			return "", errors.New("SSH_AUTH_SOCK is required for ssh-agent tooling projection")
 		}
 		return filepath.Abs(socketPath)
+	}
+	if mount.ID == profile.MountIDPulseAudio {
+		// Resolve PulseAudio socket from XDG_RUNTIME_DIR or fall back to /run/user/<uid>.
+		runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+		if runtimeDir == "" {
+			runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
+		}
+		return filepath.Join(runtimeDir, "pulse", "native"), nil
 	}
 	return expandHomePath(mount.DefaultHostPath)
 }
