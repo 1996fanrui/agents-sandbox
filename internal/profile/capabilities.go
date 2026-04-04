@@ -22,17 +22,18 @@ const ContainerUserHome = "/home/agbox"
 type MountID string
 
 const (
-	MountIDClaude     MountID = ".claude"
-	MountIDClaudeJSON MountID = ".claude.json"
-	MountIDCodex      MountID = ".codex"
-	MountIDAgents     MountID = ".agents"
-	MountIDGHAuth     MountID = "gh-auth"
-	MountIDSSHAgent   MountID = "ssh-agent"
-	MountIDUVCache    MountID = "uv-cache"
-	MountIDUVData     MountID = "uv-data"
-	MountIDNPM        MountID = "npm"
-	MountIDApt        MountID = "apt"
-	MountIDPulseAudio MountID = "pulse-audio"
+	MountIDClaude        MountID = ".claude"
+	MountIDClaudeJSON    MountID = ".claude.json"
+	MountIDCodex         MountID = ".codex"
+	MountIDAgents        MountID = ".agents"
+	MountIDGHAuth        MountID = "gh-auth"
+	MountIDSSHAgent      MountID = "ssh-agent"
+	MountIDSSHKnownHosts MountID = "ssh-known-hosts"
+	MountIDUVCache       MountID = "uv-cache"
+	MountIDUVData        MountID = "uv-data"
+	MountIDNPM           MountID = "npm"
+	MountIDApt           MountID = "apt"
+	MountIDPulseAudio    MountID = "pulse-audio"
 )
 
 // ToolID is the canonical identifier for a tooling capability.
@@ -44,7 +45,7 @@ const (
 	ToolIDGit    ToolID = "git"
 	ToolIDUV     ToolID = "uv"
 	ToolIDNPM    ToolID = "npm"
-	ToolIDApt ToolID = "apt"
+	ToolIDApt    ToolID = "apt"
 )
 
 // MacOSKeychainCredential declares that a credential file may be absent from
@@ -129,6 +130,13 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		Mode:            CapabilityModeSocket,
 		Optional:        true,
 	},
+	{
+		ID:              MountIDSSHKnownHosts,
+		DefaultHostPath: "~/.ssh/known_hosts",
+		ContainerTarget: path.Join(ContainerUserHome, ".ssh/known_hosts"),
+		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
+	},
 	// uv-cache holds downloaded packages; uv-data holds uv-managed Python interpreters and global tools.
 	{
 		ID:              MountIDUVCache,
@@ -178,7 +186,7 @@ func buildMountIndex(mounts []CapabilityMount) map[MountID]CapabilityMount {
 var builtInToolingCapabilities = map[ToolID]ToolingCapability{
 	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON, MountIDPulseAudio}},
 	ToolIDCodex:  {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
-	ToolIDGit:    {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth}},
+	ToolIDGit:    {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth, MountIDSSHKnownHosts}},
 	ToolIDUV:     {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
 	ToolIDNPM:    {MountIDs: []MountID{MountIDNPM}},
 	ToolIDApt:    {MountIDs: []MountID{MountIDApt}},
