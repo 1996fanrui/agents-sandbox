@@ -125,7 +125,7 @@ func TestSandboxCommandRequiresSubcommand(t *testing.T) {
 	if !strings.Contains(stderr.String(), "requires a subcommand") {
 		t.Fatalf("unexpected stderr %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "create, list, get, delete, exec") {
+	if !strings.Contains(stderr.String(), "create, list, get, delete, stop, resume") {
 		t.Fatalf("missing subcommand list in stderr %q", stderr.String())
 	}
 }
@@ -169,7 +169,7 @@ func TestHelpFlag(t *testing.T) {
 			t.Fatalf("unexpected exit code %d for %s", exitCode, flag)
 		}
 		output := stdout.String()
-		for _, want := range []string{"sandbox", "agent", "version"} {
+		for _, want := range []string{"sandbox", "exec", "agent", "version"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("help output missing %q for %s: %q", want, flag, output)
 			}
@@ -187,7 +187,7 @@ func TestSandboxHelpFlag(t *testing.T) {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
 	output := stdout.String()
-	for _, want := range []string{"create", "list", "get", "delete", "exec"} {
+	for _, want := range []string{"create", "list", "get", "delete", "stop", "resume"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("sandbox help output missing %q: %q", want, output)
 		}
@@ -222,17 +222,28 @@ func TestSandboxListHelpFlag(t *testing.T) {
 	}
 }
 
-func TestSandboxExecHelpFlag(t *testing.T) {
+func TestSandboxExecRemoved(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := run(context.Background(), []string{"sandbox", "exec", "--help"}, &stdout, &stderr, func(string) (string, bool) {
+	exitCode := run(context.Background(), []string{"sandbox", "exec"}, &stdout, &stderr, func(string) (string, bool) {
+		return "", false
+	})
+	if exitCode != exitCodeUsageError {
+		t.Fatalf("unexpected exit code %d", exitCode)
+	}
+}
+
+func TestExecRunHelpFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := run(context.Background(), []string{"exec", "run", "--help"}, &stdout, &stderr, func(string) (string, bool) {
 		return "", false
 	})
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
 	if !strings.Contains(stdout.String(), "--cwd") {
-		t.Fatalf("sandbox exec help output missing --cwd: %q", stdout.String())
+		t.Fatalf("exec run help output missing --cwd: %q", stdout.String())
 	}
 }
 

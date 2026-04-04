@@ -22,6 +22,9 @@ type fakeSandboxService struct {
 	createExecFn           func(context.Context, *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error)
 	cancelExecFn           func(context.Context, *agboxv1.CancelExecRequest) (*agboxv1.AcceptedResponse, error)
 	getExecFn              func(context.Context, *agboxv1.GetExecRequest) (*agboxv1.GetExecResponse, error)
+	stopFn                 func(context.Context, *agboxv1.StopSandboxRequest) (*agboxv1.AcceptedResponse, error)
+	resumeFn               func(context.Context, *agboxv1.ResumeSandboxRequest) (*agboxv1.AcceptedResponse, error)
+	listActiveExecsFn      func(context.Context, *agboxv1.ListActiveExecsRequest) (*agboxv1.ListActiveExecsResponse, error)
 	subscribeFn            func(*agboxv1.SubscribeSandboxEventsRequest, grpc.ServerStreamingServer[agboxv1.SandboxEvent]) error
 	createReq              *agboxv1.CreateSandboxRequest
 	listReq                *agboxv1.ListSandboxesRequest
@@ -31,6 +34,9 @@ type fakeSandboxService struct {
 	createExecReq          *agboxv1.CreateExecRequest
 	cancelExecReq          *agboxv1.CancelExecRequest
 	getExecReq             *agboxv1.GetExecRequest
+	stopReq                *agboxv1.StopSandboxRequest
+	resumeReq              *agboxv1.ResumeSandboxRequest
+	listActiveExecsReq     *agboxv1.ListActiveExecsRequest
 	subscribeReq           *agboxv1.SubscribeSandboxEventsRequest
 	subscribeEventsPayload []*agboxv1.SandboxEvent
 	subscribeErr           error
@@ -111,6 +117,30 @@ func (f *fakeSandboxService) SubscribeSandboxEvents(request *agboxv1.SubscribeSa
 		}
 	}
 	return f.subscribeErr
+}
+
+func (f *fakeSandboxService) StopSandbox(ctx context.Context, request *agboxv1.StopSandboxRequest) (*agboxv1.AcceptedResponse, error) {
+	f.stopReq = request
+	if f.stopFn != nil {
+		return f.stopFn(ctx, request)
+	}
+	return &agboxv1.AcceptedResponse{Accepted: true}, nil
+}
+
+func (f *fakeSandboxService) ResumeSandbox(ctx context.Context, request *agboxv1.ResumeSandboxRequest) (*agboxv1.AcceptedResponse, error) {
+	f.resumeReq = request
+	if f.resumeFn != nil {
+		return f.resumeFn(ctx, request)
+	}
+	return &agboxv1.AcceptedResponse{Accepted: true}, nil
+}
+
+func (f *fakeSandboxService) ListActiveExecs(ctx context.Context, request *agboxv1.ListActiveExecsRequest) (*agboxv1.ListActiveExecsResponse, error) {
+	f.listActiveExecsReq = request
+	if f.listActiveExecsFn != nil {
+		return f.listActiveExecsFn(ctx, request)
+	}
+	return &agboxv1.ListActiveExecsResponse{}, nil
 }
 
 func TestSandboxCreate(t *testing.T) {

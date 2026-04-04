@@ -81,8 +81,8 @@ func TestSandboxExecExitCode(t *testing.T) {
 	_, _, exitCode := runCLIWithSandboxServer(
 		t,
 		service,
-		"sandbox",
 		"exec",
+		"run",
 		"sandbox-123",
 		"--cwd", "/workspace",
 		"--env-overrides", "PATH=/usr/bin",
@@ -129,7 +129,7 @@ func TestSandboxExecPropagatesFailedExitCode(t *testing.T) {
 		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 4, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
-	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
+	_, _, exitCode := runCLIWithSandboxServer(t, service, "exec", "run", "sandbox-123", "--", "false")
 	if exitCode != 9 {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -161,7 +161,7 @@ func TestSandboxExecReturns125ForFailedZeroExitCode(t *testing.T) {
 		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 6, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
-	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
+	_, _, exitCode := runCLIWithSandboxServer(t, service, "exec", "run", "sandbox-123", "--", "false")
 	if exitCode != 125 {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -193,7 +193,7 @@ func TestSandboxExecReturns125ForCancelledWithoutLocalSignal(t *testing.T) {
 		return stream.Send(&agboxv1.SandboxEvent{EventId: "event-1", Sequence: 9, SandboxId: "sandbox-123", Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}}})
 	}
 
-	_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
+	_, _, exitCode := runCLIWithSandboxServer(t, service, "exec", "run", "sandbox-123", "--", "false")
 	if exitCode != 125 {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -210,7 +210,7 @@ func TestSandboxExecReturnsRuntimeErrorOnSubscribeFailure(t *testing.T) {
 		return execResponse("exec-1", "sandbox-123", agboxv1.ExecState_EXEC_STATE_RUNNING, 10, 0), nil
 	}
 
-	_, stderr, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "exec", "sandbox-123", "--", "false")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, service, "exec", "run", "sandbox-123", "--", "false")
 	if exitCode != exitCodeRuntimeError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -220,7 +220,7 @@ func TestSandboxExecReturnsRuntimeErrorOnSubscribeFailure(t *testing.T) {
 }
 
 func TestSandboxExecRejectsMissingSeparator(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--cwd", "/workspace", "python")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "exec", "run", "sandbox-123", "--cwd", "/workspace", "python")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -230,7 +230,7 @@ func TestSandboxExecRejectsMissingSeparator(t *testing.T) {
 }
 
 func TestSandboxExecRejectsEmptyCommandAfterSeparator(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "exec", "run", "sandbox-123", "--")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -240,7 +240,7 @@ func TestSandboxExecRejectsEmptyCommandAfterSeparator(t *testing.T) {
 }
 
 func TestSandboxExecRejectsBadEnvAssignment(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--env-overrides", "BAD", "--", "python")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "exec", "run", "sandbox-123", "--env-overrides", "BAD", "--", "python")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -250,7 +250,7 @@ func TestSandboxExecRejectsBadEnvAssignment(t *testing.T) {
 }
 
 func TestSandboxExecRejectsDeprecatedEnvFlag(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--env", "KEY=value", "--", "python")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "exec", "run", "sandbox-123", "--env", "KEY=value", "--", "python")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
@@ -260,11 +260,11 @@ func TestSandboxExecRejectsDeprecatedEnvFlag(t *testing.T) {
 }
 
 func TestSandboxExecRejectsJSON(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "exec", "sandbox-123", "--json", "--", "python")
+	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "exec", "run", "sandbox-123", "--json", "--", "python")
 	if exitCode != exitCodeUsageError {
 		t.Fatalf("unexpected exit code %d", exitCode)
 	}
-	if !strings.Contains(stderr, "does not support --json") {
+	if !strings.Contains(stderr, "unknown flag: --json") {
 		t.Fatalf("unexpected stderr %q", stderr)
 	}
 }
