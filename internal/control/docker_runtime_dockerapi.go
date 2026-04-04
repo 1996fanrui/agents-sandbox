@@ -164,6 +164,9 @@ func primaryContainerEnvironment(mounts []dockerMount) map[string]string {
 	if hasMountedToolingTarget(mounts, "/ssh-agent") {
 		environment["SSH_AUTH_SOCK"] = "/ssh-agent"
 	}
+	if hasMountedToolingTarget(mounts, "/pulse-audio") {
+		environment["PULSE_SERVER"] = "unix:/pulse-audio"
+	}
 	return environment
 }
 

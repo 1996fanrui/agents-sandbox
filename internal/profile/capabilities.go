@@ -32,6 +32,7 @@ const (
 	MountIDUVData     MountID = "uv-data"
 	MountIDNPM        MountID = "npm"
 	MountIDApt        MountID = "apt"
+	MountIDPulseAudio MountID = "pulse-audio"
 )
 
 // ToolID is the canonical identifier for a tooling capability.
@@ -43,7 +44,7 @@ const (
 	ToolIDGit    ToolID = "git"
 	ToolIDUV     ToolID = "uv"
 	ToolIDNPM    ToolID = "npm"
-	ToolIDApt    ToolID = "apt"
+	ToolIDApt ToolID = "apt"
 )
 
 // MacOSKeychainCredential declares that a credential file may be absent from
@@ -67,6 +68,10 @@ type CapabilityMount struct {
 	DefaultHostPath string
 	ContainerTarget string
 	Mode            CapabilityMode
+	// Optional marks this mount as individually skippable when the host resource
+	// is unavailable, even if the parent tool is required. This allows a required
+	// tool (e.g. claude) to include mounts that may not exist on all hosts.
+	Optional bool
 	// MacOSKeychain, when non-nil, triggers credential projection from macOS
 	// Keychain before bind-mounting. See MacOSKeychainCredential for the full contract.
 	MacOSKeychain *MacOSKeychainCredential
@@ -74,10 +79,9 @@ type CapabilityMount struct {
 
 // ToolingCapability is a user-facing tool name that maps to one or more mount IDs.
 // Users request tools by name; the daemon resolves and deduplicates the underlying mounts.
-// Optional tools are silently skipped when their host paths do not exist.
+// Each mount's Optional field controls whether it is silently skipped when unavailable.
 type ToolingCapability struct {
 	MountIDs []MountID
-	Optional bool
 }
 
 var capabilityMounts = buildMountIndex([]CapabilityMount{
@@ -109,18 +113,21 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		DefaultHostPath: "~/.agents",
 		ContainerTarget: path.Join(ContainerUserHome, ".agents"),
 		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
 	},
 	{
 		ID:              MountIDGHAuth,
 		DefaultHostPath: "~/.config/gh",
 		ContainerTarget: path.Join(ContainerUserHome, ".config/gh"),
 		Mode:            CapabilityModeReadOnly,
+		Optional:        true,
 	},
 	{
 		ID:              MountIDSSHAgent,
 		DefaultHostPath: "SSH_AUTH_SOCK",
 		ContainerTarget: "/ssh-agent",
 		Mode:            CapabilityModeSocket,
+		Optional:        true,
 	},
 	// uv-cache holds downloaded packages; uv-data holds uv-managed Python interpreters and global tools.
 	{
@@ -128,24 +135,35 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		DefaultHostPath: "~/.cache/uv",
 		ContainerTarget: path.Join(ContainerUserHome, ".cache/uv"),
 		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
 	},
 	{
 		ID:              MountIDUVData,
 		DefaultHostPath: "~/.local/share/uv",
 		ContainerTarget: path.Join(ContainerUserHome, ".local/share/uv"),
 		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
 	},
 	{
 		ID:              MountIDNPM,
 		DefaultHostPath: "~/.npm",
 		ContainerTarget: path.Join(ContainerUserHome, ".npm"),
 		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
 	},
 	{
 		ID:              MountIDApt,
 		DefaultHostPath: "~/.cache/agents-sandbox-apt",
 		ContainerTarget: "/var/cache/apt/archives",
 		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
+	},
+	{
+		ID:              MountIDPulseAudio,
+		DefaultHostPath: "PULSE_AUDIO_SOCK",
+		ContainerTarget: "/pulse-audio",
+		Mode:            CapabilityModeSocket,
+		Optional:        true,
 	},
 })
 
@@ -158,16 +176,12 @@ func buildMountIndex(mounts []CapabilityMount) map[MountID]CapabilityMount {
 }
 
 var builtInToolingCapabilities = map[ToolID]ToolingCapability{
-	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON}},
-	// codex requires its own config dir and the shared agents state directory.
-	ToolIDCodex: {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
-	// git mounts are optional: SSH agent may not be running and gh CLI may not be configured.
-	// Each mount is independently skipped if its host path is unavailable.
-	ToolIDGit: {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth}, Optional: true},
-	// uv, npm, apt are cache/acceleration mounts; the host may not have them installed.
-	ToolIDUV:  {MountIDs: []MountID{MountIDUVCache, MountIDUVData}, Optional: true},
-	ToolIDNPM: {MountIDs: []MountID{MountIDNPM}, Optional: true},
-	ToolIDApt: {MountIDs: []MountID{MountIDApt}, Optional: true},
+	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON, MountIDPulseAudio}},
+	ToolIDCodex:  {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
+	ToolIDGit:    {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth}},
+	ToolIDUV:     {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
+	ToolIDNPM:    {MountIDs: []MountID{MountIDNPM}},
+	ToolIDApt:    {MountIDs: []MountID{MountIDApt}},
 }
 
 func BuiltInToolingCapabilities() []ToolingCapability {

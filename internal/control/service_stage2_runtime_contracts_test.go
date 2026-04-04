@@ -588,6 +588,9 @@ func TestBuiltinToolMountsPreserveSymlinks(t *testing.T) {
 		t.Fatalf("Symlink failed: %v", err)
 	}
 
+	// Prevent optional PulseAudio socket from being resolved during test.
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(homeDir, "nonexistent-runtime"))
+
 	// Builtin resources are mounted directly from the host path; symlinks are preserved as-is.
 	runtimeState := &sandboxRuntimeState{}
 	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
