@@ -1,6 +1,9 @@
 package profile
 
-import "sort"
+import (
+	"path"
+	"sort"
+)
 
 type CapabilityMode string
 
@@ -9,6 +12,11 @@ const (
 	CapabilityModeReadWrite CapabilityMode = "read_write"
 	CapabilityModeSocket    CapabilityMode = "socket"
 )
+
+// ContainerUserHome is the home directory of the default user inside
+// AgentsSandbox runtime containers. This constant is the single source
+// of truth; all container-side home-relative paths must derive from it.
+const ContainerUserHome = "/home/agbox"
 
 // MountID is the canonical identifier for a capability mount.
 type MountID string
@@ -76,7 +84,7 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 	{
 		ID:              MountIDClaude,
 		DefaultHostPath: "~/.claude",
-		ContainerTarget: "/home/agbox/.claude",
+		ContainerTarget: path.Join(ContainerUserHome, ".claude"),
 		Mode:            CapabilityModeReadWrite,
 		MacOSKeychain: &MacOSKeychainCredential{
 			ServiceName: "Claude Code-credentials",
@@ -86,26 +94,26 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 	{
 		ID:              MountIDClaudeJSON,
 		DefaultHostPath: "~/.claude.json",
-		ContainerTarget: "/home/agbox/.claude.json",
+		ContainerTarget: path.Join(ContainerUserHome, ".claude.json"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
 		ID:              MountIDCodex,
 		DefaultHostPath: "~/.codex",
-		ContainerTarget: "/home/agbox/.codex",
+		ContainerTarget: path.Join(ContainerUserHome, ".codex"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	// .agents is the shared state directory consumed by Codex and potentially other tools.
 	{
 		ID:              MountIDAgents,
 		DefaultHostPath: "~/.agents",
-		ContainerTarget: "/home/agbox/.agents",
+		ContainerTarget: path.Join(ContainerUserHome, ".agents"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
 		ID:              MountIDGHAuth,
 		DefaultHostPath: "~/.config/gh",
-		ContainerTarget: "/home/agbox/.config/gh",
+		ContainerTarget: path.Join(ContainerUserHome, ".config/gh"),
 		Mode:            CapabilityModeReadOnly,
 	},
 	{
@@ -118,19 +126,19 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 	{
 		ID:              MountIDUVCache,
 		DefaultHostPath: "~/.cache/uv",
-		ContainerTarget: "/home/agbox/.cache/uv",
+		ContainerTarget: path.Join(ContainerUserHome, ".cache/uv"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
 		ID:              MountIDUVData,
 		DefaultHostPath: "~/.local/share/uv",
-		ContainerTarget: "/home/agbox/.local/share/uv",
+		ContainerTarget: path.Join(ContainerUserHome, ".local/share/uv"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
 		ID:              MountIDNPM,
 		DefaultHostPath: "~/.npm",
-		ContainerTarget: "/home/agbox/.npm",
+		ContainerTarget: path.Join(ContainerUserHome, ".npm"),
 		Mode:            CapabilityModeReadWrite,
 	},
 	{
