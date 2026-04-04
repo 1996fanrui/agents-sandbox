@@ -156,11 +156,14 @@ func runAgentSession(
 
 	containerName := primaryContainerName(sandboxID)
 
-	_, _ = fmt.Fprintf(stdout, "Waiting for sandbox %s to be ready...\n", sandboxID)
-	_, _ = fmt.Fprintf(stdout, "Tip: open another shell into this sandbox with:\n  docker exec -it --user agbox %s bash\n", containerName)
+	_, _ = fmt.Fprintf(stdout, "Waiting for sandbox %s to be ready...", sandboxID)
+	waitStart := time.Now()
 	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
+		_, _ = fmt.Fprintln(stdout)
 		return err
 	}
+	_, _ = fmt.Fprintf(stdout, "\nSandbox ready in %.1fs.\n", time.Since(waitStart).Seconds())
+	_, _ = fmt.Fprintf(stdout, "  Open another shell: docker exec -it --user agbox %s bash\n", containerName)
 	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, parsed.command...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
@@ -250,10 +253,11 @@ func waitForSandboxReady(
 	switch sandbox.GetState() {
 	case agboxv1.SandboxState_SANDBOX_STATE_READY:
 		return nil
-	case agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
+	case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
+		return runtimeErrorf("sandbox %s failed: %s", sandboxID, sandboxErrorDetail(sandbox))
+	case agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
 		agboxv1.SandboxState_SANDBOX_STATE_DELETED:
-		return runtimeErrorf("sandbox %s entered terminal state %s before READY", sandboxID, sandbox.GetState())
+		return runtimeErrorf("sandbox %s entered %s state before ready", sandboxID, humanStateName(sandbox.GetState()))
 	}
 
 	// Use the most recent sequence from GetSandbox as the subscription cursor.
@@ -287,10 +291,11 @@ func waitForSandboxReady(
 			switch result.event.GetSandboxState() {
 			case agboxv1.SandboxState_SANDBOX_STATE_READY:
 				return nil
-			case agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-				agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
+			case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
+				return sandboxFailedError(ctx, client, sandboxID)
+			case agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
 				agboxv1.SandboxState_SANDBOX_STATE_DELETED:
-				return runtimeErrorf("sandbox %s reached state %s before READY", sandboxID, result.event.GetSandboxState())
+				return runtimeErrorf("sandbox %s entered %s state before ready", sandboxID, humanStateName(result.event.GetSandboxState()))
 			}
 		case <-ctx.Done():
 			return runtimeErrorf("wait for sandbox ready: %v", ctx.Err())

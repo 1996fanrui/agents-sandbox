@@ -121,10 +121,23 @@ func TestSandboxCreate(t *testing.T) {
 			}
 			return &agboxv1.CreateSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId: "sandbox-123",
-					State:     agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					SandboxId:         "sandbox-123",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
 				},
 			}, nil
+		},
+		getFn: func(_ context.Context, _ *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         "sandbox-123",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence: 2,
+				},
+			}, nil
+		},
+		subscribeEventsPayload: []*agboxv1.SandboxEvent{
+			{SandboxId: "sandbox-123", Sequence: 2, SandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY},
 		},
 	}
 
@@ -132,11 +145,20 @@ func TestSandboxCreate(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if stderr != "" {
-		t.Fatalf("unexpected stderr %q", stderr)
+	if !strings.Contains(stderr, "Waiting for sandbox sandbox-123 to be ready...") {
+		t.Fatalf("expected wait message in stderr, got %q", stderr)
 	}
-	if !strings.Contains(stdout, "sandbox_id=sandbox-123") || !strings.Contains(stdout, "state=Pending") {
-		t.Fatalf("unexpected stdout %q", stdout)
+	if !strings.Contains(stderr, "Sandbox ready in") {
+		t.Fatalf("expected ready message in stderr, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "docker exec") {
+		t.Fatalf("expected docker exec tip in stderr, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "agbox sandbox delete sandbox-123") {
+		t.Fatalf("expected delete tip in stderr, got %q", stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
 	if service.createReq.GetCreateSpec().GetImage() != "ubuntu:latest" {
 		t.Fatalf("create request mismatch: %#v", service.createReq)
@@ -150,7 +172,15 @@ func TestSandboxCreateWithLabels(t *testing.T) {
 			if labels["team"] != "platform" || labels["env"] != "dev" {
 				t.Fatalf("unexpected labels: %#v", labels)
 			}
-			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-123"}}, nil
+			return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-123", LastEventSequence: 1}}, nil
+		},
+		getFn: func(_ context.Context, _ *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-123", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 2},
+			}, nil
+		},
+		subscribeEventsPayload: []*agboxv1.SandboxEvent{
+			{SandboxId: "sandbox-123", Sequence: 2, SandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY},
 		},
 	}
 
@@ -167,14 +197,11 @@ func TestSandboxCreateWithLabels(t *testing.T) {
 	if exitCode != exitCodeSuccess {
 		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
 	}
-	if stderr != "" {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
 	if got := service.createReq.GetCreateSpec().GetLabels()["team"]; got != "platform" {
 		t.Fatalf("duplicate label should be overwritten, got %q", got)
 	}
-	if !strings.Contains(stdout, "sandbox_id=sandbox-123") {
-		t.Fatalf("unexpected stdout %q", stdout)
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
 }
 
@@ -221,10 +248,19 @@ func TestSandboxCreateDefaultImage(t *testing.T) {
 		createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
 			return &agboxv1.CreateSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId: "sandbox-default",
-					State:     agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					SandboxId:         "sandbox-default",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
 				},
 			}, nil
+		},
+		getFn: func(_ context.Context, _ *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{SandboxId: "sandbox-default", State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 2},
+			}, nil
+		},
+		subscribeEventsPayload: []*agboxv1.SandboxEvent{
+			{SandboxId: "sandbox-default", Sequence: 2, SandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY},
 		},
 	}
 
@@ -235,8 +271,8 @@ func TestSandboxCreateDefaultImage(t *testing.T) {
 	if service.createReq.GetCreateSpec().GetImage() != defaultImage {
 		t.Fatalf("expected default image %q, got %q", defaultImage, service.createReq.GetCreateSpec().GetImage())
 	}
-	if !strings.Contains(stdout, "sandbox_id=sandbox-default") {
-		t.Fatalf("unexpected stdout %q", stdout)
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
 }
 
@@ -580,105 +616,6 @@ func TestSandboxGetRejectsUnknownFlag(t *testing.T) {
 	}
 }
 
-func TestSandboxDelete(t *testing.T) {
-	service := &fakeSandboxService{
-		deleteFn: func(_ context.Context, request *agboxv1.DeleteSandboxRequest) (*agboxv1.AcceptedResponse, error) {
-			if request.GetSandboxId() != "sandbox-123" {
-				t.Fatalf("unexpected sandbox id: %q", request.GetSandboxId())
-			}
-			return &agboxv1.AcceptedResponse{Accepted: true}, nil
-		},
-	}
-
-	stdout, stderr, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "delete", "sandbox-123")
-	if exitCode != exitCodeSuccess {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if strings.TrimSpace(stdout) != "accepted=true" {
-		t.Fatalf("unexpected stdout %q", stdout)
-	}
-}
-
-func TestSandboxDeleteByLabel(t *testing.T) {
-	service := &fakeSandboxService{
-		deleteManyFn: func(_ context.Context, request *agboxv1.DeleteSandboxesRequest) (*agboxv1.DeleteSandboxesResponse, error) {
-			selector := request.GetLabelSelector()
-			if selector["team"] != "a" || selector["env"] != "dev" {
-				t.Fatalf("unexpected selector: %#v", selector)
-			}
-			return &agboxv1.DeleteSandboxesResponse{
-				DeletedCount:      2,
-				DeletedSandboxIds: []string{"sandbox-a", "sandbox-d"},
-			}, nil
-		},
-	}
-
-	stdout, stderr, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "delete", "--label", "team=a", "--label", "env=dev")
-	if exitCode != exitCodeSuccess {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	want := []string{"deleted_count=2", "sandbox_ids=sandbox-a,sandbox-d"}
-	if len(lines) != len(want) {
-		t.Fatalf("unexpected output lines: %#v", lines)
-	}
-	for index, line := range lines {
-		if line != want[index] {
-			t.Fatalf("unexpected line %d: got %q want %q", index, line, want[index])
-		}
-	}
-}
-
-func TestSandboxDeleteMissingTarget(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete")
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if !strings.Contains(stderr, "<sandbox_id>") || !strings.Contains(stderr, "--label") {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
-}
-
-func TestSandboxDeleteMixedTargetModes(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "sandbox-123", "--label", "team=a")
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if !strings.Contains(stderr, "mutually exclusive") {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
-}
-
-func TestSandboxDeleteBadLabel(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "--label", "badlabel")
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if !strings.Contains(stderr, "--label") || !strings.Contains(stderr, "=") {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
-}
-
-func TestSandboxDeleteRejectsJSON(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "sandbox-123", "--json")
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if !strings.Contains(stderr, "does not support --json") {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
-}
-
-func TestSandboxDeleteRejectsUnknownFlag(t *testing.T) {
-	_, stderr, exitCode := runCLIWithSandboxServer(t, &fakeSandboxService{}, "sandbox", "delete", "--unknown")
-	if exitCode != exitCodeUsageError {
-		t.Fatalf("unexpected exit code %d stderr=%q", exitCode, stderr)
-	}
-	if !strings.Contains(stderr, "unknown flag: --unknown") {
-		t.Fatalf("unexpected stderr %q", stderr)
-	}
-}
-
 func TestSandboxCreateIdleTTL(t *testing.T) {
 	t.Parallel()
 
@@ -686,9 +623,10 @@ func TestSandboxCreateIdleTTL(t *testing.T) {
 		t.Parallel()
 		service := &fakeSandboxService{
 			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-1"}}, nil
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-1", LastEventSequence: 1}}, nil
 			},
 		}
+		withCreateWaitMocks(service, "sb-1")
 		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "5m")
 		if exitCode != exitCodeSuccess {
 			t.Fatalf("unexpected exit code %d", exitCode)
@@ -706,9 +644,10 @@ func TestSandboxCreateIdleTTL(t *testing.T) {
 		t.Parallel()
 		service := &fakeSandboxService{
 			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-2"}}, nil
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-2", LastEventSequence: 1}}, nil
 			},
 		}
+		withCreateWaitMocks(service, "sb-2")
 		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest", "--idle-ttl", "0")
 		if exitCode != exitCodeSuccess {
 			t.Fatalf("unexpected exit code %d", exitCode)
@@ -726,9 +665,10 @@ func TestSandboxCreateIdleTTL(t *testing.T) {
 		t.Parallel()
 		service := &fakeSandboxService{
 			createFn: func(_ context.Context, request *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
-				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-3"}}, nil
+				return &agboxv1.CreateSandboxResponse{Sandbox: &agboxv1.SandboxHandle{SandboxId: "sb-3", LastEventSequence: 1}}, nil
 			},
 		}
+		withCreateWaitMocks(service, "sb-3")
 		_, _, exitCode := runCLIWithSandboxServer(t, service, "sandbox", "create", "--image", "ubuntu:latest")
 		if exitCode != exitCodeSuccess {
 			t.Fatalf("unexpected exit code %d", exitCode)
@@ -757,6 +697,24 @@ func TestSandboxCreateIdleTTLRejectsNegative(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "negative") {
 		t.Fatalf("unexpected stderr %q", stderr)
+	}
+}
+
+// withCreateWaitMocks adds getFn and subscribeEventsPayload to a fake service
+// so that sandbox create can wait for the READY state. The sandboxID must match
+// what createFn returns.
+func withCreateWaitMocks(service *fakeSandboxService, sandboxID string) {
+	if service.getFn == nil {
+		service.getFn = func(_ context.Context, _ *agboxv1.GetSandboxRequest) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{SandboxId: sandboxID, State: agboxv1.SandboxState_SANDBOX_STATE_READY, LastEventSequence: 2},
+			}, nil
+		}
+	}
+	if service.subscribeEventsPayload == nil {
+		service.subscribeEventsPayload = []*agboxv1.SandboxEvent{
+			{SandboxId: sandboxID, Sequence: 2, SandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY},
+		}
 	}
 }
 

@@ -44,18 +44,6 @@ func formatSandboxGetResponse(resp *agboxv1.GetSandboxResponse) (string, error) 
 	return writeProtoJSON(resp)
 }
 
-func formatSandboxDeleteAccepted(resp *agboxv1.AcceptedResponse) string {
-	return fmt.Sprintf("accepted=%t\n", resp.GetAccepted())
-}
-
-func formatSandboxDeleteByLabel(resp *agboxv1.DeleteSandboxesResponse) string {
-	return fmt.Sprintf(
-		"deleted_count=%d\nsandbox_ids=%s\n",
-		resp.GetDeletedCount(),
-		strings.Join(resp.GetDeletedSandboxIds(), ","),
-	)
-}
-
 // relativeTime returns a human-friendly relative time string like "5m ago", "3h ago", "2d ago".
 func relativeTime(t time.Time) string {
 	if t.IsZero() {
