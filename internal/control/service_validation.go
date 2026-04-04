@@ -34,6 +34,22 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 		if mount.GetSource() == "" {
 			return errors.New("mount source is required")
 		}
+		if err := validateTildePath(mount.GetSource()); err != nil {
+			return err
+		}
+		if err := validateTildePath(mount.GetTarget()); err != nil {
+			return err
+		}
+		// Reject relative non-tilde source paths before expansion.
+		if !strings.HasPrefix(mount.GetSource(), "~") && !filepath.IsAbs(mount.GetSource()) {
+			return fmt.Errorf("mount source must be absolute: %s", mount.GetSource())
+		}
+		expandedSource, err := expandHomePath(mount.GetSource())
+		if err != nil {
+			return fmt.Errorf("mount source: %w", err)
+		}
+		mount.Source = expandedSource
+		mount.Target = expandContainerHomePath(mount.GetTarget())
 		if err := validateGenericSourcePath("mount", mount.GetSource()); err != nil {
 			return err
 		}
@@ -45,6 +61,22 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 		if copy.GetSource() == "" {
 			return errors.New("copy source is required")
 		}
+		if err := validateTildePath(copy.GetSource()); err != nil {
+			return err
+		}
+		if err := validateTildePath(copy.GetTarget()); err != nil {
+			return err
+		}
+		// Reject relative non-tilde source paths before expansion.
+		if !strings.HasPrefix(copy.GetSource(), "~") && !filepath.IsAbs(copy.GetSource()) {
+			return fmt.Errorf("copy source must be absolute: %s", copy.GetSource())
+		}
+		expandedSource, err := expandHomePath(copy.GetSource())
+		if err != nil {
+			return fmt.Errorf("copy source: %w", err)
+		}
+		copy.Source = expandedSource
+		copy.Target = expandContainerHomePath(copy.GetTarget())
 		if err := validateGenericSourcePath("copy", copy.GetSource()); err != nil {
 			return err
 		}

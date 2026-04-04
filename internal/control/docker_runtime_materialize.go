@@ -276,7 +276,29 @@ func expandHomePath(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		path = filepath.Join(homeDir, strings.TrimPrefix(path, "~/"))
+		if path == "~" {
+			return filepath.Abs(homeDir)
+		}
+		path = filepath.Join(homeDir, path[2:]) // skip "~/"
 	}
 	return filepath.Abs(path)
+}
+
+// validateTildePath rejects ~username syntax while allowing ~ and ~/... paths.
+func validateTildePath(path string) error {
+	if strings.HasPrefix(path, "~") && path != "~" && !strings.HasPrefix(path, "~/") {
+		return fmt.Errorf("~username syntax is not supported: %s", path)
+	}
+	return nil
+}
+
+// expandContainerHomePath replaces a leading ~ with the container user home directory.
+func expandContainerHomePath(path string) string {
+	if path == "~" {
+		return profile.ContainerUserHome
+	}
+	if strings.HasPrefix(path, "~/") {
+		return profile.ContainerUserHome + path[1:] // replace ~ with ContainerUserHome, keep /rest
+	}
+	return path
 }
