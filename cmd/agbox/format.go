@@ -147,6 +147,67 @@ func formatSandboxHandleText(handle *agboxv1.SandboxHandle) string {
 	return builder.String()
 }
 
+func formatExecGetResponse(resp *agboxv1.GetExecResponse) (string, error) {
+	return writeProtoJSON(resp)
+}
+
+func formatExecListResponse(resp *agboxv1.ListActiveExecsResponse) (string, error) {
+	return writeProtoJSON(resp)
+}
+
+func formatExecStatusText(status *agboxv1.ExecStatus) string {
+	var builder strings.Builder
+	_, _ = fmt.Fprintf(&builder, "exec_id=%s\n", status.GetExecId())
+	_, _ = fmt.Fprintf(&builder, "sandbox_id=%s\n", status.GetSandboxId())
+	_, _ = fmt.Fprintf(&builder, "state=%s\n", humanExecStateName(status.GetState()))
+	_, _ = fmt.Fprintf(&builder, "command=%s\n", strings.Join(status.GetCommand(), " "))
+	if status.GetCwd() != "" {
+		_, _ = fmt.Fprintf(&builder, "cwd=%s\n", status.GetCwd())
+	}
+	// Only show exit_code in terminal states to avoid proto default 0 being misleading.
+	if isTerminalExecState(status.GetState()) {
+		_, _ = fmt.Fprintf(&builder, "exit_code=%d\n", status.GetExitCode())
+	}
+	if status.GetError() != "" {
+		_, _ = fmt.Fprintf(&builder, "error=%s\n", status.GetError())
+	}
+	return builder.String()
+}
+
+func formatExecListTable(execs []*agboxv1.ExecStatus) string {
+	var buffer bytes.Buffer
+	writer := tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', 0)
+
+	_, _ = fmt.Fprintln(writer, "EXEC ID\tSANDBOX ID\tSTATE\tCOMMAND")
+	for _, exec := range execs {
+		_, _ = fmt.Fprintf(
+			writer,
+			"%s\t%s\t%s\t%s\n",
+			exec.GetExecId(),
+			exec.GetSandboxId(),
+			humanExecStateName(exec.GetState()),
+			strings.Join(exec.GetCommand(), " "),
+		)
+	}
+
+	_ = writer.Flush()
+	return buffer.String()
+}
+
+// humanExecStateName converts an ExecState enum to a human-friendly name.
+// E.g. EXEC_STATE_RUNNING -> "Running"
+func humanExecStateName(state agboxv1.ExecState) string {
+	name := state.String()
+	const prefix = "EXEC_STATE_"
+	if strings.HasPrefix(name, prefix) {
+		name = name[len(prefix):]
+	}
+	if len(name) == 0 {
+		return name
+	}
+	return strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
+}
+
 func formatStringMapJSON(values map[string]string) string {
 	if len(values) == 0 {
 		return "{}"

@@ -46,6 +46,7 @@ func run(
 	rootCmd.AddCommand(
 		newVersionCommand(),
 		newSandboxCommand(),
+		newExecCommand(),
 		newAgentCommand(),
 	)
 
