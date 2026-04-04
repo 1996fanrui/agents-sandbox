@@ -32,7 +32,7 @@ The agent gets unrestricted permissions inside the sandbox. Your host stays unto
 agbox sandbox create --image ghcr.io/agents-sandbox/coding-runtime:latest --label project=demo
 
 # Run a command
-agbox sandbox exec <sandbox_id> -- python -c "print('hello')"
+agbox exec run <sandbox_id> -- python -c "print('hello')"
 
 # Inspect
 agbox sandbox list
