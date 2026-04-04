@@ -18,6 +18,18 @@ func TestPrimaryContainerEnvironmentIncludesHostIdentity(t *testing.T) {
 	if _, exists := environment["SSH_AUTH_SOCK"]; exists {
 		t.Fatalf("unexpected SSH_AUTH_SOCK without ssh-agent mount: %#v", environment)
 	}
+	if _, exists := environment["PULSE_SERVER"]; exists {
+		t.Fatalf("unexpected PULSE_SERVER without pulse-audio mount: %#v", environment)
+	}
+}
+
+func TestPrimaryContainerEnvironmentIncludesPulseServerWhenMounted(t *testing.T) {
+	environment := primaryContainerEnvironment([]dockerMount{
+		{Target: "/pulse-audio"},
+	})
+	if got, want := environment["PULSE_SERVER"], "unix:/pulse-audio"; got != want {
+		t.Fatalf("unexpected PULSE_SERVER: got %q want %q", got, want)
+	}
 }
 
 func TestPrimaryContainerEnvironmentIncludesSshAuthSockWhenMounted(t *testing.T) {
