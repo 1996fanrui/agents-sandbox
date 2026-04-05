@@ -131,6 +131,12 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 	hostConfig := &container.HostConfig{
 		Init:   ptrTo(true),
 		Mounts: hostMounts,
+		// Map host.docker.internal to 0.0.0.0 so that any attempt to reach
+		// the host via this well-known DNS name is black-holed.  On macOS this
+		// is the primary isolation mechanism; on Linux nftables rules handle
+		// the heavier lifting, but the extra-host entry is harmless and
+		// provides defence-in-depth.
+		ExtraHosts: []string{"host.docker.internal:0.0.0.0"},
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {

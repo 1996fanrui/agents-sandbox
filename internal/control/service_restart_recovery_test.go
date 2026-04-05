@@ -13,6 +13,7 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
@@ -473,7 +474,7 @@ func TestEndToEndRestartRecoveryWithMockDocker(t *testing.T) {
 	first.close()
 
 	// ---- Phase 2: Restart with container still running ----
-	phase2Backend := newDockerRuntimeBackendForTest(t, newRecoveryHandler(t, primaryContainer, true, 0))
+	phase2Backend := newDockerRuntimeBackendForTest(t, newRecoveryHandler(t, primaryContainer, networkName, true, 0))
 
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -502,7 +503,7 @@ func TestEndToEndRestartRecoveryWithMockDocker(t *testing.T) {
 	second.close()
 
 	// ---- Phase 3: Restart with container exited → FAILED ----
-	phase3Backend := newDockerRuntimeBackendForTest(t, newRecoveryHandler(t, primaryContainer, false, 137))
+	phase3Backend := newDockerRuntimeBackendForTest(t, newRecoveryHandler(t, primaryContainer, networkName, false, 137))
 
 	third := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		TransitionDelay: 5 * time.Millisecond,
@@ -534,6 +535,20 @@ func newPhase1Handler(t *testing.T, sandboxID, primaryContainer, networkName, im
 		// dockerNetworkCreate
 		case r.Method == http.MethodPost && path == "/networks/create":
 			writeDockerJSON(t, w, map[string]string{"Id": "net-1"})
+
+		// NetworkInspect: used by applyNetworkHostIsolation after network creation
+		case r.Method == http.MethodGet && path == "/networks/"+networkName:
+			writeDockerJSON(t, w, network.Inspect{
+				ID: "net1abcdef1234",
+				IPAM: network.IPAM{
+					Config: []network.IPAMConfig{
+						{Subnet: "172.20.0.0/16", Gateway: "172.20.0.1"},
+					},
+				},
+				Options: map[string]string{
+					"com.docker.network.bridge.name": "br-net1abcdef12",
+				},
+			})
 
 		// dockerContainerCreate
 		case r.Method == http.MethodPost && path == "/containers/create":
@@ -575,11 +590,25 @@ func newPhase1Handler(t *testing.T, sandboxID, primaryContainer, networkName, im
 //   - ContainerInspect (recovery path + exec pre-checks)
 //   - Events long-poll
 //   - Exec create/start/inspect (when container is running)
-func newRecoveryHandler(t *testing.T, primaryContainer string, running bool, exitCode int) func(http.ResponseWriter, *http.Request) {
+func newRecoveryHandler(t *testing.T, primaryContainer string, networkName string, running bool, exitCode int) func(http.ResponseWriter, *http.Request) {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
 		switch {
+		// NetworkInspect: used by applyNetworkHostIsolation during resume
+		case r.Method == http.MethodGet && path == "/networks/"+networkName:
+			writeDockerJSON(t, w, network.Inspect{
+				ID: "net1abcdef1234",
+				IPAM: network.IPAM{
+					Config: []network.IPAMConfig{
+						{Subnet: "172.20.0.0/16", Gateway: "172.20.0.1"},
+					},
+				},
+				Options: map[string]string{
+					"com.docker.network.bridge.name": "br-net1abcdef12",
+				},
+			})
+
 		// ContainerInspect: used by InspectContainer during recovery,
 		// dockerContainerMustExist, and dockerContainerEnsureRunning for exec.
 		case r.Method == http.MethodGet && strings.HasSuffix(path, "/json") && strings.Contains(path, "/containers/"):

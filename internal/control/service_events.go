@@ -492,6 +492,11 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 					return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
 				}
 				record.runtimeState = nil
+			} else {
+				// Re-apply nftables host isolation rules lost during host reboot or daemon restart.
+				if err := s.config.runtimeBackend.ReapplyNetworkIsolation(ctx, record); err != nil {
+					return fmt.Errorf("reapply network isolation for sandbox %s: %w", sandboxID, err)
+				}
 			}
 		case agboxv1.SandboxState_SANDBOX_STATE_STOPPED:
 			primaryName := dockerPrimaryContainerName(sandboxID)

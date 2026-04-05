@@ -25,6 +25,9 @@ type runtimeBackend interface {
 	RunExec(context.Context, *sandboxRecord, *agboxv1.ExecStatus) (runtimeExecResult, error)
 	InspectContainer(ctx context.Context, containerName string) (ContainerInspectResult, error)
 	WatchContainerEvents(ctx context.Context) (<-chan ContainerEvent, <-chan error)
+	// ReapplyNetworkIsolation re-applies nftables host isolation rules for a sandbox network.
+	// Called during daemon restart recovery because nftables rules are lost on host reboot.
+	ReapplyNetworkIsolation(ctx context.Context, record *sandboxRecord) error
 }
 
 // ContainerEvent represents a Docker container lifecycle event relevant to sandbox state management.
@@ -124,8 +127,9 @@ func (fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord
 	}
 	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
-func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error   { return nil }
-func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error { return nil }
+func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error                { return nil }
+func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error              { return nil }
+func (fakeRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error    { return nil }
 
 func (fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv1.ExecStatus) (runtimeExecResult, error) {
 	return runtimeExecResult{ExitCode: 0}, nil
@@ -150,6 +154,7 @@ func (backend fakeRuntimeBackend) WatchContainerEvents(_ context.Context) (<-cha
 type dockerRuntimeBackend struct {
 	config       ServiceConfig
 	dockerClient *client.Client
+	nftConn      nftablesConnector
 }
 
 func newDockerRuntimeBackend(config ServiceConfig) (runtimeBackend, io.Closer, error) {
@@ -160,6 +165,7 @@ func newDockerRuntimeBackend(config ServiceConfig) (runtimeBackend, io.Closer, e
 	backend := &dockerRuntimeBackend{
 		config:       config,
 		dockerClient: dockerClient,
+		nftConn:      newNftablesConnector(config.Logger),
 	}
 	return backend, backend, nil
 }
@@ -228,6 +234,9 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err := backend.dockerNetworkCreate(ctx, state.NetworkName, runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default", userLabels)); err != nil {
 		return runtimeCreateResult{}, err
 	}
+	if err := backend.applyNetworkHostIsolation(ctx, state.NetworkName); err != nil {
+		return runtimeCreateResult{}, err
+	}
 
 	ccStarts = startCompanionContainersAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.companionContainers, userLabels, backend, func(ctx context.Context, spec dockerContainerSpec) error {
 		return backend.dockerContainerCreate(ctx, spec)
@@ -292,6 +301,11 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 		if err := backend.dockerContainerMustExist(ctx, cc.ContainerName); err != nil {
 			return runtimeResumeResult{}, err
 		}
+	}
+	// Re-apply nftables host isolation rules for the sandbox network.
+	// Rules are lost on host reboot or nftables flush, so re-apply on every resume.
+	if err := backend.applyNetworkHostIsolation(ctx, record.runtimeState.NetworkName); err != nil {
+		return runtimeResumeResult{}, err
 	}
 	if err := backend.dockerContainerEnsureRunning(ctx, record.runtimeState.PrimaryContainerName); err != nil {
 		return runtimeResumeResult{}, err
@@ -426,6 +440,7 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 		joined = append(joined, backend.dockerContainerRemove(ctx, cc.ContainerName))
 	}
 	if state.NetworkName != "" {
+		backend.removeNetworkHostIsolation(ctx, state.NetworkName)
 		joined = append(joined, backend.dockerNetworkRemove(ctx, state.NetworkName))
 	}
 	return errors.Join(joined...)
@@ -517,4 +532,11 @@ func (backend *dockerRuntimeBackend) RunExec(ctx context.Context, record *sandbo
 		ExecID:        execRecord.GetExecId(),
 	})
 	return runtimeExecResult{ExitCode: exitCode}, err
+}
+
+func (backend *dockerRuntimeBackend) ReapplyNetworkIsolation(ctx context.Context, record *sandboxRecord) error {
+	if record.runtimeState == nil || record.runtimeState.NetworkName == "" {
+		return nil
+	}
+	return backend.applyNetworkHostIsolation(ctx, record.runtimeState.NetworkName)
 }

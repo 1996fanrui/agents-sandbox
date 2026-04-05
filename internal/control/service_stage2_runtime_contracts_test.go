@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,9 @@ import (
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	runtimedocker "github.com/1996fanrui/agents-sandbox/internal/runtime/docker"
+
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,6 +30,7 @@ import (
 
 func TestDockerLabelsPassthrough(t *testing.T) {
 	sandboxID := "labels-pass-through"
+	networkName := dockerNetworkName(sandboxID)
 	userLabels := map[string]string{
 		"owner": "team-a",
 		"env":   "dev",
@@ -38,6 +42,7 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 	var mu sync.Mutex
 	networkLabels := map[string]string{}
 	containerLabels := make(map[string]map[string]string)
+	containerExtraHosts := make(map[string][]string)
 	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
 		switch {
@@ -54,9 +59,24 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 			networkLabels = request.Labels
 			mu.Unlock()
 			writeDockerJSON(t, w, map[string]string{"Id": "network-1"})
+		case r.Method == http.MethodGet && path == "/networks/"+networkName:
+			writeDockerJSON(t, w, network.Inspect{
+				ID: "abc123def456",
+				IPAM: network.IPAM{
+					Config: []network.IPAMConfig{
+						{Subnet: "172.18.0.0/16", Gateway: "172.18.0.1"},
+					},
+				},
+				Options: map[string]string{
+					"com.docker.network.bridge.name": "br-abc123def456",
+				},
+			})
 		case r.Method == http.MethodPost && path == "/containers/create":
 			var request struct {
-				Labels map[string]string `json:"Labels"`
+				Labels     map[string]string `json:"Labels"`
+				HostConfig struct {
+					ExtraHosts []string `json:"ExtraHosts"`
+				} `json:"HostConfig"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode container create request failed: %v", err)
@@ -64,6 +84,7 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 			name := r.URL.Query().Get("name")
 			mu.Lock()
 			containerLabels[name] = request.Labels
+			containerExtraHosts[name] = request.HostConfig.ExtraHosts
 			mu.Unlock()
 			writeDockerJSON(t, w, map[string]string{"Id": name})
 		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/start"):
@@ -149,6 +170,17 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		runtimedocker.LabelUserPrefix + "owner": "team-a",
 		runtimedocker.LabelUserPrefix + "env":   "dev",
 	})
+
+	// Verify all containers have the host.docker.internal:0.0.0.0 extra host entry.
+	wantExtraHosts := []string{"host.docker.internal:0.0.0.0"}
+	for _, name := range []string{dbContainerName, cacheContainerName, primaryContainerName} {
+		mu.Lock()
+		got := containerExtraHosts[name]
+		mu.Unlock()
+		if !reflect.DeepEqual(got, wantExtraHosts) {
+			t.Fatalf("container %s: unexpected ExtraHosts: got=%v want=%v", name, got, wantExtraHosts)
+		}
+	}
 }
 
 func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWriter, *http.Request)) *dockerRuntimeBackend {
@@ -178,8 +210,9 @@ func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWrit
 	})
 
 	return &dockerRuntimeBackend{
-		config:       ServiceConfig{},
+		config:       ServiceConfig{Logger: slog.Default()},
 		dockerClient: dockerClient,
+		nftConn:      noopNftablesConnector{},
 	}
 }
 
