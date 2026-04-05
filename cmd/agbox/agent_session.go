@@ -141,7 +141,10 @@ func runAgentSession(
 	defer func() {
 		// Allow a second Ctrl+C during cleanup to force-exit the process.
 		signal.Reset(syscall.SIGINT)
-		_, _ = fmt.Fprintf(stderr, "Cleaning up sandbox %s...\n", sandboxID)
+		// Move the cursor to the bottom of the terminal (past any TUI remnants)
+		// before writing cleanup messages. \033[9999B moves down as far as
+		// possible, landing on the last occupied line, then \n starts a fresh line.
+		_, _ = fmt.Fprintf(stderr, "\033[9999B\nCleaning up sandbox %s...\n", sandboxID)
 		deleteAndWait(client, sandboxID, stderr)
 	}()
 
@@ -156,14 +159,14 @@ func runAgentSession(
 
 	containerName := primaryContainerName(sandboxID)
 
-	_, _ = fmt.Fprintf(stdout, "Waiting for sandbox %s to be ready...", sandboxID)
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be ready...", sandboxID)
 	waitStart := time.Now()
 	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
-		_, _ = fmt.Fprintln(stdout)
+		_, _ = fmt.Fprintln(stderr)
 		return err
 	}
-	_, _ = fmt.Fprintf(stdout, "\nSandbox ready in %.1fs.\n", time.Since(waitStart).Seconds())
-	_, _ = fmt.Fprintf(stdout, "  Open another shell: docker exec -it --user agbox %s bash\n", containerName)
+	_, _ = fmt.Fprintf(stderr, "\nSandbox ready in %.1fs.\n", time.Since(waitStart).Seconds())
+	_, _ = fmt.Fprintf(stderr, "  Open another shell: docker exec -it --user agbox %s bash\n", containerName)
 	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, parsed.command...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
@@ -330,7 +333,7 @@ func deleteAndWait(client sandboxExecClient, sandboxID string, stderr io.Writer)
 		_, _ = fmt.Fprintf(stderr, "Sandbox %s cleaned up.\n", sandboxID)
 		return
 	case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
-		_, _ = fmt.Fprintf(stderr, "warning: sandbox %s is in FAILED state after delete\n", sandboxID)
+		_, _ = fmt.Fprintf(stderr, "warning: sandbox %s failed to clean up\n", sandboxID)
 		return
 	}
 
@@ -361,7 +364,7 @@ func deleteAndWait(client sandboxExecClient, sandboxID string, stderr io.Writer)
 				_, _ = fmt.Fprintf(stderr, "Sandbox %s cleaned up.\n", sandboxID)
 				return
 			case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
-				_, _ = fmt.Fprintf(stderr, "warning: sandbox %s entered FAILED state during cleanup\n", sandboxID)
+				_, _ = fmt.Fprintf(stderr, "warning: sandbox %s failed during cleanup\n", sandboxID)
 				return
 			}
 		case <-timeout:
@@ -391,11 +394,11 @@ func pumpSandboxEvents(stream rawclient.SandboxEventStream, eventCh chan<- sandb
 	}
 }
 
-// confirmWorkspaceCopy prompts the user to confirm copying a workspace that lacks
-// a top-level .git directory. It reads a single line from stdin; only "y" or "Y"
+// confirmWorkspaceCopy prompts the user to confirm uploading a non-Git directory
+// as the sandbox workspace. It reads a single line from stdin; only "y" or "Y"
 // is accepted. Any other input (including empty/EOF) is treated as rejection.
 func confirmWorkspaceCopy(stdin io.Reader, stderr io.Writer, path string) error {
-	_, _ = fmt.Fprintf(stderr, "Warning: no .git directory found in %s. This directory will be copied into the sandbox.\nContinue? [y/N] ", path)
+	_, _ = fmt.Fprintf(stderr, "%s is not a Git repository. It will be copied into the sandbox as your workspace.\nProceed? [y/N] ", path)
 	var response string
 	_, err := fmt.Fscanln(stdin, &response)
 	if err != nil || (response != "y" && response != "Y") {
