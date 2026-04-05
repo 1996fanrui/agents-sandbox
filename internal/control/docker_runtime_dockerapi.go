@@ -23,6 +23,11 @@ import (
 // execLogContainerDir is the container-side directory for exec log files when output redirection is enabled.
 const execLogContainerDir = "/var/log/agents-sandbox/"
 
+var macOSBlockedHostAliases = []string{
+	"host.docker.internal:0.0.0.0",
+	"gateway.docker.internal:0.0.0.0",
+}
+
 type dockerMount struct {
 	Source   string
 	Target   string
@@ -131,12 +136,10 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 	hostConfig := &container.HostConfig{
 		Init:   ptrTo(true),
 		Mounts: hostMounts,
-		// Map host.docker.internal to 0.0.0.0 so that any attempt to reach
-		// the host via this well-known DNS name is black-holed.  On macOS this
-		// is the primary isolation mechanism; on Linux nftables rules handle
-		// the heavier lifting, but the extra-host entry is harmless and
-		// provides defence-in-depth.
-		ExtraHosts: []string{"host.docker.internal:0.0.0.0"},
+		// Black-hole Docker Desktop's stable host-discovery aliases on macOS.
+		// This is a DNS-layer best-effort control; Linux host isolation is
+		// enforced separately via nftables on the sandbox network.
+		ExtraHosts: append([]string(nil), macOSBlockedHostAliases...),
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {
