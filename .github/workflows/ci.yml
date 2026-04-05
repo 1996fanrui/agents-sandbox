@@ -32,3 +32,7 @@ jobs:
 
       - name: Run Repository Tests
         run: bash scripts/run_test.sh
+
+      - name: Run Integration Tests
+        if: runner.os == 'Linux'
+        run: make integration-test
