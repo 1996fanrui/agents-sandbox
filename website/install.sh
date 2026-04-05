@@ -272,6 +272,13 @@ if [[ "${NEED_DOWNLOAD}" == true ]]; then
   echo ""
   echo "Installed: ${INSTALL_DIR}/agboxd"
   echo "Installed: ${INSTALL_DIR}/agbox"
+
+  # Grant CAP_NET_ADMIN so the daemon can manage nftables rules for sandbox
+  # network isolation without running as root. Only applicable on Linux.
+  if [[ "${OS}" == "linux" ]] && command -v setcap >/dev/null 2>&1; then
+    echo "Granting CAP_NET_ADMIN (requires sudo)..."
+    sudo setcap cap_net_admin+ep "${INSTALL_DIR}/agboxd"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
