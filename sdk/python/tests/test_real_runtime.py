@@ -8,6 +8,7 @@ import os
 import signal
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -20,6 +21,28 @@ from agents_sandbox import (
 )
 from agents_sandbox._grpc_client import SandboxGrpcClient
 from tests.smoke_support import daemon_socket_path
+
+
+def _can_grant_net_admin() -> bool:
+    """Check whether we can grant CAP_NET_ADMIN to a binary via setcap.
+
+    On Linux the daemon requires CAP_NET_ADMIN for nftables-based network
+    isolation.  If passwordless sudo is unavailable, the test daemon will
+    refuse to start, so integration tests must be skipped.
+    """
+    if sys.platform != "linux":
+        return True  # macOS uses --add-host; no capability needed.
+    if os.geteuid() == 0:
+        return True
+    if shutil.which("setcap") is None:
+        return False
+    result = subprocess.run(
+        ["sudo", "-n", "true"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
 RUNTIME_IMAGE_REPOSITORY = "ghcr.io/agents-sandbox/coding-runtime"
@@ -38,6 +61,10 @@ def test_sdk_can_create_real_sandbox_and_exec(tmp_path: Path) -> None:
         pytest.skip("go is required for the real runtime smoke test")
     if shutil.which("docker") is None:
         pytest.skip("docker is required for the real runtime smoke test")
+    if not _can_grant_net_admin():
+        if os.environ.get("AGBOX_REQUIRE_INTEGRATION"):
+            pytest.fail("CAP_NET_ADMIN is required for integration tests but sudo -n setcap is not available")
+        pytest.skip("CAP_NET_ADMIN required; grant passwordless sudo or run as root")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -69,6 +96,10 @@ def test_sdk_rejects_empty_image_in_real_runtime(tmp_path: Path) -> None:
         pytest.skip("go is required for the real runtime smoke test")
     if shutil.which("docker") is None:
         pytest.skip("docker is required for the real runtime smoke test")
+    if not _can_grant_net_admin():
+        if os.environ.get("AGBOX_REQUIRE_INTEGRATION"):
+            pytest.fail("CAP_NET_ADMIN is required for integration tests but sudo -n setcap is not available")
+        pytest.skip("CAP_NET_ADMIN required; grant passwordless sudo or run as root")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -96,6 +127,10 @@ def test_sdk_can_project_claude_directory_with_symlink(tmp_path: Path) -> None:
         pytest.skip("go is required for the real runtime smoke test")
     if shutil.which("docker") is None:
         pytest.skip("docker is required for the real runtime smoke test")
+    if not _can_grant_net_admin():
+        if os.environ.get("AGBOX_REQUIRE_INTEGRATION"):
+            pytest.fail("CAP_NET_ADMIN is required for integration tests but sudo -n setcap is not available")
+        pytest.skip("CAP_NET_ADMIN required; grant passwordless sudo or run as root")
 
     fake_home = tmp_path / "home"
     claude_root = fake_home / ".claude"
@@ -258,6 +293,14 @@ def _running_test_daemon(
         stderr=subprocess.DEVNULL,
         text=True,
     )
+    # Grant CAP_NET_ADMIN so the test daemon can manage nftables rules.
+    if sys.platform == "linux" and shutil.which("setcap") is not None:
+        subprocess.run(
+            ["sudo", "-n", "setcap", "cap_net_admin+ep", str(daemon_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     process = subprocess.Popen(
         [str(daemon_path)],
         cwd=repo_root,

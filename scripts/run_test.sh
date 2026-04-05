@@ -46,7 +46,9 @@ run_sdk_tests() {
 
   (
     cd "${sdk_root}"
-    uv run pytest
+    uv run pytest tests/ \
+      --ignore=tests/test_real_runtime.py \
+      --ignore=tests/test_network_isolation.py
   )
 }
 

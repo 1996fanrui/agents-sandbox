@@ -36,6 +36,13 @@ echo "Installed: ${INSTALL_DIR}/agboxd"
 "${GO_BIN}" build -ldflags="-s -w" -o "${INSTALL_DIR}/agbox" ./cmd/agbox
 echo "Installed: ${INSTALL_DIR}/agbox"
 
+# Grant CAP_NET_ADMIN so the daemon can manage nftables rules for sandbox
+# network isolation without running as root. Only applicable on Linux.
+if [[ "$(uname -s)" == "Linux" ]] && command -v setcap >/dev/null 2>&1; then
+  echo "Granting CAP_NET_ADMIN (requires sudo)..."
+  sudo setcap cap_net_admin+ep "${INSTALL_DIR}/agboxd"
+fi
+
 # ---------------------------------------------------------------------------
 # Ensure install directory is in PATH.
 # Auto-adds to shell profile unless AGBOX_NO_MODIFY_PATH=1.
