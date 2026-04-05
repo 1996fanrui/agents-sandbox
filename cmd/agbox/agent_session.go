@@ -26,6 +26,12 @@ const (
 	// sigtermGracePeriod is how long we wait for the docker exec child after forwarding SIGTERM
 	// before escalating to SIGKILL.
 	sigtermGracePeriod = 10 * time.Second
+
+	// agentSessionIdleTTL is a safety-net idle TTL for interactive agent sessions.
+	// The CLI always deletes the sandbox on exit, but if signal handling fails
+	// (e.g., SIGKILL), the daemon will reclaim the sandbox after this duration.
+	agentSessionIdleTTL = 10 * 24 * time.Hour
+
 )
 
 // agentTypeDef defines the container-internal command and the builtin tools for an agent type.
@@ -106,15 +112,18 @@ func runAgentSession(
 
 	// Register signal handlers BEFORE creating the sandbox so that any signal
 	// received during creation or the READY wait still triggers cleanup.
+	// SIGHUP is included because terminal closure sends SIGHUP, and Go's
+	// default SIGHUP handler terminates without running deferred cleanup.
 	sigintCh := make(chan os.Signal, 2)
 	sigtermCh := make(chan os.Signal, 1)
 	signal.Notify(sigintCh, os.Interrupt)
-	signal.Notify(sigtermCh, syscall.SIGTERM)
+	signal.Notify(sigtermCh, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigintCh)
 	defer signal.Stop(sigtermCh)
 
-	// idle_ttl=0 disables the idle-stop timer; the sandbox should live until the
-	// session exits and we explicitly delete it.
+	// Use a large idle TTL as a safety net: the CLI always cleans up on exit,
+	// but if the process is killed without cleanup (e.g., SIGKILL), the daemon
+	// will reclaim the sandbox after agentSessionIdleTTL.
 	createResp, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:        defaultImage,
@@ -126,7 +135,7 @@ func runAgentSession(
 				"created-by": "agbox-cli",
 				"agent-type": agentLabel,
 			},
-			IdleTtl: durationpb.New(0),
+			IdleTtl: durationpb.New(agentSessionIdleTTL),
 		},
 	})
 	if err != nil {
