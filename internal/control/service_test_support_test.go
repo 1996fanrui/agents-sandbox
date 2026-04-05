@@ -363,6 +363,10 @@ func (backend *capturingRuntimeBackend) InspectContainer(_ context.Context, cont
 	return ContainerInspectResult{}, nil
 }
 
+func (*capturingRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error {
+	return nil
+}
+
 func (backend *capturingRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
 	if backend.watchEventCh != nil {
 		return backend.watchEventCh, backend.watchErrCh

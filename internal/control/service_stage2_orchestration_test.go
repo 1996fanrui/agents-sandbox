@@ -63,6 +63,10 @@ func (backend *scriptedRuntimeBackend) WatchContainerEvents(_ context.Context) (
 	return make(chan ContainerEvent), make(chan error)
 }
 
+func (*scriptedRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error {
+	return nil
+}
+
 func assertMessageFieldNames(t *testing.T, descriptor protoreflect.MessageDescriptor, want []string) {
 	t.Helper()
 	fields := descriptor.Fields()

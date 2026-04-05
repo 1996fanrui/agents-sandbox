@@ -11,6 +11,7 @@ import (
 
 	"github.com/1996fanrui/agents-sandbox/internal/control"
 	"github.com/1996fanrui/agents-sandbox/internal/logging"
+	"github.com/1996fanrui/agents-sandbox/internal/platform"
 )
 
 func main() {
@@ -25,6 +26,10 @@ func run(
 	stderr io.Writer,
 	lookupEnv func(string) (string, bool),
 ) int {
+	if err := platform.CheckNetAdminCapability(); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
 	return runWithDeps(ctx, args, stderr, lookupEnv, acquireHostLock, control.ListenAndServe, control.NewServiceWithPersistentIDStore)
 }
 
