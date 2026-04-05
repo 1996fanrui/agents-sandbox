@@ -55,6 +55,42 @@ RUNTIME_IMAGE = f"{RUNTIME_IMAGE_REPOSITORY}:{CODING_RUNTIME_IMAGE_TAG}"
 LATEST_RUNTIME_IMAGE = f"{RUNTIME_IMAGE_REPOSITORY}:latest"
 
 
+def test_daemon_refuses_to_start_without_cap_net_admin(tmp_path: Path) -> None:
+    if sys.platform != "linux":
+        pytest.skip("Linux-only capability check")
+    if shutil.which("go") is None:
+        pytest.skip("go is required for the daemon startup test")
+    if os.geteuid() == 0:
+        pytest.skip("root already has CAP_NET_ADMIN")
+    if _current_process_has_net_admin():
+        pytest.skip("current test process already has CAP_NET_ADMIN")
+
+    repo_root = Path(__file__).resolve().parents[3]
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    socket_path = daemon_socket_path(runtime_dir)
+    daemon_path = _build_test_daemon(repo_root, runtime_dir, grant_net_admin=False)
+
+    process = subprocess.Popen(
+        [str(daemon_path)],
+        cwd=repo_root,
+        env=_daemon_env(runtime_dir),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        _, stderr = process.communicate(timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_process_group(process)
+        raise AssertionError("daemon should fail fast without CAP_NET_ADMIN") from exc
+
+    assert process.returncode == 1
+    assert "CAP_NET_ADMIN" in stderr
+    assert not socket_path.exists(), "daemon should not expose a socket when startup capability checks fail"
+
+
 def test_sdk_can_create_real_sandbox_and_exec(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[3]
     if shutil.which("go") is None:
@@ -269,13 +305,7 @@ def _new_client(socket_path: str | Path, **kwargs: object) -> AgentsSandboxClien
     return client
 
 
-@contextmanager
-def _running_test_daemon(
-    repo_root: Path,
-    runtime_dir: Path,
-    *,
-    env: dict[str, str] | None = None,
-) -> Iterator[None]:
+def _daemon_env(runtime_dir: Path, *, env: dict[str, str] | None = None) -> dict[str, str]:
     merged_env = os.environ.copy()
     merged_env["XDG_RUNTIME_DIR"] = str(runtime_dir)
     merged_env["XDG_DATA_HOME"] = str(runtime_dir)
@@ -283,6 +313,10 @@ def _running_test_daemon(
     merged_env["HOME"] = str(runtime_dir)
     if env is not None:
         merged_env.update(env)
+    return merged_env
+
+
+def _build_test_daemon(repo_root: Path, runtime_dir: Path, *, grant_net_admin: bool) -> Path:
     daemon_path = runtime_dir / "agboxd-test"
     subprocess.run(
         ["go", "build", "-o", str(daemon_path), "./cmd/agboxd"],
@@ -293,14 +327,26 @@ def _running_test_daemon(
         stderr=subprocess.DEVNULL,
         text=True,
     )
-    # Grant CAP_NET_ADMIN so the test daemon can manage nftables rules.
-    if sys.platform == "linux" and shutil.which("setcap") is not None:
+    if grant_net_admin and sys.platform == "linux" and shutil.which("setcap") is not None:
         subprocess.run(
             ["sudo", "-n", "setcap", "cap_net_admin+ep", str(daemon_path)],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+    return daemon_path
+
+
+@contextmanager
+def _running_test_daemon(
+    repo_root: Path,
+    runtime_dir: Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> Iterator[None]:
+    merged_env = _daemon_env(runtime_dir, env=env)
+    daemon_path = _build_test_daemon(repo_root, runtime_dir, grant_net_admin=True)
+    # Grant CAP_NET_ADMIN so the test daemon can manage nftables rules.
     process = subprocess.Popen(
         [str(daemon_path)],
         cwd=repo_root,
@@ -333,6 +379,22 @@ def _terminate_process_group(process: subprocess.Popen[str]) -> None:
         except ProcessLookupError:
             return
         process.wait(timeout=10)
+
+
+def _current_process_has_net_admin() -> bool:
+    if sys.platform != "linux":
+        return False
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in status.splitlines():
+        if line.startswith("CapEff:"):
+            try:
+                return int(line.split(":", 1)[1].strip(), 16) & (1 << 12) != 0
+            except ValueError:
+                return False
+    return False
 
 
 def _ensure_runtime_image(repo_root: Path) -> None:

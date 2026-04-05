@@ -171,8 +171,11 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		runtimedocker.LabelUserPrefix + "env":   "dev",
 	})
 
-	// Verify all containers have the host.docker.internal:0.0.0.0 extra host entry.
-	wantExtraHosts := []string{"host.docker.internal:0.0.0.0"}
+	// Verify all containers carry the Docker Desktop host-discovery overrides.
+	wantExtraHosts := []string{
+		"host.docker.internal:0.0.0.0",
+		"gateway.docker.internal:0.0.0.0",
+	}
 	for _, name := range []string{dbContainerName, cacheContainerName, primaryContainerName} {
 		mu.Lock()
 		got := containerExtraHosts[name]
