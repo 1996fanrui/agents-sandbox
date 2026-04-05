@@ -2,99 +2,129 @@
 
 **Full power for your agents. Full safety for your machine.**
 
-## What matters most when running AI agents locally?
+The best runtime environment for your AI agents.
 
-**Your machine must stay safe** — No host filesystem access. No host network access. No exceptions. Bad commands destroy only the sandbox.
-**The agent must run free** — Install anything, run anything, break anything. Zero approval prompts. Deliver results directly.
-**Reuse your CLI subscriptions** — Host authentication and flat-rate subscriptions (Claude Max, Codex) carry into the sandbox. Zero extra cost.
-**One command to start sandbox** — `agbox agent claude` or `agbox agent codex` with Full Permissions.
-**Data never leaves your machine** — Code, credentials, all agent activity stay local.
-**No dedicated Mac Mini needed** — Your laptop already has Docker. That's all it takes.
+<details>
+<summary><b>The Permission Dilemma of Running AI Agents Locally</b></summary>
 
-## Why agents-sandbox?
+Every AI agent running on a personal machine today faces the same lose-lose trade-off. If you use Claude Code or Codex, you know the drill: the agent is midway through a task, and a dozen permission dialogs pop up. You click `Yes` until your fingers go numb. Or you switch to `Yes always` and spend the rest of the day wondering if the agent just `rm -rf`'d something important.
 
-Today's AI agents face an impossible dilemma on the host machine:
+Claude Code and Codex both offer sandbox-like capabilities that let you configure permission levels, but in practice they boil down to two choices:
 
-- **Grant full permissions?** The agent runs fast — but a single bad command can delete your files, leak credentials, or compromise the entire machine. One prompt injection away from disaster.
-- **Keep permissions locked down?** Every `npm install`, every file write, every shell command triggers a manual confirmation. The agent spends more time waiting for "yes" than actually working. You end up babysitting the agent instead of letting it work for you.
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/contrast-v3.png" alt="The Dilemma: Lock Down Permissions or Open Everything">
+</p>
 
-This is not a hypothetical problem — it is exactly how today's agent CLIs work:
+This is exactly why Mac Minis took off in the AI agent community. People started buying a dedicated machine just for the agent — that way, even if it trashes something, it's the agent's files, not yours. Makes sense — except now you own a whole extra computer.
 
-| | Restricted | Unrestricted |
-|---|---|---|
-| **Codex** | `workspace-write` — constant approvals, `.git` read-only | `danger-full-access` — host fully exposed |
-| **Claude Code** | `default` — approval prompts on every tool call | `--dangerously-skip-permissions` — all checks bypassed |
+Give Claude Code full permissions (`claude --dangerously-skip-permissions`) and you're greeted with Anthropic's own disclaimer: only run this in a sandbox or VM, because dangerous commands will execute without asking. The default option is to decline and exit. You can ignore the warning and run it on bare metal, but if something breaks, that's on you.
 
-**Every agent CLI ships these two modes, and neither works.**
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/zh-CN/images/claude_code_reminder.jpg" alt="Claude Code reminder">
+</p>
 
-Both modes shift the responsibility to **you**. Open permissions? You bear the risk. Lock them down? You become a full-time babysitter — approving every action, reviewing every command, essentially doing QA for the agent. Either way, **agents on bare hosts can never reach their full potential.** The platform should guarantee safety, not make the user choose between risk and manual labor.
+</details>
 
-A sandbox eliminates this tradeoff entirely. The agent gets an isolated container where it has **full, unrestricted permissions** — install anything, run anything, delete anything — while your host sees none of it. No compromise. Full speed. Full safety. See [Why Not Built-in Agent Sandboxes?](docs/why_not_builtin_sandboxes.md) for a detailed comparison.
+## What Matters Most When Running AI Agents Locally?
 
-## How agents-sandbox solves this
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/feature-cards.png" alt="Six Core Capabilities">
+</p>
 
-The first-class principle is: **the sandbox is fully isolated from the host by default. No host network access. No host filesystem access. No exceptions.** A sandbox running on your laptop is as isolated as a remote cloud server — except with zero latency, zero cost, and full data privacy.
+That's the problem **Agents Sandbox** solves. Here's the deal: give the agent full permissions while keeping your machine completely safe. You stop babysitting the agent. Your entire workflow becomes two things: hit Yes Always and describe what you want.
 
-| Security Layer | Mechanism |
-|----------------|-----------|
-| **Host network blocked — permanently** | Each sandbox gets its own isolated Docker network. Cannot reach `localhost`, host services, or the local network. **Will never be supported.** |
-| **Internet fully available** | Agents can freely download packages, call APIs, clone repos, and interact with the outside world. |
-| **Host filesystem invisible** | Zero access to host files by default. Only explicitly declared mounts or copies are allowed; the daemon rejects anything unsafe. |
-| **Minimal credential injection** | Only a small set of daemon-defined credential shortcuts (e.g., `ssh-agent`, `gh-auth`) can enter. Fixed rules, not arbitrary host path passthrough. |
-| **Deterministic cleanup** | All runtime resources (containers, networks, filesystem state) are fully removed on delete. No orphans, no leaks. |
+<p align="center">
+<img src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/zh-CN/images/2_keyboards.png" alt="Agents Sandbox Keyboard: Just Hit Yes Always">
+</p>
 
-See [Isolation and Security](docs/isolation_and_security.md) for the full security posture reference.
+## Same Workflow, Zero Extra Cost
 
-## Use Cases
-
-Any AI agent that needs to **take actions** — not just generate text — benefits from a sandbox.
-
-| Scenario | What agents can do in the sandbox |
-|----------|----------------------------------|
-| **AI coding agents** (Claude Code, Codex) | Freely install, build, test, and iterate at full speed |
-| **General-purpose task agents** (OpenClaw) | Execute arbitrary multi-step workflows — browse, download, run scripts |
-| **Data analysis agents** | Process untrusted datasets and run user-provided code in complete isolation |
-| **DevOps / SRE agents** | Run deployment scripts and CLI tools in disposable, contained environments |
-| **Research agents** | Install anything, run any experiment, discard when done |
-| **CI / test agents** | Each run gets a clean, reproducible, fully isolated environment |
-
-## Installation
-
-**One-line install** (Linux and macOS — requires Docker and curl):
+Agents Sandbox doesn't change your workflow. It was one command before; it's still one command now. The only difference: the agent runs inside an isolated sandbox instead of on your host.
 
 ```bash
-curl -fsSL https://agents-sandbox.com/install.sh | bash
-```
-
-This downloads the latest stable release, installs `agboxd` and `agbox` to a directory in your `PATH`, and starts the daemon as a user service (systemd on Linux, launchd on macOS).
-
-To install a specific version or include pre-releases:
-
-```bash
-curl -fsSL https://agents-sandbox.com/install.sh | bash -s -- v0.1.1   # specific version
-curl -fsSL https://agents-sandbox.com/install.sh | bash -s -- --pre     # latest including pre-releases
-```
-
-## Quickstart
-
-Install and start Claude Code in a sandbox with two commands:
-
-```bash
-# Install agents-sandbox (daemon starts automatically)
+# Install agents-sandbox (requires Docker and curl)
 curl -fsSL https://agents-sandbox.com/install.sh | bash
 
-# Run interactive Claude Code in an isolated sandbox with full permissions.
-# Equivalent to running: claude --dangerously-skip-permissions
+# Run Claude Code in an isolated sandbox with full permissions
+# Equivalent to: claude --dangerously-skip-permissions
 agbox agent claude
 
-# Run interactive Codex in an isolated sandbox with full permissions.
-# Equivalent to running: codex --dangerously-bypass-approvals-and-sandbox
+# Run Codex in an isolated sandbox with full permissions
+# Equivalent to: codex --dangerously-bypass-approvals-and-sandbox
 agbox agent codex
 ```
 
-That's it. The agent has full unrestricted permissions inside the sandbox while your host stays completely untouched. See [CLI Reference](docs/cli_reference.md) for all available commands and options.
+Same single command — but now the agent is sandboxed, and your host is untouched.
 
-### Programmatic Access (Python SDK)
+<p align="center">
+<img src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/terminal-comparison-en-side-by-side.gif" alt="Sandbox Create → Agent Execute → Results → Sandbox Destroy">
+</p>
+
+This isn't just "spin up a Docker container." Unlike built-in sandboxes, Agents Sandbox auto-mounts your project code and ships a pre-configured runtime — and you'll feel the difference right away. When the task is done, it self-destructs — see [Why Not Built-in Sandboxes?](docs/why_not_builtin_sandboxes.md) for the full comparison.
+
+## Security Model
+
+**The sandbox is fully isolated from the host. No exceptions.**
+
+<p align="center">
+<img src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/security-model.png" alt="Security Model: Host and Sandbox Isolation">
+</p>
+
+Host network access is off by default and will stay off — by design, not oversight.
+
+Need a database or a cache for your agent? Spin up a Companion Container — a built-in container type in Agents Sandbox that shares the sandbox's isolated network but still can't reach your host. Your sandbox and its companions can talk to each other freely while staying completely walled off from everything else. Full details in [Isolation and Security](docs/isolation_and_security.md).
+
+A sandbox on your own machine gives you the same isolation as a remote cloud server — without the latency, cost, or data-residency headaches.
+
+<details>
+<summary><b>Your Existing Subscriptions Work Out of the Box</b></summary>
+
+Cloud sandboxes charge you twice: compute by the hour, tokens by the million. You're already paying Anthropic for the tokens. Why pay someone else for a server just to use them?
+
+Agents Sandbox flips that model. Sandboxes run locally on Docker — zero infrastructure cost. Your Claude Max or Codex Pro subscription works right inside the sandbox. No extra API key. No per-token billing. For heavy users, that's real money back in your pocket every month.
+
+</details>
+
+<details>
+<summary><b>Real-World Scenarios</b></summary>
+
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/scenario-1.png" alt="Scenario 1: Agent Codes at Full Speed, Zero Confirmation Interrupts">
+</p>
+
+<br/>
+<br/>
+<br/>
+
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/scenario-2.png" alt="Scenario 2: Multiple Isolated Instances in Parallel">
+</p>
+
+<br/>
+<br/>
+<br/>
+
+<p align="center">
+<img width="600" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/scenario-3.png" alt="Scenario 3: Ephemeral Lifecycle — Destroyed When Done">
+</p>
+
+</details>
+
+<details>
+<summary><b>More Than Just a Container</b></summary>
+
+Agents Sandbox is not a thin wrapper around `docker run`. It's a sandbox control plane purpose-built for AI agents — works out of the box for everyday development and scales to full platform integration:
+
+<p align="center">
+<img width="500" src="https://raw.githubusercontent.com/DaladaLee/blogs/main/agents-sandbox/2026-04-01-introducing-agents-sandbox/en/images/not-just-container.png" alt="Seven Key Features: Runtime, Mount/Copy, Credential Injection, Companion Containers, YAML Config, SDK, Auto Cleanup">
+</p>
+
+Remember that Mac Mini? You don't need one. A single Docker install, one command, and your agent gets full permissions inside a sandbox that can never touch your host.
+
+</details>
+
+<details>
+<summary><b>Programmatic Access (Python SDK)</b></summary>
 
 For programmatic control, use the Python SDK:
 
@@ -123,13 +153,10 @@ asyncio.run(main())
 
 For full examples, see `examples/`.
 
-## Learn More
+</details>
 
-- Agent needs databases, caches, or other dependencies for debugging? See [Companion Container Guide](docs/companion_container_guide.md)
-- Want reusable sandbox environments as YAML? See [Declarative YAML Config](docs/declarative_yaml_config.md)
-- Tuning daemon behavior (idle TTL, cleanup, log level)? See [Configuration Reference](docs/configuration_reference.md)
-
-## Repository Layout
+<details>
+<summary><b>Repository Layout</b></summary>
 
 - Go entrypoints live under `cmd/`
 - Runtime implementation is organized under `internal/`
@@ -138,3 +165,5 @@ For full examples, see `examples/`.
 - The minimal base runtime image asset lives under `images/base-runtime/`
 - The home-aligned coding runtime image asset lives under `images/coding-runtime/`
 - Examples live under `examples/`
+
+</details>
