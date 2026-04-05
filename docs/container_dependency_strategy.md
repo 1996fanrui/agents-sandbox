@@ -92,7 +92,7 @@ Startup rules:
 
 ## Permissions and Runtime User Model
 
-The runtime must execute under a non-root user inside the sandbox. Bind-mounted writable paths must remain writable to that runtime user. The daemon must not rely on root-only behavior for normal exec, lifecycle, or companion container orchestration.
+The runtime must execute under a non-root user inside the sandbox. Bind-mounted writable paths must remain writable to that runtime user. The daemon must not rely on root-only behavior for normal exec, lifecycle, or companion container orchestration. Exception: on Linux, `CAP_NET_ADMIN` is required for nftables-based sandbox network isolation (see [Isolation and Security](isolation_and_security.md)).
 
 ## Cleanup and Ownership
 

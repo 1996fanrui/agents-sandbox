@@ -40,6 +40,7 @@ Actual condition of Docker containers and networks. Never written to bbolt; obta
 | Container exit code | `docker inspect {container_name}` |
 | Companion container health status | `docker inspect {container_name}` → `.State.Health` |
 | Network exists | `docker network inspect {network_name}` |
+| nftables host isolation rule | Ephemeral kernel state (Linux only); re-applied on create, resume, and daemon restart recovery via `google/nftables` netlink library |
 
 ## Category C — Derived / Rebuilt State
 
@@ -79,7 +80,8 @@ flowchart TD
     LoadA --> DeriveC[Derive Category C state]
     DeriveC --> QueryB[Query Category B via docker inspect]
     QueryB --> Reconcile{Reconcile}
-    Reconcile -->|READY + running| RestoreReady[Restore as READY]
+    Reconcile -->|READY + running| ReapplyNftables[Re-apply nftables host isolation]
+    ReapplyNftables --> RestoreReady[Restore as READY]
     Reconcile -->|READY + exited| ToFailed[FAILED]
     Reconcile -->|STOPPED + exited| RestoreStopped[Restore as STOPPED]
     Reconcile -->|PENDING + missing| ToFailed2[FAILED]

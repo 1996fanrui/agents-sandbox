@@ -6,6 +6,25 @@
 - Docker daemon
 - systemd (Linux, for running agboxd as a user service)
 
+## Network Isolation Privileges
+
+On Linux, the daemon requires `CAP_NET_ADMIN` to manage nftables rules for sandbox network isolation. The install script grants this automatically:
+
+```bash
+sudo setcap cap_net_admin+ep $(which agboxd)
+```
+
+On macOS, no additional privileges are needed.
+
+## Test Targets
+
+| Target | Scope | Privileges |
+|--------|-------|------------|
+| `make test` | Unit tests + mock tests | None |
+| `make integration-test` | Real daemon integration tests | `CAP_NET_ADMIN` (granted via `sudo -n setcap`) |
+
+For daily development, `make test` is sufficient. Run `make integration-test` for full verification including network isolation.
+
 ## Build
 
 Build both binaries:
