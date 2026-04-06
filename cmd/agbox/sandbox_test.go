@@ -587,10 +587,10 @@ func TestSandboxGetJSON(t *testing.T) {
 			}
 			return &agboxv1.GetSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId:         "sandbox-123",
-					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
-					LastEventSequence: 7,
-					Labels:            map[string]string{"env": "dev"},
+					SandboxId:           "sandbox-123",
+					State:               agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence:   7,
+					Labels:              map[string]string{"env": "dev"},
 					CompanionContainers: []*agboxv1.CompanionContainerSpec{},
 				},
 			}, nil

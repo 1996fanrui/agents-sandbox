@@ -19,19 +19,19 @@ import (
 )
 
 type scriptedEventStore struct {
-	appendFn              func(string, *agboxv1.SandboxEvent) error
-	loadEventsFn          func(string) ([]*agboxv1.SandboxEvent, error)
-	loadAllSandboxIDsFn   func() ([]string, error)
-	maxSequenceFn         func(string) (uint64, error)
-	deletedAtFn           func(string) (time.Time, bool, error)
-	markDeletedFn         func(string, time.Time) error
-	cleanupFn             func(time.Duration) ([]string, error)
-	saveSandboxConfigFn   func(string, *agboxv1.CreateSpec) error
-	loadSandboxConfigFn   func(string) (*agboxv1.CreateSpec, error)
+	appendFn                func(string, *agboxv1.SandboxEvent) error
+	loadEventsFn            func(string) ([]*agboxv1.SandboxEvent, error)
+	loadAllSandboxIDsFn     func() ([]string, error)
+	maxSequenceFn           func(string) (uint64, error)
+	deletedAtFn             func(string) (time.Time, bool, error)
+	markDeletedFn           func(string, time.Time) error
+	cleanupFn               func(time.Duration) ([]string, error)
+	saveSandboxConfigFn     func(string, *agboxv1.CreateSpec) error
+	loadSandboxConfigFn     func(string) (*agboxv1.CreateSpec, error)
 	loadAllSandboxConfigsFn func() (map[string]*agboxv1.CreateSpec, error)
-	deleteSandboxConfigFn func(string) error
-	saveExecConfigFn      func(string, *agboxv1.CreateExecRequest) error
-	loadExecConfigsFn     func(string) ([]*agboxv1.CreateExecRequest, error)
+	deleteSandboxConfigFn   func(string) error
+	saveExecConfigFn        func(string, *agboxv1.CreateExecRequest) error
+	loadExecConfigsFn       func(string) ([]*agboxv1.CreateExecRequest, error)
 }
 
 type persistentBufconnHarness struct {

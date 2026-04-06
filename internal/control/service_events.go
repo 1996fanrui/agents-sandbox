@@ -467,9 +467,9 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 				})
 			}
 			record.runtimeState = &sandboxRuntimeState{
-				NetworkName:           dockerNetworkName(sandboxID),
-				PrimaryContainerName:  dockerPrimaryContainerName(sandboxID),
-				CompanionContainers:   companionContainers,
+				NetworkName:          dockerNetworkName(sandboxID),
+				PrimaryContainerName: dockerPrimaryContainerName(sandboxID),
+				CompanionContainers:  companionContainers,
 			}
 		}
 

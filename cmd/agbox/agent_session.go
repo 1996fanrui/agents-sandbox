@@ -31,7 +31,6 @@ const (
 	// The CLI always deletes the sandbox on exit, but if signal handling fails
 	// (e.g., SIGKILL), the daemon will reclaim the sandbox after this duration.
 	agentSessionIdleTTL = 10 * 24 * time.Hour
-
 )
 
 // agentTypeDef defines the container-internal command and the builtin tools for an agent type.

@@ -63,17 +63,17 @@ type CreateSandboxOption interface {
 }
 
 type createSandboxOptions struct {
-	image            *string
-	configYAML       []byte
-	sandboxID        *string
-	mounts           []MountSpec
-	copies           []CopySpec
-	builtinTools     []string
+	image               *string
+	configYAML          []byte
+	sandboxID           *string
+	mounts              []MountSpec
+	copies              []CopySpec
+	builtinTools        []string
 	companionContainers []CompanionContainerSpec
-	labels           map[string]string
-	envs             map[string]string
-	idleTTL          *time.Duration
-	wait             bool
+	labels              map[string]string
+	envs                map[string]string
+	idleTTL             *time.Duration
+	wait                bool
 }
 
 func defaultCreateSandboxOptions() createSandboxOptions {

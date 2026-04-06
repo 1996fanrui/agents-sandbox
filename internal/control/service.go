@@ -210,7 +210,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 		createSpec:          cloneCreateSpec(req.GetCreateSpec()),
 		companionContainers: cloneCompanionContainerSpecs(req.GetCreateSpec().GetCompanionContainers()),
 		execs:               make(map[string]*agboxv1.ExecStatus),
-		execCancel:           make(map[string]context.CancelFunc),
+		execCancel:          make(map[string]context.CancelFunc),
 	}
 	if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_ACCEPTED, eventMutation{
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_PENDING,

@@ -566,7 +566,7 @@ func TestCreateSandboxRejectsUnknownBuiltinToolsBeforeRuntime(t *testing.T) {
 	_, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 		SandboxId: "session-unknown-builtin",
 		CreateSpec: &agboxv1.CreateSpec{
-			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
+			Image:        "ghcr.io/agents-sandbox/coding-runtime:test",
 			BuiltinTools: []string{"missing-builtin"},
 		},
 	})

@@ -317,15 +317,15 @@ func TestCallerProvidedSandboxID(t *testing.T) {
 func TestCallerProvidedSandboxIDValidation(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{})
 	invalidIDs := []string{
-		"-mybox",   // must start with letter or digit
-		"_mybox",   // must start with letter or digit
-		"mybox-",   // must end with letter or digit
-		"mybox_",   // must end with letter or digit
-		"ab",       // too short (< 4 characters)
+		"-mybox",                             // must start with letter or digit
+		"_mybox",                             // must start with letter or digit
+		"mybox-",                             // must end with letter or digit
+		"mybox_",                             // must end with letter or digit
+		"ab",                                 // too short (< 4 characters)
 		"a" + strings.Repeat("x", 200) + "z", // too long (> 200)
-		"my/box",   // slashes not allowed
-		"my.box",   // dots not allowed
-		"my box",   // spaces not allowed
+		"my/box",                             // slashes not allowed
+		"my.box",                             // dots not allowed
+		"my box",                             // spaces not allowed
 	}
 	for _, sandboxID := range invalidIDs {
 		t.Run(sandboxID, func(t *testing.T) {
@@ -343,11 +343,11 @@ func TestCallerProvidedSandboxIDValidation(t *testing.T) {
 func TestCallerProvidedSandboxIDAcceptsFlexibleFormats(t *testing.T) {
 	client := newBufconnClient(t, ServiceConfig{})
 	validIDs := []string{
-		"MyBox-1",                                     // mixed case
-		"my_box_1",                                    // underscores
-		"36d4492a-f142-4d30-afbe-7954cf698d73",        // UUID
-		"Session_With-Mixed_Chars-123",                // mixed separators
-		"ALLCAPS",                                     // all uppercase
+		"MyBox-1",                              // mixed case
+		"my_box_1",                             // underscores
+		"36d4492a-f142-4d30-afbe-7954cf698d73", // UUID
+		"Session_With-Mixed_Chars-123",         // mixed separators
+		"ALLCAPS",                              // all uppercase
 	}
 	for _, sandboxID := range validIDs {
 		t.Run(sandboxID, func(t *testing.T) {

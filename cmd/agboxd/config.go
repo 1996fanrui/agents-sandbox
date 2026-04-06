@@ -20,9 +20,9 @@ type startupConfig struct {
 
 type daemonFileConfig struct {
 	Runtime struct {
-		IdleTTL           string `toml:"idle_ttl"`
+		IdleTTL    string `toml:"idle_ttl"`
 		CleanupTTL string `toml:"cleanup_ttl"`
-		LogLevel          string `toml:"log_level"`
+		LogLevel   string `toml:"log_level"`
 	} `toml:"runtime"`
 	Artifacts struct {
 		ExecOutputRoot     string `toml:"exec_output_root"`

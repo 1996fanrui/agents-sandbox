@@ -127,9 +127,9 @@ func (fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord
 	}
 	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
-func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error                { return nil }
-func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error              { return nil }
-func (fakeRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error    { return nil }
+func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error             { return nil }
+func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error           { return nil }
+func (fakeRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error { return nil }
 
 func (fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv1.ExecStatus) (runtimeExecResult, error) {
 	return runtimeExecResult{ExitCode: 0}, nil

@@ -108,7 +108,7 @@ env: prod
 
 func TestYAMLConfigToCreateSpec(t *testing.T) {
 	cfg := &YAMLConfig{
-		Image:            "test:latest",
+		Image:        "test:latest",
 		BuiltinTools: []string{"claude"},
 		Mounts: []YAMLMountSpec{
 			{Source: "/src", Target: "/dst", Writable: true},

@@ -3,11 +3,11 @@ package docker
 const LabelNamespace = "io.github.1996fanrui.agents-sandbox"
 
 const (
-	LabelSandboxID   = LabelNamespace + ".sandbox-id"
-	LabelComponent   = LabelNamespace + ".component"
+	LabelSandboxID              = LabelNamespace + ".sandbox-id"
+	LabelComponent              = LabelNamespace + ".component"
 	LabelCompanionContainerName = LabelNamespace + ".companion-container-name"
-	LabelProfile     = LabelNamespace + ".profile"
-	LabelUserPrefix  = LabelNamespace + ".user."
+	LabelProfile                = LabelNamespace + ".profile"
+	LabelUserPrefix             = LabelNamespace + ".user."
 )
 
 func SandboxLabels(sandboxID string, profile string, userLabels map[string]string) map[string]string {
@@ -21,8 +21,8 @@ func SandboxLabels(sandboxID string, profile string, userLabels map[string]strin
 
 func CompanionContainerLabels(sandboxID string, name string, userLabels map[string]string) map[string]string {
 	labels := map[string]string{
-		LabelSandboxID:             sandboxID,
-		LabelComponent:             "companion",
+		LabelSandboxID:              sandboxID,
+		LabelComponent:              "companion",
 		LabelCompanionContainerName: name,
 	}
 	return withUserLabels(labels, userLabels)
