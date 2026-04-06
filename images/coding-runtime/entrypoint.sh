@@ -39,6 +39,9 @@ fi
 
 mkdir -p "$USER_HOME"
 chown "$HOST_UID:$HOST_GID" "$USER_HOME" /workspace
+# Grant passwordless sudo so the runtime user can install system packages.
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/runtime-user
+chmod 440 /etc/sudoers.d/runtime-user
 
 for dir in "$USER_HOME/.claude" "$USER_HOME/.codex" "$USER_HOME/.agents" "$USER_HOME/.cache" "$USER_HOME/.npm" "$USER_HOME/.config"; do
     if [ -d "$dir" ]; then
