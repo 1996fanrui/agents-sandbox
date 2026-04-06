@@ -38,6 +38,18 @@ func cloneCopies(items []*agboxv1.CopySpec) []*agboxv1.CopySpec {
 	return result
 }
 
+func clonePortMappings(items []*agboxv1.PortMapping) []*agboxv1.PortMapping {
+	result := make([]*agboxv1.PortMapping, 0, len(items))
+	for _, item := range items {
+		result = append(result, &agboxv1.PortMapping{
+			ContainerPort: item.GetContainerPort(),
+			HostPort:      item.GetHostPort(),
+			Protocol:      item.GetProtocol(),
+		})
+	}
+	return result
+}
+
 func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	if spec == nil {
 		return &agboxv1.CreateSpec{}
@@ -50,6 +62,7 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		BuiltinTools:        slices.Clone(spec.GetBuiltinTools()),
 		CompanionContainers: cloneCompanionContainerSpecs(spec.GetCompanionContainers()),
 		Envs:                cloneStringMap(spec.GetEnvs()),
+		Ports:               clonePortMappings(spec.GetPorts()),
 	}
 	if spec.GetIdleTtl() != nil {
 		cloned.IdleTtl = durationpb.New(spec.GetIdleTtl().AsDuration())

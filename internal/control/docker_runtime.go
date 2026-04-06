@@ -251,6 +251,14 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		})
 	}
 
+	var portMappings []dockerPortMapping
+	for _, p := range record.createSpec.GetPorts() {
+		portMappings = append(portMappings, dockerPortMapping{
+			ContainerPort: p.GetContainerPort(),
+			HostPort:      p.GetHostPort(),
+			Protocol:      portProtocolToString(p.GetProtocol()),
+		})
+	}
 	primaryEnv := primaryContainerEnvironment(mounts)
 	for k, v := range record.createSpec.GetEnvs() {
 		primaryEnv[k] = v
@@ -261,6 +269,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		NetworkName: state.NetworkName,
 		Labels:      runtimedocker.SandboxLabels(record.handle.GetSandboxId(), "default", userLabels),
 		Mounts:      mounts,
+		Ports:       portMappings,
 		Environment: primaryEnv,
 		Workdir:     "/workspace",
 		Command: []string{

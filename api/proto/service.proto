@@ -78,6 +78,18 @@ message CopySpec {
   repeated string exclude_patterns = 3;
 }
 
+enum PortProtocol {
+  PORT_PROTOCOL_TCP = 0;
+  PORT_PROTOCOL_UDP = 1;
+  PORT_PROTOCOL_SCTP = 2;
+}
+
+message PortMapping {
+  uint32 container_port = 1;
+  uint32 host_port = 2;
+  PortProtocol protocol = 3;
+}
+
 message HealthcheckConfig {
   repeated string test = 1;
   google.protobuf.Duration interval = 2;
@@ -105,6 +117,7 @@ message CreateSpec {
   map<string, string> envs = 7;
   // Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
   google.protobuf.Duration idle_ttl = 8;
+  repeated PortMapping ports = 9;
 }
 
 message SandboxHandle {
