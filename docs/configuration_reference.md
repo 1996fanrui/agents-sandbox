@@ -51,6 +51,7 @@ The northbound API may override only a narrow subset of behavior:
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `companion_containers` | Yes | Each sandbox declares companion containers started concurrently with the primary container |
+| `ports` | Yes | Each sandbox may expose container ports to the host via Docker port publishing (`-p`). Each entry specifies `container_port`, `host_port`, and `protocol` (tcp/udp/sctp). |
 | `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
 | Resource limits | No | V1 does not support request-scoped resource limits |

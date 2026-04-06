@@ -68,6 +68,7 @@ type createSandboxOptions struct {
 	sandboxID           *string
 	mounts              []MountSpec
 	copies              []CopySpec
+	ports               []PortMapping
 	builtinTools        []string
 	companionContainers []CompanionContainerSpec
 	labels              map[string]string
@@ -270,6 +271,18 @@ func (o copiesOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	return nil
 }
 
+type portsOption []PortMapping
+
+// WithPorts sets the sandbox port mappings.
+func WithPorts(ports ...PortMapping) portsOption {
+	return portsOption(slicesClone(ports))
+}
+
+func (o portsOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	opts.ports = slicesClone([]PortMapping(o))
+	return nil
+}
+
 type builtinToolsOption []string
 
 // WithBuiltinTools sets the built-in tools for sandbox creation.
@@ -452,6 +465,18 @@ func toProtoCopies(copies []CopySpec) []*agboxv1.CopySpec {
 		result = append(result, toProtoCopy(copySpec))
 	}
 	return result
+}
+
+func toProtoPortMappings(ports []PortMapping) ([]*agboxv1.PortMapping, error) {
+	result := make([]*agboxv1.PortMapping, 0, len(ports))
+	for _, port := range ports {
+		pm, err := toProtoPortMapping(port)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, pm)
+	}
+	return result, nil
 }
 
 func toProtoCompanionContainers(containers []CompanionContainerSpec) []*agboxv1.CompanionContainerSpec {

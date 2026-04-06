@@ -281,6 +281,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "sandbox_id",
         "mounts",
         "copies",
+        "ports",
         "builtin_tools",
         "companion_containers",
         "labels",

@@ -39,6 +39,7 @@ from .types import (
     ExecHandle,
     MountSpec,
     PingInfo,
+    PortMapping,
     SandboxEvent,
     SandboxHandle,
 )
@@ -128,6 +129,7 @@ class AgentsSandboxClient:
         sandbox_id: str | None = None,
         mounts: tuple[MountSpec, ...] = (),
         copies: tuple[CopySpec, ...] = (),
+        ports: tuple[PortMapping, ...] = (),
         builtin_tools: tuple[str, ...] = (),
         companion_containers: tuple[CompanionContainerSpec, ...] = (),
         labels: Mapping[str, str] | None = None,
@@ -153,6 +155,7 @@ class AgentsSandboxClient:
                 image=image,
                 mounts=mounts,
                 copies=copies,
+                ports=ports,
                 builtin_tools=builtin_tools,
                 companion_containers=companion_containers,
                 labels={} if labels is None else dict(labels),
