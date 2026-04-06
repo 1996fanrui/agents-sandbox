@@ -15,13 +15,13 @@ import (
 // YAMLConfig is the top-level schema for declarative sandbox configuration
 // supplied via the config_yaml field in CreateSandboxRequest.
 type YAMLConfig struct {
-	Image               string                                  `yaml:"image"`
-	Mounts              []YAMLMountSpec                         `yaml:"mounts"`
-	Copies              []YAMLCopySpec                          `yaml:"copies"`
-	BuiltinTools        []string                                `yaml:"builtin_tools"`
-	CompanionContainers map[string]YAMLCompanionContainerSpec   `yaml:"companion_containers"`
-	Labels              map[string]string                       `yaml:"labels"`
-	Envs                map[string]string                       `yaml:"envs"`
+	Image               string                                `yaml:"image"`
+	Mounts              []YAMLMountSpec                       `yaml:"mounts"`
+	Copies              []YAMLCopySpec                        `yaml:"copies"`
+	BuiltinTools        []string                              `yaml:"builtin_tools"`
+	CompanionContainers map[string]YAMLCompanionContainerSpec `yaml:"companion_containers"`
+	Labels              map[string]string                     `yaml:"labels"`
+	Envs                map[string]string                     `yaml:"envs"`
 	// IdleTTL is the per-sandbox idle TTL override. Empty = use global daemon
 	// default; "0" = disable idle stop for this sandbox.
 	IdleTTL string `yaml:"idle_ttl"`

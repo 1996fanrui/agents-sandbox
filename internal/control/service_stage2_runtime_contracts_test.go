@@ -150,18 +150,18 @@ func TestDockerLabelsPassthrough(t *testing.T) {
 		runtimedocker.LabelUserPrefix + "env":   "dev",
 	})
 	assertUserDockerLabels(t, containerLabels[dbContainerName], map[string]string{
-		runtimedocker.LabelSandboxID:                sandboxID,
-		runtimedocker.LabelComponent:                "companion",
-		runtimedocker.LabelCompanionContainerName:   "db",
-		runtimedocker.LabelUserPrefix + "owner":     "team-a",
-		runtimedocker.LabelUserPrefix + "env":       "dev",
+		runtimedocker.LabelSandboxID:              sandboxID,
+		runtimedocker.LabelComponent:              "companion",
+		runtimedocker.LabelCompanionContainerName: "db",
+		runtimedocker.LabelUserPrefix + "owner":   "team-a",
+		runtimedocker.LabelUserPrefix + "env":     "dev",
 	})
 	assertUserDockerLabels(t, containerLabels[cacheContainerName], map[string]string{
-		runtimedocker.LabelSandboxID:                sandboxID,
-		runtimedocker.LabelComponent:                "companion",
-		runtimedocker.LabelCompanionContainerName:   "cache",
-		runtimedocker.LabelUserPrefix + "owner":     "team-a",
-		runtimedocker.LabelUserPrefix + "env":       "dev",
+		runtimedocker.LabelSandboxID:              sandboxID,
+		runtimedocker.LabelComponent:              "companion",
+		runtimedocker.LabelCompanionContainerName: "cache",
+		runtimedocker.LabelUserPrefix + "owner":   "team-a",
+		runtimedocker.LabelUserPrefix + "env":     "dev",
 	})
 	assertUserDockerLabels(t, containerLabels[primaryContainerName], map[string]string{
 		runtimedocker.LabelSandboxID:            sandboxID,
@@ -429,7 +429,7 @@ func TestBuiltinToolsForwardedToRuntime(t *testing.T) {
 	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
 		SandboxId: "builtin-without-legacy",
 		CreateSpec: &agboxv1.CreateSpec{
-			Image:            "ghcr.io/agents-sandbox/coding-runtime:test",
+			Image:        "ghcr.io/agents-sandbox/coding-runtime:test",
 			BuiltinTools: []string{"claude"},
 		},
 	})
@@ -519,17 +519,17 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"companion_container",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
-				"event_id":             1,
-				"sequence":             2,
-				"sandbox_id":           3,
-				"event_type":           4,
-				"occurred_at":          5,
-				"replay":               6,
-				"snapshot":             7,
-				"sandbox_state":        8,
-				"sandbox_phase":        9,
-				"exec":                 10,
-				"companion_container":  11,
+				"event_id":            1,
+				"sequence":            2,
+				"sandbox_id":          3,
+				"event_type":          4,
+				"occurred_at":         5,
+				"replay":              6,
+				"snapshot":            7,
+				"sandbox_state":       8,
+				"sandbox_phase":       9,
+				"exec":                10,
+				"companion_container": 11,
 			},
 		},
 		{

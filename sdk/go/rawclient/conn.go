@@ -27,7 +27,7 @@ func Dial(socketPath string, opts ...grpc.DialOption) (*grpc.ClientConn, error) 
 			return dialer.DialContext(ctx, "unix", socketPath)
 		}),
 	}
-		options = append(options, opts...)
+	options = append(options, opts...)
 	return grpc.NewClient("passthrough:///agents-sandbox", options...)
 }
 

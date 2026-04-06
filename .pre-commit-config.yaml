@@ -28,3 +28,11 @@ repos:
       - id: lint-shell-portability
       - id: lint-enum-redundant-string
       - id: lint-no-ignored-files
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt -s
+        entry: bash -c 'gofmt -s -w "$@"' --
+        language: system
+        types: [go]
