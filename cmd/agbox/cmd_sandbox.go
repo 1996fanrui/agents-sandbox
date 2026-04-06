@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -43,6 +44,8 @@ func newSandboxCreateCommand() *cobra.Command {
 		labels     []string
 		idleTTLStr string
 		jsonOutput bool
+		yamlFile   string
+		sandboxID  string
 	)
 
 	cmd := &cobra.Command{
@@ -56,9 +59,23 @@ func newSandboxCreateCommand() *cobra.Command {
 			}
 
 			parsed := sandboxCreateArgs{
-				image:  image,
-				labels: labelMap,
-				json:   jsonOutput,
+				image:     image,
+				labels:    labelMap,
+				json:      jsonOutput,
+				sandboxID: sandboxID,
+			}
+
+			if yamlFile != "" {
+				data, err := os.ReadFile(yamlFile)
+				if err != nil {
+					return runtimeErrorf("read yaml file %s: %v", yamlFile, err)
+				}
+				parsed.configYAML = data
+				// When --yaml-file is provided but --image is not explicitly set,
+				// clear the default image so the server uses the YAML config.
+				if !cmd.Flags().Changed("image") {
+					parsed.image = ""
+				}
 			}
 
 			if idleTTLStr != "" {
@@ -86,6 +103,8 @@ func newSandboxCreateCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&labels, "label", nil, "Label in key=value form (repeatable)")
 	cmd.Flags().StringVar(&idleTTLStr, "idle-ttl", "", "Idle TTL duration (e.g. 5m, 0 to disable)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+	cmd.Flags().StringVar(&yamlFile, "yaml-file", "", "Path to YAML configuration file")
+	cmd.Flags().StringVar(&sandboxID, "sandbox-id", "", "Sandbox ID (must be unique)")
 
 	return cmd
 }
