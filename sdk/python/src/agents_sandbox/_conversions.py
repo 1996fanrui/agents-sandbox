@@ -18,6 +18,7 @@ from .types import (
     HealthcheckConfig,
     MountSpec,
     PingInfo,
+    PortMapping,
     SandboxEvent,
     SandboxHandle,
     SandboxPhaseDetails,
@@ -85,6 +86,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
         image="" if request.create_spec.image is None else request.create_spec.image,
         mounts=[to_proto_mount(item) for item in request.create_spec.mounts],
         copies=[to_proto_copy(item) for item in request.create_spec.copies],
+        ports=[to_proto_port_mapping(item) for item in request.create_spec.ports],
         builtin_tools=list(request.create_spec.builtin_tools),
         companion_containers=[to_proto_companion_container(item) for item in request.create_spec.companion_containers],
         labels=dict(request.create_spec.labels),
@@ -112,6 +114,26 @@ def to_proto_copy(spec: CopySpec) -> service_pb2.CopySpec:
         source=spec.source,
         target=spec.target,
         exclude_patterns=list(spec.exclude_patterns),
+    )
+
+
+_PORT_PROTOCOL_MAP = {
+    "tcp": service_pb2.PORT_PROTOCOL_TCP,
+    "udp": service_pb2.PORT_PROTOCOL_UDP,
+    "sctp": service_pb2.PORT_PROTOCOL_SCTP,
+}
+
+
+def to_proto_port_mapping(spec: PortMapping) -> service_pb2.PortMapping:
+    normalized = spec.protocol.lower()
+    if normalized not in _PORT_PROTOCOL_MAP:
+        raise ValueError(
+            f"unsupported port protocol {spec.protocol!r}; must be tcp, udp, or sctp"
+        )
+    return service_pb2.PortMapping(
+        container_port=spec.container_port,
+        host_port=spec.host_port,
+        protocol=_PORT_PROTOCOL_MAP[normalized],
     )
 
 

@@ -24,6 +24,10 @@ builtin_tools: ["claude", "git", "uv", "npm"]
 labels:
   team: my-team
 
+ports:
+  - container_port: 8080
+    host_port: 8080
+
 envs:
   APP_ENV: production
 
@@ -61,6 +65,7 @@ companion_containers:
 | `companion_containers` | `CreateSpec.companion_containers` | map of CompanionContainerSpec | Companion containers started concurrently with the primary container |
 | `labels` | `CreateSpec.labels` | map of string | Labels attached to the sandbox |
 | `envs` | `CreateSpec.envs` | map of string | Env vars on primary container, inherited by all execs |
+| `ports` | `CreateSpec.ports` | list of PortMapping | Port mappings to publish container ports to the host (localhost only) |
 | `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
 
 ### CopySpec Fields
@@ -70,6 +75,10 @@ companion_containers:
 ### MountSpec Fields
 
 `source` (absolute host path), `target` (absolute container path), `writable` (default: false). For detailed mount semantics, see [Container Dependency Strategy](container_dependency_strategy.md).
+
+### PortMapping Fields
+
+`container_port` (uint32, required, 1-65535), `host_port` (uint32, required, 1-65535), `protocol` (string, default: `"tcp"`, one of `tcp`, `udp`, `sctp`). Ports bind to `127.0.0.1` (localhost only).
 
 ### CompanionContainerSpec and HealthcheckConfig Fields
 

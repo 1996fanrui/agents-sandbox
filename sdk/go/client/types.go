@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -97,6 +98,13 @@ type CopySpec struct {
 	Source          string
 	Target          string
 	ExcludePatterns []string
+}
+
+// PortMapping is the public port mapping declaration type.
+type PortMapping struct {
+	ContainerPort uint32
+	HostPort      uint32
+	Protocol      string // "tcp" (default), "udp", or "sctp"
 }
 
 // SandboxHandle is the public sandbox state snapshot.
@@ -321,6 +329,31 @@ func toProtoCopy(spec CopySpec) *agboxv1.CopySpec {
 		Source:          spec.Source,
 		Target:          spec.Target,
 		ExcludePatterns: slices.Clone(spec.ExcludePatterns),
+	}
+}
+
+func toProtoPortMapping(spec PortMapping) (*agboxv1.PortMapping, error) {
+	proto, err := toProtoPortProtocol(spec.Protocol)
+	if err != nil {
+		return nil, err
+	}
+	return &agboxv1.PortMapping{
+		ContainerPort: spec.ContainerPort,
+		HostPort:      spec.HostPort,
+		Protocol:      proto,
+	}, nil
+}
+
+func toProtoPortProtocol(protocol string) (agboxv1.PortProtocol, error) {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "", "tcp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_TCP, nil
+	case "udp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_UDP, nil
+	case "sctp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_SCTP, nil
+	default:
+		return 0, fmt.Errorf("unsupported port protocol %q; must be tcp, udp, or sctp", protocol)
 	}
 }
 

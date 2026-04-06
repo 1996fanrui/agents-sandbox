@@ -131,10 +131,15 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 		image = *options.image
 	}
 
+	protoPorts, err := toProtoPortMappings(options.ports)
+	if err != nil {
+		return SandboxHandle{}, err
+	}
 	createSpec := &agboxv1.CreateSpec{
 		Image:               image,
 		Mounts:              toProtoMounts(options.mounts),
 		Copies:              toProtoCopies(options.copies),
+		Ports:               protoPorts,
 		BuiltinTools:        slicesClone(options.builtinTools),
 		CompanionContainers: toProtoCompanionContainers(options.companionContainers),
 		Labels:              cloneStringMap(options.labels),

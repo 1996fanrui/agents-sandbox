@@ -179,3 +179,123 @@ func TestWithIdleTTLRejectsNegative(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestWithPorts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ports_in_create_spec", func(t *testing.T) {
+		t.Parallel()
+		var captured *agboxv1.CreateSandboxRequest
+		base := &fakeRPCClient{}
+		base.createSandboxFn = func(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			captured = req
+			return &agboxv1.CreateSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         "sb-1",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence: 1,
+				},
+			}, nil
+		}
+
+		client := newTestClient(base, nil)
+		_, err := client.CreateSandbox(context.Background(),
+			WithImage("test:latest"),
+			WithPorts(
+				PortMapping{ContainerPort: 8080, HostPort: 9090, Protocol: "tcp"},
+				PortMapping{ContainerPort: 53, HostPort: 5353, Protocol: "udp"},
+				PortMapping{ContainerPort: 3000, HostPort: 3000},
+			),
+			WithWait(false),
+		)
+		if err != nil {
+			t.Fatalf("CreateSandbox failed: %v", err)
+		}
+		ports := captured.GetCreateSpec().GetPorts()
+		if len(ports) != 3 {
+			t.Fatalf("expected 3 ports, got %d", len(ports))
+		}
+		if ports[0].GetContainerPort() != 8080 || ports[0].GetHostPort() != 9090 || ports[0].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_TCP {
+			t.Fatalf("unexpected first port: %v", ports[0])
+		}
+		if ports[1].GetContainerPort() != 53 || ports[1].GetHostPort() != 5353 || ports[1].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_UDP {
+			t.Fatalf("unexpected second port: %v", ports[1])
+		}
+		// Empty protocol defaults to TCP.
+		if ports[2].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_TCP {
+			t.Fatalf("expected default TCP protocol, got %v", ports[2].GetProtocol())
+		}
+	})
+
+	t.Run("no_ports_leaves_empty", func(t *testing.T) {
+		t.Parallel()
+		var captured *agboxv1.CreateSandboxRequest
+		base := &fakeRPCClient{}
+		base.createSandboxFn = func(_ context.Context, req *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			captured = req
+			return &agboxv1.CreateSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         "sb-1",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence: 1,
+				},
+			}, nil
+		}
+
+		client := newTestClient(base, nil)
+		_, err := client.CreateSandbox(context.Background(), WithImage("test:latest"), WithWait(false))
+		if err != nil {
+			t.Fatalf("CreateSandbox failed: %v", err)
+		}
+		if got := captured.GetCreateSpec().GetPorts(); len(got) != 0 {
+			t.Fatalf("expected no ports, got %v", got)
+		}
+	})
+}
+
+func TestToProtoPortProtocol(t *testing.T) {
+	t.Parallel()
+
+	validCases := []struct {
+		input string
+		want  agboxv1.PortProtocol
+	}{
+		{"tcp", agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+		{"TCP", agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+		{"udp", agboxv1.PortProtocol_PORT_PROTOCOL_UDP},
+		{"UDP", agboxv1.PortProtocol_PORT_PROTOCOL_UDP},
+		{"sctp", agboxv1.PortProtocol_PORT_PROTOCOL_SCTP},
+		{"SCTP", agboxv1.PortProtocol_PORT_PROTOCOL_SCTP},
+		{"", agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+		{"  tcp  ", agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+	}
+
+	for _, tc := range validCases {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			got, err := toProtoPortProtocol(tc.input)
+			if err != nil {
+				t.Fatalf("toProtoPortProtocol(%q) unexpected error: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("toProtoPortProtocol(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+
+	invalidCases := []string{"unknown", "http", "ftp"}
+	for _, input := range invalidCases {
+		input := input
+		t.Run("error_"+input, func(t *testing.T) {
+			t.Parallel()
+			_, err := toProtoPortProtocol(input)
+			if err == nil {
+				t.Fatalf("toProtoPortProtocol(%q) expected error, got nil", input)
+			}
+			if !strings.Contains(err.Error(), "unsupported port protocol") {
+				t.Fatalf("expected 'unsupported port protocol' error, got: %v", err)
+			}
+		})
+	}
+}

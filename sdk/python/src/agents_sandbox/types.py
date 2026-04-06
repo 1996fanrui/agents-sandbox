@@ -49,6 +49,13 @@ class CopySpec:
 
 
 @dataclass(frozen=True, slots=True)
+class PortMapping:
+    container_port: int
+    host_port: int
+    protocol: str = "tcp"
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxPhaseDetails:
     phase: str | None = None
     error_code: str | None = None
@@ -135,6 +142,7 @@ __all__ = [
     "HealthcheckConfig",
     "MountSpec",
     "PingInfo",
+    "PortMapping",
     "SandboxEvent",
     "SandboxHandle",
     "SandboxPhaseDetails",

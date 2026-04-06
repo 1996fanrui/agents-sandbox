@@ -6,7 +6,7 @@ import datetime
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .types import CompanionContainerSpec, CopySpec, MountSpec
+from .types import CompanionContainerSpec, CopySpec, MountSpec, PortMapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +14,7 @@ class CreateSandboxSpec:
     image: str | None = None
     mounts: tuple[MountSpec, ...] = ()
     copies: tuple[CopySpec, ...] = ()
+    ports: tuple[PortMapping, ...] = ()
     builtin_tools: tuple[str, ...] = ()
     companion_containers: tuple[CompanionContainerSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
