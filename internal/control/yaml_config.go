@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -18,6 +19,7 @@ type YAMLConfig struct {
 	Image               string                                `yaml:"image"`
 	Mounts              []YAMLMountSpec                       `yaml:"mounts"`
 	Copies              []YAMLCopySpec                        `yaml:"copies"`
+	Ports               []YAMLPortMapping                     `yaml:"ports"`
 	BuiltinTools        []string                              `yaml:"builtin_tools"`
 	CompanionContainers map[string]YAMLCompanionContainerSpec `yaml:"companion_containers"`
 	Labels              map[string]string                     `yaml:"labels"`
@@ -39,6 +41,13 @@ type YAMLCopySpec struct {
 	Source          string   `yaml:"source"`
 	Target          string   `yaml:"target"`
 	ExcludePatterns []string `yaml:"exclude_patterns"`
+}
+
+// YAMLPortMapping describes a port mapping from container to host.
+type YAMLPortMapping struct {
+	ContainerPort uint32 `yaml:"container_port"`
+	HostPort      uint32 `yaml:"host_port"`
+	Protocol      string `yaml:"protocol"`
 }
 
 // YAMLCompanionContainerSpec describes a companion container.
@@ -94,6 +103,18 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 			Source:          c.Source,
 			Target:          c.Target,
 			ExcludePatterns: c.ExcludePatterns,
+		})
+	}
+
+	for _, p := range cfg.Ports {
+		proto, err := parsePortProtocol(p.Protocol)
+		if err != nil {
+			return nil, err
+		}
+		spec.Ports = append(spec.Ports, &agboxv1.PortMapping{
+			ContainerPort: p.ContainerPort,
+			HostPort:      p.HostPort,
+			Protocol:      proto,
 		})
 	}
 
@@ -198,6 +219,22 @@ func parseOptionalDuration(field, value string) (*durationpb.Duration, error) {
 	return durationpb.New(d), nil
 }
 
+// parsePortProtocol converts a user-friendly protocol string to the proto enum.
+// Empty string and "tcp" map to TCP (default). Case-insensitive.
+func parsePortProtocol(raw string) (agboxv1.PortProtocol, error) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch normalized {
+	case "", "tcp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_TCP, nil
+	case "udp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_UDP, nil
+	case "sctp":
+		return agboxv1.PortProtocol_PORT_PROTOCOL_SCTP, nil
+	default:
+		return 0, fmt.Errorf("unsupported port protocol %q; must be tcp, udp, or sctp", raw)
+	}
+}
+
 // mergeCreateSpecs merges two CreateSpecs: base provides defaults, override
 // takes precedence. Scalar strings overwrite when non-empty; repeated fields
 // replace entirely when non-nil (len > 0); map fields merge at key level.
@@ -231,6 +268,9 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	}
 	if len(override.GetCompanionContainers()) > 0 {
 		result.CompanionContainers = cloneCompanionContainerSpecs(override.GetCompanionContainers())
+	}
+	if len(override.GetPorts()) > 0 {
+		result.Ports = clonePortMappings(override.GetPorts())
 	}
 
 	// Map: key-level merge — override keys overwrite, base-only keys preserved.

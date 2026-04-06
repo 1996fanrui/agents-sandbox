@@ -46,6 +46,12 @@ class ExecState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EXEC_STATE_FINISHED: _ClassVar[ExecState]
     EXEC_STATE_FAILED: _ClassVar[ExecState]
     EXEC_STATE_CANCELLED: _ClassVar[ExecState]
+
+class PortProtocol(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    PORT_PROTOCOL_TCP: _ClassVar[PortProtocol]
+    PORT_PROTOCOL_UDP: _ClassVar[PortProtocol]
+    PORT_PROTOCOL_SCTP: _ClassVar[PortProtocol]
 SANDBOX_STATE_UNSPECIFIED: SandboxState
 SANDBOX_STATE_PENDING: SandboxState
 SANDBOX_STATE_READY: SandboxState
@@ -73,6 +79,9 @@ EXEC_STATE_RUNNING: ExecState
 EXEC_STATE_FINISHED: ExecState
 EXEC_STATE_FAILED: ExecState
 EXEC_STATE_CANCELLED: ExecState
+PORT_PROTOCOL_TCP: PortProtocol
+PORT_PROTOCOL_UDP: PortProtocol
+PORT_PROTOCOL_SCTP: PortProtocol
 
 class PingRequest(_message.Message):
     __slots__ = ()
@@ -105,6 +114,16 @@ class CopySpec(_message.Message):
     target: str
     exclude_patterns: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, source: _Optional[str] = ..., target: _Optional[str] = ..., exclude_patterns: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class PortMapping(_message.Message):
+    __slots__ = ("container_port", "host_port", "protocol")
+    CONTAINER_PORT_FIELD_NUMBER: _ClassVar[int]
+    HOST_PORT_FIELD_NUMBER: _ClassVar[int]
+    PROTOCOL_FIELD_NUMBER: _ClassVar[int]
+    container_port: int
+    host_port: int
+    protocol: PortProtocol
+    def __init__(self, container_port: _Optional[int] = ..., host_port: _Optional[int] = ..., protocol: _Optional[_Union[PortProtocol, str]] = ...) -> None: ...
 
 class HealthcheckConfig(_message.Message):
     __slots__ = ("test", "interval", "timeout", "retries", "start_period", "start_interval")
@@ -144,7 +163,7 @@ class CompanionContainerSpec(_message.Message):
     def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl")
+    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -167,6 +186,7 @@ class CreateSpec(_message.Message):
     LABELS_FIELD_NUMBER: _ClassVar[int]
     ENVS_FIELD_NUMBER: _ClassVar[int]
     IDLE_TTL_FIELD_NUMBER: _ClassVar[int]
+    PORTS_FIELD_NUMBER: _ClassVar[int]
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
@@ -175,7 +195,8 @@ class CreateSpec(_message.Message):
     labels: _containers.ScalarMap[str, str]
     envs: _containers.ScalarMap[str, str]
     idle_ttl: _duration_pb2.Duration
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+    ports: _containers.RepeatedCompositeFieldContainer[PortMapping]
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., ports: _Optional[_Iterable[_Union[PortMapping, _Mapping]]] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
     __slots__ = ("sandbox_id", "state", "last_event_sequence", "companion_containers", "labels", "created_at", "image", "error_code", "error_message", "state_changed_at")

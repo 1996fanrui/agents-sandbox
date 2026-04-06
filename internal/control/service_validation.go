@@ -87,6 +87,24 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return err
 		}
 	}
+	seenHostPorts := make(map[string]struct{})
+	for _, port := range spec.GetPorts() {
+		if port.GetContainerPort() == 0 || port.GetContainerPort() > 65535 {
+			return fmt.Errorf("port container_port must be between 1 and 65535, got %d", port.GetContainerPort())
+		}
+		if port.GetHostPort() == 0 || port.GetHostPort() > 65535 {
+			return fmt.Errorf("port host_port must be between 1 and 65535, got %d", port.GetHostPort())
+		}
+		protoStr := portProtocolToString(port.GetProtocol())
+		if protoStr == "" {
+			return fmt.Errorf("port protocol must be TCP, UDP, or SCTP, got %d", int32(port.GetProtocol()))
+		}
+		key := fmt.Sprintf("%d/%s", port.GetHostPort(), protoStr)
+		if _, exists := seenHostPorts[key]; exists {
+			return fmt.Errorf("duplicate host_port %d with protocol %s", port.GetHostPort(), protoStr)
+		}
+		seenHostPorts[key] = struct{}{}
+	}
 	if err := validateCompanionContainerSpecs(spec.GetCompanionContainers(), seenNames); err != nil {
 		return err
 	}

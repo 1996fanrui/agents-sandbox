@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
+	nat "github.com/docker/go-connections/nat"
 )
 
 // execLogContainerDir is the container-side directory for exec log files when output redirection is enabled.
@@ -34,6 +35,12 @@ type dockerMount struct {
 	ReadOnly bool
 }
 
+type dockerPortMapping struct {
+	ContainerPort uint32
+	HostPort      uint32
+	Protocol      string // "tcp", "udp", "sctp"
+}
+
 type dockerContainerSpec struct {
 	Name         string
 	Image        string
@@ -43,6 +50,7 @@ type dockerContainerSpec struct {
 	Environment  map[string]string
 	Healthcheck  *agboxv1.HealthcheckConfig
 	Mounts       []dockerMount
+	Ports        []dockerPortMapping
 	Workdir      string
 	Command      []string
 }
@@ -133,9 +141,24 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 			ReadOnly: item.ReadOnly,
 		})
 	}
+	// Build port bindings and exposed ports from the spec.
+	exposedPorts := make(nat.PortSet)
+	portBindings := make(nat.PortMap)
+	for _, p := range spec.Ports {
+		natPort, err := nat.NewPort(p.Protocol, fmt.Sprintf("%d", p.ContainerPort))
+		if err != nil {
+			return fmt.Errorf("invalid port spec %d/%s: %w", p.ContainerPort, p.Protocol, err)
+		}
+		exposedPorts[natPort] = struct{}{}
+		portBindings[natPort] = []nat.PortBinding{{
+			HostIP:   "127.0.0.1",
+			HostPort: fmt.Sprintf("%d", p.HostPort),
+		}}
+	}
 	hostConfig := &container.HostConfig{
-		Init:   ptrTo(true),
-		Mounts: hostMounts,
+		Init:         ptrTo(true),
+		Mounts:       hostMounts,
+		PortBindings: portBindings,
 		// Black-hole Docker Desktop's stable host-discovery aliases on macOS.
 		// This is a DNS-layer best-effort control; Linux host isolation is
 		// enforced separately via nftables on the sandbox network.
@@ -155,13 +178,23 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		}
 	}
 	_, err = backend.dockerClient.ContainerCreate(ctx, &container.Config{
-		Image:       spec.Image,
-		Cmd:         spec.Command,
-		WorkingDir:  spec.Workdir,
-		Env:         envMapToSlice(spec.Environment),
-		Labels:      spec.Labels,
-		Healthcheck: healthcheck,
+		Image:        spec.Image,
+		Cmd:          spec.Command,
+		WorkingDir:   spec.Workdir,
+		Env:          envMapToSlice(spec.Environment),
+		Labels:       spec.Labels,
+		Healthcheck:  healthcheck,
+		ExposedPorts: exposedPorts,
 	}, hostConfig, networkingConfig, nil, spec.Name)
+	if err != nil && len(spec.Ports) > 0 {
+		// Wrap with port context so async error messages are actionable.
+		ports := make([]string, 0, len(spec.Ports))
+		for _, p := range spec.Ports {
+			ports = append(ports, fmt.Sprintf("%d->%d/%s", p.HostPort, p.ContainerPort, p.Protocol))
+		}
+		return fmt.Errorf("failed to create container with port bindings [%s]: %w",
+			strings.Join(ports, ", "), err)
+	}
 	return err
 }
 
@@ -426,6 +459,21 @@ func (backend *dockerRuntimeBackend) dockerCopyToContainer(ctx context.Context, 
 		return fmt.Errorf("build tar for %s: %w", copy.SourcePath, tarErr)
 	}
 	return nil
+}
+
+// portProtocolToString converts a proto PortProtocol enum to a Docker protocol
+// string. Returns empty string for unknown values so callers can detect invalid input.
+func portProtocolToString(protocol agboxv1.PortProtocol) string {
+	switch protocol {
+	case agboxv1.PortProtocol_PORT_PROTOCOL_TCP:
+		return "tcp"
+	case agboxv1.PortProtocol_PORT_PROTOCOL_UDP:
+		return "udp"
+	case agboxv1.PortProtocol_PORT_PROTOCOL_SCTP:
+		return "sctp"
+	default:
+		return ""
+	}
 }
 
 func ptrTo[T any](value T) *T {

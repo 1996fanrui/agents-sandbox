@@ -320,6 +320,83 @@ func TestYAMLAllDurationFieldsParsed(t *testing.T) {
 	}
 }
 
+func TestYAMLConfigWithPorts(t *testing.T) {
+	raw := []byte(`
+image: "test:latest"
+ports:
+  - container_port: 8080
+    host_port: 9090
+    protocol: tcp
+  - container_port: 53
+    host_port: 5353
+    protocol: udp
+  - container_port: 3000
+    host_port: 3000
+`)
+	cfg, err := parseYAMLConfig(raw)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	if len(cfg.Ports) != 3 {
+		t.Fatalf("expected 3 ports, got %d", len(cfg.Ports))
+	}
+
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+	ports := spec.GetPorts()
+	if len(ports) != 3 {
+		t.Fatalf("expected 3 ports in spec, got %d", len(ports))
+	}
+	if ports[0].GetContainerPort() != 8080 || ports[0].GetHostPort() != 9090 || ports[0].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_TCP {
+		t.Fatalf("unexpected port[0]: %v", ports[0])
+	}
+	if ports[1].GetContainerPort() != 53 || ports[1].GetHostPort() != 5353 || ports[1].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_UDP {
+		t.Fatalf("unexpected port[1]: %v", ports[1])
+	}
+	// Empty protocol defaults to TCP.
+	if ports[2].GetContainerPort() != 3000 || ports[2].GetHostPort() != 3000 || ports[2].GetProtocol() != agboxv1.PortProtocol_PORT_PROTOCOL_TCP {
+		t.Fatalf("unexpected port[2]: %v", ports[2])
+	}
+}
+
+func TestParsePortProtocol(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected agboxv1.PortProtocol
+		wantErr  bool
+	}{
+		{"", agboxv1.PortProtocol_PORT_PROTOCOL_TCP, false},
+		{"tcp", agboxv1.PortProtocol_PORT_PROTOCOL_TCP, false},
+		{"TCP", agboxv1.PortProtocol_PORT_PROTOCOL_TCP, false},
+		{"udp", agboxv1.PortProtocol_PORT_PROTOCOL_UDP, false},
+		{"UDP", agboxv1.PortProtocol_PORT_PROTOCOL_UDP, false},
+		{"sctp", agboxv1.PortProtocol_PORT_PROTOCOL_SCTP, false},
+		{"SCTP", agboxv1.PortProtocol_PORT_PROTOCOL_SCTP, false},
+		{"ftp", 0, true},
+		{"http", 0, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run("protocol_"+tc.input, func(t *testing.T) {
+			got, err := parsePortProtocol(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tc.input)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error for %q: %v", tc.input, err)
+				}
+				if got != tc.expected {
+					t.Fatalf("expected %v for %q, got %v", tc.expected, tc.input, got)
+				}
+			}
+		})
+	}
+}
+
 func TestMergeCreateSpecs(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -476,6 +553,42 @@ func TestMergeCreateSpecs(t *testing.T) {
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
 				if result.GetIdleTtl() == nil || result.GetIdleTtl().AsDuration() != 5*time.Minute {
 					t.Fatalf("expected base 5m idle_ttl preserved, got %v", result.GetIdleTtl())
+				}
+			},
+		},
+		{
+			name: "ports_override",
+			base: &agboxv1.CreateSpec{
+				Ports: []*agboxv1.PortMapping{
+					{ContainerPort: 8080, HostPort: 8080, Protocol: agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+				},
+			},
+			override: &agboxv1.CreateSpec{
+				Ports: []*agboxv1.PortMapping{
+					{ContainerPort: 3000, HostPort: 3000, Protocol: agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+					{ContainerPort: 53, HostPort: 5353, Protocol: agboxv1.PortProtocol_PORT_PROTOCOL_UDP},
+				},
+			},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				if len(result.GetPorts()) != 2 {
+					t.Fatalf("expected 2 ports, got %d", len(result.GetPorts()))
+				}
+				if result.GetPorts()[0].GetContainerPort() != 3000 {
+					t.Fatalf("expected override port 3000, got %d", result.GetPorts()[0].GetContainerPort())
+				}
+			},
+		},
+		{
+			name: "ports_no_override",
+			base: &agboxv1.CreateSpec{
+				Ports: []*agboxv1.PortMapping{
+					{ContainerPort: 8080, HostPort: 8080, Protocol: agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
+				},
+			},
+			override: &agboxv1.CreateSpec{},
+			check: func(t *testing.T, result *agboxv1.CreateSpec) {
+				if len(result.GetPorts()) != 1 || result.GetPorts()[0].GetContainerPort() != 8080 {
+					t.Fatalf("expected base ports preserved, got %v", result.GetPorts())
 				}
 			},
 		},
