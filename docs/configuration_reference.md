@@ -47,6 +47,7 @@ The northbound API may override only a narrow subset of behavior:
 | Generic mounts | Yes | Each sandbox may bind explicit host paths to explicit container targets. `source` and `target` support `~` prefix: `source` expands to the host user's home directory; `target` expands to the container user's home directory. `~username` syntax is not supported. |
 | Generic copies | Yes | Each sandbox may copy explicit host files or trees into explicit container targets. `source` and `target` support `~` prefix: `source` expands to the host user's home directory; `target` expands to the container user's home directory. `~username` syntax is not supported. |
 | Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `claude`, `codex`, `git`, `uv`, `npm`, or `apt` |
+| Caller-provided `config_yaml` | Yes | Inline YAML configuration; when provided, field-level values from `CreateSpec` override the YAML (RFC 7396 merge semantics) |
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `companion_containers` | Yes | Each sandbox declares companion containers started concurrently with the primary container |

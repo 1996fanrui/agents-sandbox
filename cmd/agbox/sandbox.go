@@ -43,10 +43,12 @@ type sandboxExecClient interface {
 }
 
 type sandboxCreateArgs struct {
-	image   string
-	labels  map[string]string
-	idleTTL *time.Duration
-	json    bool
+	image      string
+	labels     map[string]string
+	idleTTL    *time.Duration
+	json       bool
+	configYAML []byte
+	sandboxID  string
 }
 
 type sandboxListArgs struct {
@@ -82,6 +84,8 @@ func runSandboxCreate(ctx context.Context, client sandboxExecClient, parsed sand
 	}
 	response, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
 		CreateSpec: createSpec,
+		SandboxId:  parsed.sandboxID,
+		ConfigYaml: parsed.configYAML,
 	})
 	if err != nil {
 		return runtimeErrorf("create sandbox: %v", err)
