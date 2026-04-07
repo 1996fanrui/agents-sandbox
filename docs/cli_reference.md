@@ -72,10 +72,7 @@ agbox exec list [sandbox_id] [--json]
 
 ## Agent Command
 
-Provides an out-of-the-box workflow: create a sandbox, optionally copy the project directory, run an agent, and manage the sandbox lifecycle. Supports two session modes:
-
-- **Interactive** (default): Attaches an interactive TTY session. The sandbox is deleted on exit. Requires a real terminal.
-- **Long-running** (`--mode long-running`): Submits the agent command via `CreateExec` and waits for completion. The CLI can detach (Ctrl+C) without affecting the sandbox. The sandbox must be managed manually via `agbox sandbox stop/delete`.
+Provides an out-of-the-box workflow: create a sandbox, optionally copy the project directory, run an agent, and manage the sandbox lifecycle.
 
 ```bash
 # Use a registered agent type (resolves command + default builtin tools)
@@ -90,17 +87,36 @@ agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool cla
 SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--command <cmd>` | Custom command (mutually exclusive with agent type) |
-| `--mode <mode>` | Session mode: `interactive` or `long-running` (default depends on agent type) |
-| `--workspace <path>` | Directory to copy into sandbox as workspace. Registered agent types (claude, codex) default to cwd; custom `--command` does not copy unless `--workspace` is explicitly provided. |
-| `--builtin-tool <name>` | Builtin tool to install (repeatable; overrides defaults when specified) |
+### Session Modes
 
-**Workspace safety checks:**
+The agent command supports two session modes, controlled by `--mode`. The mode determines all runtime behavior — users select a mode and the runtime strategy follows implicitly:
 
-- `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
-- In interactive mode, when a registered agent type's workspace directory does not contain a top-level `.git` entry, a confirmation prompt is displayed. In long-running mode, the confirmation is skipped.
+| Strategy | Interactive (default) | Long-running |
+|----------|----------------------|-------------|
+| Execution method | `docker exec -it` (TTY attached, real-time output) | `CreateExec` RPC + event subscription waiting for terminal state |
+| Wait behavior | Blocks until `docker exec` subprocess exits | Blocks until exec reaches terminal state (FINISHED/FAILED/CANCELLED) |
+| Ctrl+C behavior | Signal forwarded to container process → wait for exit → delete sandbox | CLI detaches, sandbox and exec continue running |
+| Output display | Real-time stdout/stderr streamed via TTY | No streaming; prints status at submission and at terminal state |
+| Sandbox cleanup on exit | Always deleted | Cleaned up only on pre-delivery failure; sandbox persists after delivery |
+| idle_ttl | 10d (safety net) | 0 (disabled) |
+
+### Agent Type Capabilities
+
+Agent types declare their own capabilities, orthogonal to session mode. Each capability is controlled by exactly one dimension (mode or agent type), never both:
+
+| Capability | Description | claude | codex | Custom `--command` | User override flag |
+|-----------|-------------|--------|-------|-------------------|-------------------|
+| mode | Default session mode | interactive | interactive | interactive | `--mode` |
+| command | Container command | Fixed | Fixed | User-specified | `--command` |
+| builtinTools | Pre-installed tools | Fixed | Fixed | User-specified | `--builtin-tool` |
+| workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | `--workspace` (explicit to enable) |
+| .git check | Confirm when workspace lacks .git | Yes | Yes | No | None (automatic) |
+
+- `--workspace` is optional at the top level.
+  - claude/codex declare workspace copy and default to cwd.
+  - Custom `--command` does not copy by default; passing `--workspace` explicitly enables it.
+  - `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
+- `.git` check is declared per agent type (claude/codex enable it, custom `--command` does not). When enabled, it triggers if the workspace directory lacks a `.git` entry.
 
 ## Exit Codes
 
