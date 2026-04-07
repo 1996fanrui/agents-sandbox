@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -321,4 +322,84 @@ func TestConfirmWorkspaceCopy(t *testing.T) {
 			t.Fatal("expected error for EOF")
 		}
 	})
+}
+
+func TestResolveAgentSessionArgs_Openclaw(t *testing.T) {
+	parsed, err := resolveAgentSessionArgs("openclaw", "", "", false, "", false, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.mode != agentModeLongRunning {
+		t.Fatalf("expected mode=long-running, got %q", parsed.mode)
+	}
+	expectedTools := []string{"git", "npm", "uv", "apt"}
+	if len(parsed.builtinTools) != len(expectedTools) {
+		t.Fatalf("expected builtinTools=%v, got %v", expectedTools, parsed.builtinTools)
+	}
+	for i, tool := range expectedTools {
+		if parsed.builtinTools[i] != tool {
+			t.Fatalf("builtinTools[%d]: expected %q, got %q", i, tool, parsed.builtinTools[i])
+		}
+	}
+	if len(parsed.phases) != 3 {
+		t.Fatalf("expected 3 phases, got %d", len(parsed.phases))
+	}
+	if parsed.phases[0].label != "Installing openclaw..." {
+		t.Fatalf("expected phases[0].label=%q, got %q", "Installing openclaw...", parsed.phases[0].label)
+	}
+	if parsed.phases[1].label != "Initializing config..." {
+		t.Fatalf("expected phases[1].label=%q, got %q", "Initializing config...", parsed.phases[1].label)
+	}
+	if parsed.phases[2].label != "Starting gateway..." {
+		t.Fatalf("expected phases[2].label=%q, got %q", "Starting gateway...", parsed.phases[2].label)
+	}
+	if len(parsed.command) != 0 {
+		t.Fatalf("expected empty command (phases replaces it), got %v", parsed.command)
+	}
+	if parsed.configYaml == "" {
+		t.Fatal("expected non-empty configYaml")
+	}
+
+	// openclaw typedef does not set copyWorkspace, so workspace should be empty.
+	if parsed.workspace != "" {
+		t.Fatalf("expected empty workspace, got %q", parsed.workspace)
+	}
+}
+
+func TestResolveAgentSessionArgs_SandboxID(t *testing.T) {
+	t.Run("auto_generated", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("openclaw", "", "", false, "", false, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		if !re.MatchString(parsed.sandboxID) {
+			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
+		}
+	})
+
+	t.Run("custom_command_no_generator", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("", "sleep infinity", "", false, "", false, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.sandboxID != "" {
+			t.Fatalf("expected empty sandboxID, got %q", parsed.sandboxID)
+		}
+	})
+}
+
+func TestResolveAgentSessionArgs_ConfigYaml(t *testing.T) {
+	parsed, err := resolveAgentSessionArgs("openclaw", "", "", false, "", false, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.configYaml == "" {
+		t.Fatal("expected non-empty configYaml for openclaw")
+	}
+	for _, keyword := range []string{"mounts:", "ports:", "OPENCLAW_STATE_DIR"} {
+		if !strings.Contains(parsed.configYaml, keyword) {
+			t.Fatalf("configYaml should contain %q, got:\n%s", keyword, parsed.configYaml)
+		}
+	}
 }
