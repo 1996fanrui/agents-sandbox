@@ -85,6 +85,8 @@ agbox agent claude --mode long-running
 agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool claude --builtin-tool git --builtin-tool uv --builtin-tool npm
 # Long-running custom command (stdout emits sandbox_id for scripting)
 SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
+# Deploy OpenClaw gateway (long-running, persists after CLI exit)
+agbox agent openclaw
 ```
 
 ### Session Modes
@@ -104,19 +106,26 @@ The agent command supports two session modes, controlled by `--mode`. The mode d
 
 Agent types declare their own capabilities, orthogonal to session mode. Each capability is controlled by exactly one dimension (mode or agent type), never both:
 
-| Capability | Description | claude | codex | Custom `--command` | User override flag |
-|-----------|-------------|--------|-------|-------------------|-------------------|
-| mode | Default session mode | interactive | interactive | interactive | `--mode` |
-| command | Container command | Fixed | Fixed | User-specified | `--command` |
-| builtinTools | Pre-installed tools | Fixed | Fixed | User-specified | `--builtin-tool` |
-| workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | `--workspace` (explicit to enable) |
-| .git check | Confirm when workspace lacks .git | Yes | Yes | No | None (automatic) |
+| Capability | Description | claude | codex | openclaw | Custom `--command` | User override flag |
+|-----------|-------------|--------|-------|----------|-------------------|-------------------|
+| mode | Default session mode | interactive | interactive | long-running | interactive | `--mode` |
+| command | Container command | Fixed | Fixed | Fixed (multi-phase) | User-specified | `--command` |
+| builtinTools | Pre-installed tools | Fixed | Fixed | Fixed | User-specified | `--builtin-tool` |
+| workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | No | `--workspace` (explicit to enable) |
+| .git check | Confirm when workspace lacks .git | Yes | Yes | No | No | None (automatic) |
+| sandboxIDGen | Custom ID generator | No | No | openclaw-XXXX | No | None |
+| configYaml | Embedded sandbox config | No | No | Yes (mounts, ports, envs) | No | None |
+| preFlight | Pre-flight validation | No | No | Auth + config check | No | None |
+| phases | Multi-phase startup | No | No | install + start | No | None |
+| readyMessage | Custom ready output | No | No | Management commands | No | None |
 
 - `--workspace` is optional at the top level.
   - claude/codex declare workspace copy and default to cwd.
+  - openclaw does not copy workspace (it uses host mounts instead).
   - Custom `--command` does not copy by default; passing `--workspace` explicitly enables it.
   - `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
-- `.git` check is declared per agent type (claude/codex enable it, custom `--command` does not). When enabled, it triggers if the workspace directory lacks a `.git` entry.
+- `.git` check is declared per agent type (claude/codex enable it; openclaw and custom `--command` do not). When enabled, it triggers if the workspace directory lacks a `.git` entry.
+- openclaw auto-generates sandbox IDs matching `openclaw-XXXX` (4 hex chars); other types let the daemon generate IDs.
 
 ## Exit Codes
 
