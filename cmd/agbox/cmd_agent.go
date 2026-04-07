@@ -9,11 +9,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// agentSessionArgs holds the parsed arguments for an interactive agent session.
+// agentSessionArgs holds the parsed arguments for an agent session.
 type agentSessionArgs struct {
-	agentType    string   // pre-registered agent type (empty when --command is used)
-	command      []string // custom command (empty when a registered type is used)
-	workspace    string
+	agentType    string    // pre-registered agent type (empty when --command is used)
+	command      []string  // custom command (empty when a registered type is used)
+	mode         agentMode // resolved session mode
+	workspace    string    // host directory to copy; empty means "don't copy"
 	builtinTools []string
 }
 
@@ -31,6 +32,7 @@ func registeredAgentNames() []string {
 func newAgentCommand() *cobra.Command {
 	var (
 		rawCommand   string
+		mode         string
 		workspace    string
 		builtinTools []string
 	)
@@ -39,8 +41,8 @@ func newAgentCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:       "agent [agent_type]",
-		Short:     "Launch interactive agent session",
-		Long:      "Launch interactive agent session.\n\nAvailable agent types: " + strings.Join(agentNames, ", ") + "\nOr use --command for a custom agent.",
+		Short:     "Launch agent session",
+		Long:      "Launch agent session.\n\nAvailable agent types: " + strings.Join(agentNames, ", ") + "\nOr use --command for a custom agent.",
 		Args:      cobra.MaximumNArgs(1),
 		ValidArgs: agentNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,9 +51,16 @@ func newAgentCommand() *cobra.Command {
 				agentType = args[0]
 			}
 
+			modeOverridden := cmd.Flags().Changed("mode")
+			workspaceOverridden := cmd.Flags().Changed("workspace")
 			builtinToolsOverridden := cmd.Flags().Changed("builtin-tool")
 
-			parsed, err := resolveAgentSessionArgs(agentType, rawCommand, workspace, builtinTools, builtinToolsOverridden)
+			parsed, err := resolveAgentSessionArgs(
+				agentType, rawCommand,
+				mode, modeOverridden,
+				workspace, workspaceOverridden,
+				builtinTools, builtinToolsOverridden,
+			)
 			if err != nil {
 				return err
 			}
@@ -60,9 +69,9 @@ func newAgentCommand() *cobra.Command {
 		},
 	}
 
-	cwd, _ := os.Getwd()
 	cmd.Flags().StringVar(&rawCommand, "command", "", "Custom command to run (mutually exclusive with agent type)")
-	cmd.Flags().StringVar(&workspace, "workspace", cwd, "Directory to copy into the sandbox as workspace")
+	cmd.Flags().StringVar(&mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
 	cmd.Flags().StringArrayVar(&builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
 
 	return cmd
@@ -73,7 +82,10 @@ func newAgentCommand() *cobra.Command {
 func resolveAgentSessionArgs(
 	agentType string,
 	rawCommand string,
+	mode string,
+	modeOverridden bool,
 	workspace string,
+	workspaceOverridden bool,
 	builtinTools []string,
 	builtinToolsOverridden bool,
 ) (agentSessionArgs, error) {
@@ -84,11 +96,17 @@ func resolveAgentSessionArgs(
 		return agentSessionArgs{}, usageErrorf("cannot use --command with agent type %q", agentType)
 	}
 
+	// Resolve the agent type definition when a registered type is used.
+	var typeDef agentTypeDef
+	var isRegistered bool
+
 	if agentType != "" {
-		typeDef, ok := agentTypeDefs[agentType]
+		var ok bool
+		typeDef, ok = agentTypeDefs[agentType]
 		if !ok {
 			return agentSessionArgs{}, usageErrorf("unknown agent type %q; use --command for custom agents", agentType)
 		}
+		isRegistered = true
 		parsed.agentType = agentType
 		parsed.command = typeDef.command
 		if builtinToolsOverridden {
@@ -107,33 +125,76 @@ func resolveAgentSessionArgs(
 		return agentSessionArgs{}, usageErrorf("agbox agent requires an agent type or --command")
 	}
 
-	// Validate workspace path: resolve symlinks and reject dangerous paths.
+	// Mode resolution.
+	if modeOverridden {
+		switch agentMode(mode) {
+		case agentModeInteractive, agentModeLongRunning:
+			parsed.mode = agentMode(mode)
+		default:
+			return agentSessionArgs{}, usageErrorf("--mode must be %q or %q", agentModeInteractive, agentModeLongRunning)
+		}
+	} else if isRegistered {
+		parsed.mode = typeDef.mode
+	} else {
+		// Custom --command defaults to interactive.
+		parsed.mode = agentModeInteractive
+	}
+
+	// Workspace resolution.
+	if workspaceOverridden {
+		// User explicitly provided --workspace; validate the path.
+		if workspace == "" {
+			return agentSessionArgs{}, usageErrorf("--workspace must not be empty")
+		}
+		resolved, err := validateWorkspacePath(workspace)
+		if err != nil {
+			return agentSessionArgs{}, err
+		}
+		parsed.workspace = resolved
+	} else if isRegistered && typeDef.copyWorkspace {
+		// Registered type with copyWorkspace: fill with cwd.
+		cwd, err := os.Getwd()
+		if err != nil {
+			return agentSessionArgs{}, usageErrorf("--workspace: cannot determine current directory: %v", err)
+		}
+		resolved, err := validateWorkspacePath(cwd)
+		if err != nil {
+			return agentSessionArgs{}, err
+		}
+		parsed.workspace = resolved
+	}
+	// else: custom --command without --workspace → parsed.workspace stays "".
+
+	return parsed, nil
+}
+
+// validateWorkspacePath resolves the workspace path to an absolute, symlink-evaluated
+// path and rejects dangerous paths (root and home directories).
+func validateWorkspacePath(workspace string) (string, error) {
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return agentSessionArgs{}, usageErrorf("--workspace path %q: %v", workspace, err)
+		return "", usageErrorf("--workspace path %q: %v", workspace, err)
 	}
 	realWorkspace, err := filepath.EvalSymlinks(absWorkspace)
 	if err != nil {
-		return agentSessionArgs{}, usageErrorf("--workspace path %q: %v", workspace, err)
+		return "", usageErrorf("--workspace path %q: %v", workspace, err)
 	}
 
 	if realWorkspace == "/" {
-		return agentSessionArgs{}, usageErrorf("--workspace rejects root directory: copying the entire filesystem is not allowed; please specify a project directory instead")
+		return "", usageErrorf("--workspace rejects root directory: copying the entire filesystem is not allowed; please specify a project directory instead")
 	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return agentSessionArgs{}, usageErrorf("--workspace: cannot determine home directory: %v", err)
+		return "", usageErrorf("--workspace: cannot determine home directory: %v", err)
 	}
 	realHome, err := filepath.EvalSymlinks(homeDir)
 	if err != nil {
-		return agentSessionArgs{}, usageErrorf("--workspace: cannot resolve home directory: %v", err)
+		return "", usageErrorf("--workspace: cannot resolve home directory: %v", err)
 	}
 	if realWorkspace == realHome {
-		return agentSessionArgs{}, usageErrorf("--workspace rejects home directory: copying the entire home directory is not allowed; please specify a project directory instead")
+		return "", usageErrorf("--workspace rejects home directory: copying the entire home directory is not allowed; please specify a project directory instead")
 	}
 
-	parsed.workspace = realWorkspace
-
-	return parsed, nil
+	return realWorkspace, nil
 }
