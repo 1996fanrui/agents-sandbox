@@ -84,7 +84,8 @@ func primaryContainerName(sandboxID string) string {
 }
 
 // runAgentSession implements the shared flow for `agbox agent <tool>` and
-// `agbox agent --command "..."`.
+// `agbox agent --command "..."`. It validates inputs, connects to the daemon,
+// and dispatches to the appropriate mode handler.
 func runAgentSession(
 	ctx context.Context,
 	parsed agentSessionArgs,
@@ -92,21 +93,10 @@ func runAgentSession(
 	stderr io.Writer,
 	lookupEnv func(string) (string, bool),
 ) error {
-	// Require a real TTY on stdin. Passing -t to docker exec without a TTY causes
-	// docker to exit immediately with an error, and the interactive experience
-	// (echo, Ctrl+C, terminal size) would be broken anyway.
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return usageErrorf("stdin is not a TTY; agbox agent requires an interactive terminal")
-	}
-
-	if _, err := os.Stat(parsed.workspace); err != nil {
-		return usageErrorf("--workspace path %q: %v", parsed.workspace, err)
-	}
-
-	// Prompt for confirmation when the workspace lacks a top-level .git directory.
-	if _, err := os.Stat(filepath.Join(parsed.workspace, ".git")); os.IsNotExist(err) {
-		if confirmErr := confirmWorkspaceCopy(os.Stdin, stderr, parsed.workspace); confirmErr != nil {
-			return confirmErr
+	// Workspace existence check (only when workspace is non-empty).
+	if parsed.workspace != "" {
+		if _, err := os.Stat(parsed.workspace); err != nil {
+			return usageErrorf("--workspace path %q: %v", parsed.workspace, err)
 		}
 	}
 
@@ -128,6 +118,43 @@ func runAgentSession(
 	}
 	defer client.Close()
 
+	// Mode dispatch.
+	switch parsed.mode {
+	case agentModeLongRunning:
+		return runLongRunningSession(ctx, client, parsed, agentLabel, stdout, stderr)
+	default:
+		return runInteractiveSession(ctx, client, parsed, agentLabel, stderr)
+	}
+}
+
+// runInteractiveSession attaches an interactive TTY to the agent process inside
+// a sandbox. The sandbox is deleted on exit.
+func runInteractiveSession(
+	ctx context.Context,
+	client sandboxExecClient,
+	parsed agentSessionArgs,
+	agentLabel string,
+	stderr io.Writer,
+) error {
+	// Require a real TTY on stdin. Passing -t to docker exec without a TTY causes
+	// docker to exit immediately with an error, and the interactive experience
+	// (echo, Ctrl+C, terminal size) would be broken anyway.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return usageErrorf("stdin is not a TTY; agbox agent requires an interactive terminal")
+	}
+
+	// Prompt for confirmation when the workspace lacks a top-level .git directory,
+	// but only for registered agent types that declare confirmGit=true.
+	if parsed.workspace != "" {
+		if typeDef, ok := agentTypeDefs[parsed.agentType]; ok && typeDef.confirmGit {
+			if _, err := os.Stat(filepath.Join(parsed.workspace, ".git")); os.IsNotExist(err) {
+				if confirmErr := confirmWorkspaceCopy(os.Stdin, stderr, parsed.workspace); confirmErr != nil {
+					return confirmErr
+				}
+			}
+		}
+	}
+
 	// Register signal handlers BEFORE creating the sandbox so that any signal
 	// received during creation or the READY wait still triggers cleanup.
 	// SIGHUP is included because terminal closure sends SIGHUP, and Go's
@@ -139,6 +166,12 @@ func runAgentSession(
 	defer signal.Stop(sigintCh)
 	defer signal.Stop(sigtermCh)
 
+	// Build copies list conditionally based on workspace.
+	copies := []*agboxv1.CopySpec{}
+	if parsed.workspace != "" {
+		copies = append(copies, &agboxv1.CopySpec{Source: parsed.workspace, Target: "/workspace"})
+	}
+
 	// Use a large idle TTL as a safety net: the CLI always cleans up on exit,
 	// but if the process is killed without cleanup (e.g., SIGKILL), the daemon
 	// will reclaim the sandbox after agentSessionIdleTTL.
@@ -146,9 +179,7 @@ func runAgentSession(
 		CreateSpec: &agboxv1.CreateSpec{
 			Image:        defaultImage,
 			BuiltinTools: parsed.builtinTools,
-			Copies: []*agboxv1.CopySpec{
-				{Source: parsed.workspace, Target: "/workspace"},
-			},
+			Copies:       copies,
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
 				"agent-type": agentLabel,
@@ -235,6 +266,189 @@ func runAgentSession(
 			return exitCodeFromCmdErr(waitErr, 0)
 		}
 	}
+}
+
+// runLongRunningSession submits the agent command via CreateExec and waits for
+// completion. The CLI can detach (Ctrl+C) without affecting the sandbox. The
+// sandbox must be managed manually via `agbox sandbox stop/delete`.
+func runLongRunningSession(
+	ctx context.Context,
+	client sandboxExecClient,
+	parsed agentSessionArgs,
+	agentLabel string,
+	stdout io.Writer,
+	stderr io.Writer,
+) error {
+	// Register signal handlers before creating the sandbox.
+	sigintCh := make(chan os.Signal, 2)
+	sigtermCh := make(chan os.Signal, 1)
+	signal.Notify(sigintCh, os.Interrupt)
+	signal.Notify(sigtermCh, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigintCh)
+	defer signal.Stop(sigtermCh)
+
+	// Build copies list conditionally based on workspace.
+	copies := []*agboxv1.CopySpec{}
+	if parsed.workspace != "" {
+		copies = append(copies, &agboxv1.CopySpec{Source: parsed.workspace, Target: "/workspace"})
+	}
+
+	// idle_ttl=0 disables idle stop; the sandbox stays alive until explicit stop/delete.
+	createResp, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
+		CreateSpec: &agboxv1.CreateSpec{
+			Image:        defaultImage,
+			BuiltinTools: parsed.builtinTools,
+			Copies:       copies,
+			Labels: map[string]string{
+				"created-by": "agbox-cli",
+				"agent-type": agentLabel,
+			},
+			IdleTtl: durationpb.New(0),
+		},
+	})
+	if err != nil {
+		return runtimeErrorf("create sandbox: %v", err)
+	}
+
+	sandboxID := createResp.GetSandbox().GetSandboxId()
+	lastEventSeq := createResp.GetSandbox().GetLastEventSequence()
+
+	// Track whether exec was successfully delivered. If delivery fails,
+	// the deferred cleanup deletes the sandbox to avoid orphans.
+	detachSuccess := false
+	defer func() {
+		if !detachSuccess {
+			_, _ = fmt.Fprintf(stderr, "\nCleaning up sandbox %s...\n", sandboxID)
+			deleteAndWait(client, sandboxID, stderr)
+		}
+	}()
+
+	// Check for a pre-exec signal before blocking on waitForSandboxReady.
+	select {
+	case <-sigintCh:
+		return exitCodeError(130)
+	case <-sigtermCh:
+		return exitCodeError(143)
+	default:
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox %s to be ready...", sandboxID)
+	waitStart := time.Now()
+	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
+		_, _ = fmt.Fprintln(stderr)
+		return err
+	}
+	_, _ = fmt.Fprintf(stderr, "\nSandbox ready in %.1fs.\n", time.Since(waitStart).Seconds())
+
+	// Submit the exec command.
+	createExecResp, err := client.CreateExec(ctx, &agboxv1.CreateExecRequest{
+		SandboxId: sandboxID,
+		Command:   parsed.command,
+	})
+	if err != nil {
+		return runtimeErrorf("create exec: %v", err)
+	}
+
+	execID := createExecResp.GetExecId()
+
+	// Exec is now running on the daemon side. From this point on, do not
+	// clean up the sandbox — the exec must be allowed to complete even if
+	// subsequent RPC calls (GetExec, Subscribe) fail from the CLI.
+	detachSuccess = true
+
+	// Get baseline exec status to determine the subscription cursor.
+	getExecResp, err := client.GetExec(ctx, execID)
+	if err != nil {
+		return runtimeErrorf("get exec baseline: %v", err)
+	}
+	baseline, err := requireExecStatus(getExecResp, execID)
+	if err != nil {
+		return runtimeErrorf("get exec baseline: %v", err)
+	}
+
+	// Print access info before checking terminal state so the user always
+	// sees sandbox/exec identifiers even if the exec finished immediately.
+	containerName := primaryContainerName(sandboxID)
+	_, _ = fmt.Fprintf(stderr, "\nSandbox ready. Exec submitted.\n")
+	_, _ = fmt.Fprintf(stderr, "  Command:    %s\n", strings.Join(parsed.command, " "))
+	_, _ = fmt.Fprintf(stderr, "  Sandbox ID: %s\n", sandboxID)
+	_, _ = fmt.Fprintf(stderr, "  Exec ID:    %s\n", execID)
+	_, _ = fmt.Fprintf(stderr, "  Container:  %s\n", containerName)
+	_, _ = fmt.Fprintf(stderr, "  Attach:     docker exec -it --user agbox %s bash\n", containerName)
+	_, _ = fmt.Fprintf(stderr, "  Stdout log: %s\n", createExecResp.GetStdoutLogPath())
+	_, _ = fmt.Fprintf(stderr, "  Stderr log: %s\n", createExecResp.GetStderrLogPath())
+
+	// stdout: only sandbox_id for programmatic consumption.
+	_, _ = fmt.Fprintln(stdout, sandboxID)
+
+	// If already terminal (e.g., instant failure), report and exit.
+	if isTerminalExecState(baseline.GetState()) {
+		return longRunningExecResult(stderr, baseline)
+	}
+
+	_, _ = fmt.Fprintf(stderr, "\nWaiting for exec to complete...\n")
+
+	// Subscribe to sandbox events to watch for exec completion.
+	stream, err := client.SubscribeSandboxEvents(ctx, baseline.GetSandboxId(), baseline.GetLastEventSequence(), false)
+	if err != nil {
+		return runtimeErrorf("subscribe sandbox events: %v", err)
+	}
+	defer stream.Close()
+
+	eventCh := make(chan execEventResult, 1)
+	go pumpExecEvents(stream, eventCh)
+
+	for {
+		select {
+		case <-sigintCh:
+			// Detach: leave sandbox and exec running, exit with signal code.
+			return exitCodeError(130)
+		case <-sigtermCh:
+			return exitCodeError(143)
+		case result, ok := <-eventCh:
+			if !ok {
+				return runtimeErrorf("exec event stream closed; check result with: agbox exec get %s", execID)
+			}
+			if result.err != nil {
+				return runtimeErrorf("wait exec events: %v", result.err)
+			}
+			currentResp, err := client.GetExec(ctx, execID)
+			if err != nil {
+				return runtimeErrorf("get exec: %v", err)
+			}
+			current, err := requireExecStatus(currentResp, execID)
+			if err != nil {
+				return runtimeErrorf("get exec: %v", err)
+			}
+			if isTerminalExecState(current.GetState()) {
+				return longRunningExecResult(stderr, current)
+			}
+		case <-ctx.Done():
+			return runtimeErrorf("wait exec: %v", ctx.Err())
+		}
+	}
+}
+
+// longRunningExecResult prints the terminal exec result to stderr and returns
+// an appropriate exit code error.
+func longRunningExecResult(stderr io.Writer, status *agboxv1.ExecStatus) error {
+	code := execExitCode(status.GetState(), status.GetExitCode(), 0)
+	switch status.GetState() {
+	case agboxv1.ExecState_EXEC_STATE_FINISHED:
+		_, _ = fmt.Fprintf(stderr, "Exec finished (exit_code=%d).\n", status.GetExitCode())
+	case agboxv1.ExecState_EXEC_STATE_FAILED:
+		_, _ = fmt.Fprintf(stderr, "Exec failed (exit_code=%d).", status.GetExitCode())
+		if status.GetError() != "" {
+			_, _ = fmt.Fprintf(stderr, " Error: %s", status.GetError())
+		}
+		_, _ = fmt.Fprintln(stderr)
+	case agboxv1.ExecState_EXEC_STATE_CANCELLED:
+		_, _ = fmt.Fprintf(stderr, "Exec cancelled.\n")
+	}
+	if code == 0 {
+		return nil
+	}
+	return exitCodeError(code)
 }
 
 // exitCodeFromCmdErr converts an exec.ExitError to an exitCodeError, preferring

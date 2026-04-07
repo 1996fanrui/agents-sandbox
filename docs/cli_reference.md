@@ -72,29 +72,35 @@ agbox exec list [sandbox_id] [--json]
 
 ## Agent Command
 
-Provides an out-of-the-box workflow: create a sandbox, copy the project directory, attach an interactive TTY session, and automatically clean up the sandbox on exit. Two mutually exclusive modes:
+Provides an out-of-the-box workflow: create a sandbox, optionally copy the project directory, run an agent, and manage the sandbox lifecycle. Supports two session modes:
+
+- **Interactive** (default): Attaches an interactive TTY session. The sandbox is deleted on exit. Requires a real terminal.
+- **Long-running** (`--mode long-running`): Submits the agent command via `CreateExec` and waits for completion. The CLI can detach (Ctrl+C) without affecting the sandbox. The sandbox must be managed manually via `agbox sandbox stop/delete`.
 
 ```bash
 # Use a registered agent type (resolves command + default builtin tools)
 agbox agent claude
 # Registered agent type with custom workspace
 agbox agent codex --workspace /path/to/project
-# Custom command with explicit builtin tools (equivalent to registered types but fully customizable)
+# Long-running mode
+agbox agent claude --mode long-running
+# Custom command with explicit builtin tools
 agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool claude --builtin-tool git --builtin-tool uv --builtin-tool npm
-# Any interactive CLI tool can be used as a custom command
-agbox agent --command "my-coding-agent --auto" --builtin-tool git --builtin-tool uv
+# Long-running custom command (stdout emits sandbox_id for scripting)
+SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--command <cmd>` | Custom command (mutually exclusive with agent type) |
-| `--workspace <path>` | Directory to copy into sandbox as workspace (default: cwd) |
+| `--mode <mode>` | Session mode: `interactive` or `long-running` (default depends on agent type) |
+| `--workspace <path>` | Directory to copy into sandbox as workspace. Registered agent types (claude, codex) default to cwd; custom `--command` does not copy unless `--workspace` is explicitly provided. |
 | `--builtin-tool <name>` | Builtin tool to install (repeatable; overrides defaults when specified) |
 
 **Workspace safety checks:**
 
 - `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
-- When the workspace directory does not contain a top-level `.git` entry, an interactive confirmation prompt is displayed before proceeding.
+- In interactive mode, when a registered agent type's workspace directory does not contain a top-level `.git` entry, a confirmation prompt is displayed. In long-running mode, the confirmation is skipped.
 
 ## Exit Codes
 
