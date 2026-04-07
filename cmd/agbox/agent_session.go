@@ -33,21 +33,40 @@ const (
 	agentSessionIdleTTL = 10 * 24 * time.Hour
 )
 
+// agentMode describes how the CLI manages a sandbox session.
+type agentMode string
+
+const (
+	// agentModeInteractive attaches an interactive TTY to the agent process.
+	agentModeInteractive agentMode = "interactive"
+	// agentModeLongRunning starts the agent without a TTY and keeps the sandbox alive.
+	agentModeLongRunning agentMode = "long-running"
+)
+
 // agentTypeDef defines the container-internal command and the builtin tools for an agent type.
 type agentTypeDef struct {
-	command      []string
-	builtinTools []string
+	mode          agentMode
+	command       []string
+	builtinTools  []string
+	copyWorkspace bool
+	confirmGit    bool
 }
 
 // agentTypeDefs maps agent type names to their full definitions.
 var agentTypeDefs = map[string]agentTypeDef{
 	"claude": {
-		command:      []string{"claude", "--dangerously-skip-permissions"},
-		builtinTools: []string{"claude", "git", "uv", "npm", "apt"},
+		mode:          agentModeInteractive,
+		command:       []string{"claude", "--dangerously-skip-permissions"},
+		builtinTools:  []string{"claude", "git", "uv", "npm", "apt"},
+		copyWorkspace: true,
+		confirmGit:    true,
 	},
 	"codex": {
-		command:      []string{"codex", "--dangerously-bypass-approvals-and-sandbox"},
-		builtinTools: []string{"codex", "git", "uv", "npm", "apt"},
+		mode:          agentModeInteractive,
+		command:       []string{"codex", "--dangerously-bypass-approvals-and-sandbox"},
+		builtinTools:  []string{"codex", "git", "uv", "npm", "apt"},
+		copyWorkspace: true,
+		confirmGit:    true,
 	},
 }
 

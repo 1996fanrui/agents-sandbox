@@ -23,7 +23,7 @@ func realTempDir(t *testing.T) string {
 
 func TestResolveAgentSessionArgs_RegisteredType(t *testing.T) {
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs("claude", "", tmpDir, nil, false)
+	parsed, err := resolveAgentSessionArgs("claude", "", "", false, tmpDir, true, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestResolveAgentSessionArgs_RegisteredType(t *testing.T) {
 
 func TestResolveAgentSessionArgs_RegisteredTypeOverrideBuiltinTools(t *testing.T) {
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs("claude", "", tmpDir, []string{"git"}, true)
+	parsed, err := resolveAgentSessionArgs("claude", "", "", false, tmpDir, true, []string{"git"}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestResolveAgentSessionArgs_RegisteredTypeOverrideBuiltinTools(t *testing.T
 
 func TestResolveAgentSessionArgs_CustomCommand(t *testing.T) {
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs("", "aider --yes", tmpDir, nil, false)
+	parsed, err := resolveAgentSessionArgs("", "aider --yes", "", false, tmpDir, true, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestResolveAgentSessionArgs_CustomCommand(t *testing.T) {
 
 func TestResolveAgentSessionArgs_CustomCommandWithBuiltinTools(t *testing.T) {
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs("", "aider", tmpDir, []string{"git", "uv"}, true)
+	parsed, err := resolveAgentSessionArgs("", "aider", "", false, tmpDir, true, []string{"git", "uv"}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestResolveAgentSessionArgs_CustomCommandWithBuiltinTools(t *testing.T) {
 }
 
 func TestResolveAgentSessionArgs_MutualExclusion(t *testing.T) {
-	_, err := resolveAgentSessionArgs("claude", "aider", "/work", nil, false)
+	_, err := resolveAgentSessionArgs("claude", "aider", "", false, "/work", true, nil, false)
 	if err == nil {
 		t.Fatal("expected error for agent type + --command")
 	}
@@ -91,7 +91,7 @@ func TestResolveAgentSessionArgs_MutualExclusion(t *testing.T) {
 }
 
 func TestResolveAgentSessionArgs_NeitherTypeNorCommand(t *testing.T) {
-	_, err := resolveAgentSessionArgs("", "", "/work", nil, false)
+	_, err := resolveAgentSessionArgs("", "", "", false, "/work", true, nil, false)
 	if err == nil {
 		t.Fatal("expected error when neither agent type nor --command is given")
 	}
@@ -101,7 +101,7 @@ func TestResolveAgentSessionArgs_NeitherTypeNorCommand(t *testing.T) {
 }
 
 func TestResolveAgentSessionArgs_UnknownType(t *testing.T) {
-	_, err := resolveAgentSessionArgs("nonexistent", "", "/work", nil, false)
+	_, err := resolveAgentSessionArgs("nonexistent", "", "", false, "/work", true, nil, false)
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
@@ -111,7 +111,7 @@ func TestResolveAgentSessionArgs_UnknownType(t *testing.T) {
 }
 
 func TestResolveAgentSessionArgs_EmptyCommand(t *testing.T) {
-	_, err := resolveAgentSessionArgs("", "  ", "/work", nil, false)
+	_, err := resolveAgentSessionArgs("", "  ", "", false, "/work", true, nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty --command")
 	}
@@ -124,7 +124,7 @@ func TestResolveAgentSessionArgs_DuplicateAgentType(t *testing.T) {
 	tmpDir := realTempDir(t)
 	// With cobra, duplicate positional args are prevented by cobra.MaximumNArgs(1).
 	// Here we test resolveAgentSessionArgs directly with a registered agent type.
-	parsed, err := resolveAgentSessionArgs("claude", "", tmpDir, nil, false)
+	parsed, err := resolveAgentSessionArgs("claude", "", "", false, tmpDir, true, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestResolveAgentSessionArgs_DuplicateAgentType(t *testing.T) {
 }
 
 func TestResolveAgentSessionArgs_RejectRoot(t *testing.T) {
-	_, err := resolveAgentSessionArgs("claude", "", "/", nil, false)
+	_, err := resolveAgentSessionArgs("claude", "", "", false, "/", true, nil, false)
 	if err == nil {
 		t.Fatal("expected error for root workspace")
 	}
@@ -148,12 +148,123 @@ func TestResolveAgentSessionArgs_RejectHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get home dir: %v", err)
 	}
-	_, err = resolveAgentSessionArgs("claude", "", home, nil, false)
+	_, err = resolveAgentSessionArgs("claude", "", "", false, home, true, nil, false)
 	if err == nil {
 		t.Fatal("expected error for home directory workspace")
 	}
 	if !strings.Contains(err.Error(), "home directory") {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestResolveAgentSessionArgs_Mode(t *testing.T) {
+	tmpDir := realTempDir(t)
+
+	t.Run("claude_default_interactive", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("claude", "", "", false, tmpDir, true, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.mode != agentModeInteractive {
+			t.Fatalf("expected mode=interactive, got %q", parsed.mode)
+		}
+	})
+
+	t.Run("claude_override_long_running", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("claude", "", "long-running", true, tmpDir, true, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.mode != agentModeLongRunning {
+			t.Fatalf("expected mode=long-running, got %q", parsed.mode)
+		}
+	})
+
+	t.Run("command_default_interactive", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("", "sleep infinity", "", false, tmpDir, true, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.mode != agentModeInteractive {
+			t.Fatalf("expected mode=interactive, got %q", parsed.mode)
+		}
+	})
+
+	t.Run("command_override_long_running", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs("", "sleep infinity", "long-running", true, tmpDir, true, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.mode != agentModeLongRunning {
+			t.Fatalf("expected mode=long-running, got %q", parsed.mode)
+		}
+	})
+
+	t.Run("invalid_mode", func(t *testing.T) {
+		_, err := resolveAgentSessionArgs("claude", "", "invalid", true, tmpDir, true, nil, false)
+		if err == nil {
+			t.Fatal("expected error for invalid mode")
+		}
+		if !strings.Contains(err.Error(), "--mode must be") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+}
+
+func TestResolveAgentSessionArgs_ModeOverride(t *testing.T) {
+	tmpDir := realTempDir(t)
+	parsed, err := resolveAgentSessionArgs("claude", "", "long-running", true, tmpDir, true, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.mode != agentModeLongRunning {
+		t.Fatalf("expected mode=long-running, got %q", parsed.mode)
+	}
+}
+
+func TestResolveAgentSessionArgs_WorkspaceCopy(t *testing.T) {
+	t.Run("claude_default_workspace_is_cwd", func(t *testing.T) {
+		// When no --workspace is given, registered type with copyWorkspace=true fills cwd.
+		parsed, err := resolveAgentSessionArgs("claude", "", "", false, "", false, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.workspace == "" {
+			t.Fatal("expected non-empty workspace for claude without --workspace")
+		}
+	})
+
+	t.Run("command_no_workspace", func(t *testing.T) {
+		// Custom --command without --workspace: workspace stays empty.
+		parsed, err := resolveAgentSessionArgs("", "sleep infinity", "", false, "", false, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.workspace != "" {
+			t.Fatalf("expected empty workspace for custom command, got %q", parsed.workspace)
+		}
+	})
+
+	t.Run("command_with_explicit_workspace", func(t *testing.T) {
+		tmpDir := realTempDir(t)
+		parsed, err := resolveAgentSessionArgs("", "sleep infinity", "", false, tmpDir, true, nil, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.workspace != tmpDir {
+			t.Fatalf("expected workspace=%s, got %q", tmpDir, parsed.workspace)
+		}
+	})
+}
+
+func TestResolveAgentSessionArgs_WorkspaceExplicit(t *testing.T) {
+	tmpDir := realTempDir(t)
+	parsed, err := resolveAgentSessionArgs("", "sleep infinity", "", false, tmpDir, true, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.workspace != tmpDir {
+		t.Fatalf("expected workspace=%s, got %q", tmpDir, parsed.workspace)
 	}
 }
 
