@@ -16,6 +16,10 @@ type agentSessionArgs struct {
 	mode         agentMode // resolved session mode
 	workspace    string    // host directory to copy; empty means "don't copy"
 	builtinTools []string
+	sandboxID    string                                       // custom sandbox ID (empty = daemon generates)
+	configYaml   string                                       // embedded YAML config
+	phases       []execPhase                                  // multi-phase startup (non-empty replaces command)
+	readyMessage func(sandboxID, containerName string) string // custom ready message
 }
 
 // registeredAgentNames returns the sorted list of pre-registered agent type names.
@@ -164,6 +168,19 @@ func resolveAgentSessionArgs(
 		parsed.workspace = resolved
 	}
 	// else: custom --command without --workspace → parsed.workspace stays "".
+
+	// Sandbox ID resolution: use the type's generator if defined.
+	if isRegistered && typeDef.sandboxIDGen != nil {
+		parsed.sandboxID = typeDef.sandboxIDGen()
+	}
+	// else: parsed.sandboxID stays empty, daemon auto-generates.
+
+	// Populate agent-type-specific fields.
+	if isRegistered {
+		parsed.configYaml = typeDef.configYaml
+		parsed.phases = typeDef.phases
+		parsed.readyMessage = typeDef.readyMessage
+	}
 
 	return parsed, nil
 }
