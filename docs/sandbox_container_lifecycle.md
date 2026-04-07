@@ -15,6 +15,15 @@ This document describes the runtime lifecycle contract owned by `agents-sandbox`
 
 Docker object labels use the reverse-DNS namespace `io.github.1996fanrui.agents-sandbox.*`. User-defined sandbox labels are propagated with the prefix `io.github.1996fanrui.agents-sandbox.user.<key>`. Historical `sandbox_id` and `exec_id` values are reserved in a persistent registry before accepting create operations, preventing accidental ID reuse after daemon restart.
 
+## CLI Agent Modes
+
+The `agbox agent` command supports two modes:
+
+- **Interactive** (`--mode interactive`, default): Attaches a TTY to the agent process. The CLI deletes the sandbox on exit. Uses `idle_ttl=10d` as a safety net.
+- **Long-running** (`--mode long-running`): Submits the agent command via `CreateExec` and waits for completion. The CLI can detach (Ctrl+C) without affecting the sandbox. Uses `idle_ttl=0` (disable idle stop). The sandbox must be managed manually via `agbox sandbox stop/delete`.
+
+In long-running mode, if sandbox setup or exec creation fails before delivery, the sandbox is automatically cleaned up.
+
 ## Lifecycle States
 
 ```mermaid
