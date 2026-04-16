@@ -632,8 +632,15 @@ type CompanionContainerSpec struct {
 	Envs               map[string]string      `protobuf:"bytes,3,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Healthcheck        *HealthcheckConfig     `protobuf:"bytes,4,opt,name=healthcheck,proto3" json:"healthcheck,omitempty"`
 	PostStartOnPrimary []string               `protobuf:"bytes,5,rep,name=post_start_on_primary,json=postStartOnPrimary,proto3" json:"post_start_on_primary,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Overrides Docker Cmd for the companion container. When unset, the image's
+	// built-in CMD applies.
+	// Must be long-lived / long-running — process exit => container exit =>
+	// sandbox unusable until restart.
+	// entrypoint is intentionally not exposed to preserve the image
+	// entrypoint.sh UID/GID + gosu drop-privilege behavior.
+	Command       []string `protobuf:"bytes,6,rep,name=command,proto3" json:"command,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CompanionContainerSpec) Reset() {
@@ -701,6 +708,13 @@ func (x *CompanionContainerSpec) GetPostStartOnPrimary() []string {
 	return nil
 }
 
+func (x *CompanionContainerSpec) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
 type CreateSpec struct {
 	state               protoimpl.MessageState    `protogen:"open.v1"`
 	Image               string                    `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
@@ -711,8 +725,15 @@ type CreateSpec struct {
 	Labels              map[string]string         `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Envs                map[string]string         `protobuf:"bytes,7,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
-	IdleTtl       *durationpb.Duration `protobuf:"bytes,8,opt,name=idle_ttl,json=idleTtl,proto3" json:"idle_ttl,omitempty"`
-	Ports         []*PortMapping       `protobuf:"bytes,9,rep,name=ports,proto3" json:"ports,omitempty"`
+	IdleTtl *durationpb.Duration `protobuf:"bytes,8,opt,name=idle_ttl,json=idleTtl,proto3" json:"idle_ttl,omitempty"`
+	Ports   []*PortMapping       `protobuf:"bytes,9,rep,name=ports,proto3" json:"ports,omitempty"`
+	// Overrides Docker Cmd for the primary container. When unset, the daemon
+	// uses its built-in sleep-loop default.
+	// Must be long-lived / long-running — process exit => container exit =>
+	// sandbox unusable until restart.
+	// entrypoint is intentionally not exposed to preserve the image
+	// entrypoint.sh UID/GID + gosu drop-privilege behavior.
+	Command       []string `protobuf:"bytes,10,rep,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -806,6 +827,13 @@ func (x *CreateSpec) GetIdleTtl() *durationpb.Duration {
 func (x *CreateSpec) GetPorts() []*PortMapping {
 	if x != nil {
 		return x.Ports
+	}
+	return nil
+}
+
+func (x *CreateSpec) GetCommand() []string {
+	if x != nil {
+		return x.Command
 	}
 	return nil
 }
@@ -2403,16 +2431,17 @@ const file_service_proto_rawDesc = "" +
 	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x18\n" +
 	"\aretries\x18\x04 \x01(\rR\aretries\x12<\n" +
 	"\fstart_period\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\vstartPeriod\x12@\n" +
-	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\xad\x02\n" +
+	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\xc7\x02\n" +
 	"\x16CompanionContainerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12>\n" +
 	"\x04envs\x18\x03 \x03(\v2*.agbox.v1.CompanionContainerSpec.EnvsEntryR\x04envs\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
-	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\x1a7\n" +
+	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\x12\x18\n" +
+	"\acommand\x18\x06 \x03(\tR\acommand\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xba\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd4\x04\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
@@ -2423,7 +2452,9 @@ const file_service_proto_rawDesc = "" +
 	"\x06labels\x18\x06 \x03(\v2 .agbox.v1.CreateSpec.LabelsEntryR\x06labels\x122\n" +
 	"\x04envs\x18\a \x03(\v2\x1e.agbox.v1.CreateSpec.EnvsEntryR\x04envs\x124\n" +
 	"\bidle_ttl\x18\b \x01(\v2\x19.google.protobuf.DurationR\aidleTtl\x12+\n" +
-	"\x05ports\x18\t \x03(\v2\x15.agbox.v1.PortMappingR\x05ports\x1a9\n" +
+	"\x05ports\x18\t \x03(\v2\x15.agbox.v1.PortMappingR\x05ports\x12\x18\n" +
+	"\acommand\x18\n" +
+	" \x03(\tR\acommand\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a7\n" +

@@ -463,6 +463,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"envs",
 				"idle_ttl",
 				"ports",
+				"command",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"image":                1,
@@ -474,6 +475,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"envs":                 7,
 				"idle_ttl":             8,
 				"ports":                9,
+				"command":              10,
 			},
 		},
 		{

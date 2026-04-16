@@ -105,6 +105,13 @@ message CompanionContainerSpec {
   map<string, string> envs = 3;
   HealthcheckConfig healthcheck = 4;
   repeated string post_start_on_primary = 5;
+  // Overrides Docker Cmd for the companion container. When unset, the image's
+  // built-in CMD applies.
+  // Must be long-lived / long-running — process exit => container exit =>
+  // sandbox unusable until restart.
+  // entrypoint is intentionally not exposed to preserve the image
+  // entrypoint.sh UID/GID + gosu drop-privilege behavior.
+  repeated string command = 6;
 }
 
 message CreateSpec {
@@ -118,6 +125,13 @@ message CreateSpec {
   // Per-sandbox idle TTL override. nil = use global daemon default; Duration(0) = disable idle stop.
   google.protobuf.Duration idle_ttl = 8;
   repeated PortMapping ports = 9;
+  // Overrides Docker Cmd for the primary container. When unset, the daemon
+  // uses its built-in sleep-loop default.
+  // Must be long-lived / long-running — process exit => container exit =>
+  // sandbox unusable until restart.
+  // entrypoint is intentionally not exposed to preserve the image
+  // entrypoint.sh UID/GID + gosu drop-privilege behavior.
+  repeated string command = 10;
 }
 
 message SandboxHandle {

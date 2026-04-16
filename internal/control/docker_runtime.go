@@ -263,6 +263,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	for k, v := range record.createSpec.GetEnvs() {
 		primaryEnv[k] = v
 	}
+	primaryCommand := primaryContainerCommand(record.createSpec.GetCommand())
 	if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
 		Name:        state.PrimaryContainerName,
 		Image:       record.createSpec.GetImage(),
@@ -272,11 +273,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		Ports:       portMappings,
 		Environment: primaryEnv,
 		Workdir:     "/workspace",
-		Command: []string{
-			"sh",
-			"-lc",
-			"trap 'exit 0' TERM INT; while sleep 3600; do :; done",
-		},
+		Command:     primaryCommand,
 	}); err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -331,6 +328,21 @@ func (backend *dockerRuntimeBackend) ResumeSandbox(ctx context.Context, record *
 	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
 
+// primaryContainerCommand returns the Docker Cmd argv for the primary
+// container. If the CreateSpec supplies a command, it is used verbatim;
+// otherwise the daemon's built-in sleep-loop default is returned to keep
+// pre-issue-170 behavior unchanged.
+func primaryContainerCommand(specCommand []string) []string {
+	if len(specCommand) > 0 {
+		return append([]string(nil), specCommand...)
+	}
+	return []string{
+		"sh",
+		"-lc",
+		"trap 'exit 0' TERM INT; while sleep 3600; do :; done",
+	}
+}
+
 func startCompanionContainersAsync(
 	ctx context.Context,
 	sandboxID string,
@@ -360,6 +372,8 @@ func startCompanionContainersAsync(
 				Labels:       runtimedocker.CompanionContainerLabels(sandboxID, cc.GetName(), userLabels),
 				Environment:  cc.GetEnvs(),
 				Healthcheck:  cc.GetHealthcheck(),
+				// nil/empty passes nil to Docker so the image CMD applies.
+				Command: cc.GetCommand(),
 			}); err != nil {
 				status.Ready = false
 				status.Message = err.Error()
