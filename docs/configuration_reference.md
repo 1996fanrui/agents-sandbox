@@ -51,6 +51,8 @@ The northbound API may override only a narrow subset of behavior:
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `companion_containers` | Yes | Each sandbox declares companion containers started concurrently with the primary container |
+| `command` (primary) | Yes | Optional override of primary container CMD; defaults to daemon sleep-loop when omitted. Must be a long-lived process — see [Primary container command](#primary-container-command). |
+| `companion_containers.<name>.command` | Yes | Optional override of a companion container CMD; defaults to the image's built-in `CMD` when omitted. Must be a long-lived process with the same exit semantics as the primary `command`. |
 | `ports` | Yes | Each sandbox may expose container ports to the host via Docker port publishing (`-p`). Each entry specifies `container_port`, `host_port`, and `protocol` (tcp/udp/sctp). |
 | `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
@@ -74,3 +76,36 @@ In practice, the host-managed safe default is the same platform-derived runtime 
 - host lock path: `$XDG_RUNTIME_DIR/agbox/agboxd.lock` on Linux
 
 With that layout, accidental duplicate daemons in the same user runtime contend on the same lock file and the later daemon fails before it can mutate the shared socket or Docker-managed runtime state.
+
+## Primary container command
+
+The optional top-level `command` field on a sandbox request overrides the primary container's Docker `Cmd`. It maps 1:1 onto `CreateSpec.command` in the RPC contract and onto Docker's `container.Config.Cmd` on the runtime side.
+
+```yaml
+image: my-image:latest
+command: ["myworker", "serve", "--foreground"]
+```
+
+**Default when omitted.** If `command` is not set, the daemon falls back to its built-in sleep-loop (`sh -lc "trap 'exit 0' TERM INT; while sleep 3600; do :; done"`). Existing sandboxes that never set `command` keep this sleep-loop behavior, so omitting the field is the zero-variance path.
+
+**Long-lived constraint.** A user-supplied `command` must be a long-lived / long-running foreground process. Docker treats the main process as the container lifetime anchor: process exit → container exit → sandbox unusable until restart. Short-lived commands (e.g. `echo hi`, one-shot scripts) cause the primary container to exit almost immediately, which in turn makes the sandbox unusable for further `CreateExec` calls. Users who want the legacy always-ready behavior should simply omit `command`.
+
+**Validation.** `command: []` (explicit empty array) and any empty string entry (e.g. `command: ["foo", ""]`) are rejected at the YAML parse layer and at the SDK entrypoints. proto3 cannot distinguish an omitted `repeated string` from an explicitly empty one, so the daemon's `validateCreateSpec` enforces the empty-string-element check only; the empty-array check is the responsibility of the YAML layer and the SDKs.
+
+**Interaction with `entrypoint.sh`.** The image `ENTRYPOINT` is intentionally not user-configurable. The image's `entrypoint.sh` remains the container entrypoint and is still responsible for UID/GID setup plus the final `exec gosu "$HOST_UID:$HOST_GID" "$@"` drop-privilege step. `command` supplies the argv that `entrypoint.sh` execs into; the first token must be an executable available inside the image. `entrypoint` itself is not exposed on the RPC or YAML surface — overriding it would bypass the UID/GID + gosu contract that the runtime image relies on.
+
+### Companion container command
+
+The same field exists as `companion_containers.<name>.command` and carries identical semantics for companion containers:
+
+```yaml
+companion_containers:
+  worker:
+    image: my-worker:latest
+    command: ["my-worker", "--foreground"]
+```
+
+- When `command` is omitted on a companion, the daemon does not send `Cmd` to Docker and the image's built-in `CMD` applies — this matches the prior default behavior.
+- When set, it must be a long-lived process for the same reason as the primary container: the companion's main process is still the container lifetime anchor.
+- Validation (empty array / empty string entries) follows the same layering; error messages include the companion name for locatability.
+- The companion image's own `ENTRYPOINT` is preserved; as with the primary container, `entrypoint` is intentionally not exposed.
