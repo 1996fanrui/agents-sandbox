@@ -67,6 +67,8 @@ companion_containers:
 | `envs` | `CreateSpec.envs` | map of string | Env vars on primary container, inherited by all execs |
 | `ports` | `CreateSpec.ports` | list of PortMapping | Port mappings to publish container ports to the host (localhost only) |
 | `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
+| `command` | `CreateSpec.command` | list of string | Optional override of the primary container's Docker `Cmd`. Omit to keep the daemon's sleep-loop default. Must be a long-lived process; `command: []` and empty-string entries are rejected. See [Configuration Reference: Primary container command](configuration_reference.md#primary-container-command). |
+| `companion_containers.<name>.command` | `CompanionContainerSpec.command` | list of string | Optional override of a companion container's Docker `Cmd`. Omit to keep the image's built-in `CMD`. Same long-lived constraint and validation as the primary `command`. |
 
 ### CopySpec Fields
 

@@ -24,6 +24,12 @@ The `agbox agent` command supports two modes:
 
 In long-running mode, if sandbox setup or exec creation fails before delivery, the sandbox is automatically cleaned up.
 
+## Primary Container Main Process
+
+The primary container is launched with `HostConfig.Init: true`, so Docker injects `docker-init` (tini) as the literal PID 1 inside the container. tini `exec`s the image `ENTRYPOINT` plus `CMD` argv, which means the image's `entrypoint.sh` runs as tini's immediate child and performs UID/GID setup before `exec gosu "$HOST_UID:$HOST_GID" "$@"`. The final `exec` replaces the shell with the user command (the `command` field from the sandbox request, or the daemon's built-in sleep-loop default when `command` is omitted), and that user process becomes the container's main process under tini.
+
+Docker's lifetime rule still applies: when the container's main process exits, the container exits (tini propagates the child exit code to Docker). Callers that set `command` must therefore supply a long-lived / long-running process — a short-lived command makes the primary container exit immediately and leaves the sandbox unusable until it is restarted. See [Configuration Reference: Primary container command](configuration_reference.md#primary-container-command) for the full contract.
+
 ## Lifecycle States
 
 ```mermaid
