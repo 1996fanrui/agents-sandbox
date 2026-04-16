@@ -130,6 +130,7 @@ flowchart LR
 - Cleanup uses structured Docker Engine API calls with idempotent not-found handling.
 - STOPPED sandboxes that have exceeded `runtime.cleanup_ttl` are automatically deleted by the `cleanupLoop`: Docker resources are removed and the sandbox record is purged from the database.
 - After `SANDBOX_DELETED`, the daemon retains the event stream for `runtime.cleanup_ttl` before removing retained history.
+- Containers are created with Docker `RestartPolicy=unless-stopped`, so previously-running sandboxes come back automatically after a host or Docker daemon restart, while sandboxes stopped via `agbox sandbox stop` remain stopped until `ResumeSandbox`.
 
 ## Reconciliation
 

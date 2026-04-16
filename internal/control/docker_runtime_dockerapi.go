@@ -163,6 +163,11 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		// This is a DNS-layer best-effort control; Linux host isolation is
 		// enforced separately via nftables on the sandbox network.
 		ExtraHosts: append([]string(nil), macOSBlockedHostAliases...),
+		// Auto-recover containers after host reboot or Docker daemon restart.
+		// Explicit `docker stop` (e.g. via agbox sandbox stop) is still honored:
+		// "unless-stopped" only skips restart for containers that were in the
+		// stopped state, so stopped sandboxes stay stopped across reboots.
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {
