@@ -108,6 +108,16 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 	if err := validateCompanionContainerSpecs(spec.GetCompanionContainers(), seenNames); err != nil {
 		return err
 	}
+	// Reject empty-string tokens in the primary command. An empty array is
+	// intentionally accepted here because proto3 cannot distinguish "omit" from
+	// "explicit []" on repeated fields; the YAML/SDK entry layers own that
+	// check (see design doc section "presence semantics and validation layer
+	// ownership").
+	for i, token := range spec.GetCommand() {
+		if token == "" {
+			return fmt.Errorf("command[%d]: empty string entry is not allowed", i)
+		}
+	}
 	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinTools()))
 	for _, builtin := range spec.GetBuiltinTools() {
 		if builtin == "" {
@@ -141,6 +151,14 @@ func validateCompanionContainerSpecs(items []*agboxv1.CompanionContainerSpec, se
 		}
 		if err := validateHealthcheck(cc.GetName(), cc.GetHealthcheck()); err != nil {
 			return err
+		}
+		// Same empty-string-token rule as the primary command; empty array
+		// semantics remain a YAML/SDK responsibility because proto3 cannot
+		// distinguish omit from [] here.
+		for i, token := range cc.GetCommand() {
+			if token == "" {
+				return fmt.Errorf("companion_containers[%s].command[%d]: empty string entry is not allowed", cc.GetName(), i)
+			}
 		}
 	}
 	return nil

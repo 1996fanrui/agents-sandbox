@@ -1,6 +1,8 @@
 package control
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -599,5 +601,166 @@ func TestMergeCreateSpecs(t *testing.T) {
 			result := mergeCreateSpecs(tc.base, tc.override)
 			tc.check(t, result)
 		})
+	}
+}
+
+func TestYAMLParsePrimaryCommand(t *testing.T) {
+	raw := []byte(`
+image: "ghcr.io/agents-sandbox/coding-runtime:test"
+command: ["myworker", "serve", "--foreground"]
+`)
+	cfg, err := parseYAMLConfig(raw)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+	want := []string{"myworker", "serve", "--foreground"}
+	if got := spec.GetCommand(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected primary command: got %#v want %#v", got, want)
+	}
+
+	base := &agboxv1.CreateSpec{
+		Image:   "base",
+		Command: []string{"base-cmd"},
+	}
+	override := &agboxv1.CreateSpec{
+		Command: []string{"override", "serve"},
+	}
+	merged := mergeCreateSpecs(base, override)
+	if got := merged.GetCommand(); !reflect.DeepEqual(got, []string{"override", "serve"}) {
+		t.Fatalf("override should replace base command, got %#v", got)
+	}
+
+	emptyOverride := &agboxv1.CreateSpec{}
+	merged = mergeCreateSpecs(base, emptyOverride)
+	if got := merged.GetCommand(); !reflect.DeepEqual(got, []string{"base-cmd"}) {
+		t.Fatalf("empty override should preserve base command, got %#v", got)
+	}
+}
+
+func TestYAMLParseCompanionCommand(t *testing.T) {
+	raw := []byte(`
+image: "ghcr.io/agents-sandbox/coding-runtime:test"
+companion_containers:
+  cache:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+`)
+	cfg, err := parseYAMLConfig(raw)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+	cc := spec.GetCompanionContainers()
+	if len(cc) != 1 {
+		t.Fatalf("expected 1 companion container, got %d", len(cc))
+	}
+	want := []string{"redis-server", "--appendonly", "yes"}
+	if got := cc[0].GetCommand(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected companion command: got %#v want %#v", got, want)
+	}
+}
+
+func TestYAMLRejectsEmptyCommandArray(t *testing.T) {
+	primaryYAML := []byte(`
+image: "img:test"
+command: []
+`)
+	cfg, err := parseYAMLConfig(primaryYAML)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	_, err = yamlConfigToCreateSpec(cfg)
+	if err == nil {
+		t.Fatal("expected error for primary command: []")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "empty array") || !strings.Contains(msg, "command") {
+		t.Fatalf("primary error should mention 'empty array' and 'command', got %q", msg)
+	}
+
+	companionYAML := []byte(`
+image: "img:test"
+companion_containers:
+  cache:
+    image: redis:7
+    command: []
+`)
+	cfg, err = parseYAMLConfig(companionYAML)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	_, err = yamlConfigToCreateSpec(cfg)
+	if err == nil {
+		t.Fatal("expected error for companion command: []")
+	}
+	msg = err.Error()
+	if !strings.Contains(msg, "empty array") || !strings.Contains(msg, "command") {
+		t.Fatalf("companion error should mention 'empty array' and 'command', got %q", msg)
+	}
+	if !strings.Contains(msg, "cache") {
+		t.Fatalf("companion error should include companion name 'cache', got %q", msg)
+	}
+}
+
+func TestYAMLRejectsEmptyStringInPrimaryCommand(t *testing.T) {
+	raw := []byte(`
+image: "img:test"
+command: ["foo", ""]
+`)
+	cfg, err := parseYAMLConfig(raw)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	_, err = yamlConfigToCreateSpec(cfg)
+	if err == nil {
+		t.Fatal(`expected error for primary command with empty-string element`)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "command") {
+		t.Fatalf("primary error should mention 'command', got %q", msg)
+	}
+	if !strings.Contains(msg, "[1]") {
+		t.Fatalf("primary error should include offending index '[1]', got %q", msg)
+	}
+	if !strings.Contains(msg, "empty string") {
+		t.Fatalf("primary error should mention 'empty string', got %q", msg)
+	}
+}
+
+func TestYAMLRejectsEmptyStringInCompanionCommand(t *testing.T) {
+	raw := []byte(`
+image: "img:test"
+companion_containers:
+  redis:
+    image: redis:7
+    command: ["redis-server", ""]
+`)
+	cfg, err := parseYAMLConfig(raw)
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	_, err = yamlConfigToCreateSpec(cfg)
+	if err == nil {
+		t.Fatal(`expected error for companion command with empty-string element`)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "command") {
+		t.Fatalf("companion error should mention 'command', got %q", msg)
+	}
+	if !strings.Contains(msg, "redis") {
+		t.Fatalf("companion error should include companion name 'redis', got %q", msg)
+	}
+	if !strings.Contains(msg, "[1]") {
+		t.Fatalf("companion error should include offending index '[1]', got %q", msg)
+	}
+	if !strings.Contains(msg, "empty string") {
+		t.Fatalf("companion error should mention 'empty string', got %q", msg)
 	}
 }

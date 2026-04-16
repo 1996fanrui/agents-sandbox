@@ -27,6 +27,11 @@ type YAMLConfig struct {
 	// IdleTTL is the per-sandbox idle TTL override. Empty = use global daemon
 	// default; "0" = disable idle stop for this sandbox.
 	IdleTTL string `yaml:"idle_ttl"`
+	// Command overrides the primary container's Docker CMD. A pointer type
+	// preserves YAML presence semantics: nil = field omitted (daemon falls
+	// back to the sleep-loop default); non-nil with len == 0 = explicit empty
+	// array (rejected as a misconfiguration).
+	Command *[]string `yaml:"command"`
 }
 
 // YAMLMountSpec describes a bind-mount from host to container.
@@ -56,6 +61,10 @@ type YAMLCompanionContainerSpec struct {
 	Envs               map[string]string      `yaml:"envs"`
 	Healthcheck        *YAMLHealthcheckConfig `yaml:"healthcheck"`
 	PostStartOnPrimary []string               `yaml:"post_start_on_primary"`
+	// Command overrides the companion container's Docker CMD. A pointer type
+	// preserves YAML presence semantics: nil = field omitted (image CMD
+	// applies); non-nil with len == 0 = explicit empty array (rejected).
+	Command *[]string `yaml:"command"`
 }
 
 // YAMLHealthcheckConfig describes the healthcheck for a companion container.
@@ -81,13 +90,39 @@ func parseYAMLConfig(raw []byte) (*YAMLConfig, error) {
 	return &cfg, nil
 }
 
+// validateYAMLCommand enforces YAML-layer command constraints. A nil field
+// means the user omitted the key entirely and is accepted. A non-nil field
+// with len == 0 is an explicit empty array and is rejected because proto3
+// cannot distinguish omit from [] downstream; any element equal to the empty
+// string is also rejected with the offending index reported in the error.
+func validateYAMLCommand(field *[]string, path string) error {
+	if field == nil {
+		return nil
+	}
+	if len(*field) == 0 {
+		return fmt.Errorf("%s: empty array is not allowed; omit the field to use the default", path)
+	}
+	for i, token := range *field {
+		if token == "" {
+			return fmt.Errorf("%s[%d]: empty string entry is not allowed", path, i)
+		}
+	}
+	return nil
+}
+
 // yamlConfigToCreateSpec converts a parsed YAMLConfig into a proto CreateSpec.
 // Map keys for companion containers are sorted alphabetically to produce deterministic output.
 // Returns an error if any duration field in a companion container healthcheck is unparseable.
 func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
+	if err := validateYAMLCommand(cfg.Command, "command"); err != nil {
+		return nil, err
+	}
 	spec := &agboxv1.CreateSpec{
 		Image:        cfg.Image,
 		BuiltinTools: cfg.BuiltinTools,
+	}
+	if cfg.Command != nil {
+		spec.Command = append([]string(nil), (*cfg.Command)...)
 	}
 
 	for _, m := range cfg.Mounts {
@@ -165,10 +200,16 @@ func convertCompanionContainerMap(containers map[string]YAMLCompanionContainerSp
 	result := make([]*agboxv1.CompanionContainerSpec, 0, len(keys))
 	for _, name := range keys {
 		cc := containers[name]
+		if err := validateYAMLCommand(cc.Command, fmt.Sprintf("companion_containers[%s].command", name)); err != nil {
+			return nil, err
+		}
 		protoCC := &agboxv1.CompanionContainerSpec{
 			Name:               name,
 			Image:              cc.Image,
 			PostStartOnPrimary: cc.PostStartOnPrimary,
+		}
+		if cc.Command != nil {
+			protoCC.Command = append([]string(nil), (*cc.Command)...)
 		}
 
 		if len(cc.Envs) > 0 {
@@ -271,6 +312,11 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	}
 	if len(override.GetPorts()) > 0 {
 		result.Ports = clonePortMappings(override.GetPorts())
+	}
+	// command: len > 0 override replaces base entirely. Companion container
+	// commands ride along with the whole-spec replacement above.
+	if len(override.GetCommand()) > 0 {
+		result.Command = append([]string(nil), override.GetCommand()...)
 	}
 
 	// Map: key-level merge — override keys overwrite, base-only keys preserved.
