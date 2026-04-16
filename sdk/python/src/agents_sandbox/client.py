@@ -76,6 +76,23 @@ def _validate_optional_id(field_name: str, value: str | None) -> str | None:
     return value
 
 
+def _validate_command(field_name: str, value: Sequence[str] | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    command_tuple = tuple(value)
+    if len(command_tuple) == 0:
+        raise ValueError(
+            f"{field_name}: empty array is not allowed, "
+            "omit the field to use the default"
+        )
+    for index, element in enumerate(command_tuple):
+        if element == "":
+            raise ValueError(
+                f"{field_name}[{index}]: empty string element is not allowed"
+            )
+    return command_tuple
+
+
 def _normalize_config_yaml(config_yaml: str | bytes | None) -> bytes:
     if config_yaml is None:
         return b""
@@ -131,6 +148,7 @@ class AgentsSandboxClient:
         copies: tuple[CopySpec, ...] = (),
         ports: tuple[PortMapping, ...] = (),
         builtin_tools: tuple[str, ...] = (),
+        command: Sequence[str] | None = None,
         companion_containers: tuple[CompanionContainerSpec, ...] = (),
         labels: Mapping[str, str] | None = None,
         envs: Mapping[str, str] | None = None,
@@ -149,6 +167,8 @@ class AgentsSandboxClient:
         if not resolved_config_yaml and image is None:
             raise ValueError("at least one of 'config_yaml' or 'image' must be provided")
 
+        resolved_command = _validate_command("command", command)
+
         request = CreateSandboxRequest(
             sandbox_id=_validate_optional_id("sandbox_id", sandbox_id),
             create_spec=CreateSandboxSpec(
@@ -157,6 +177,7 @@ class AgentsSandboxClient:
                 copies=copies,
                 ports=ports,
                 builtin_tools=builtin_tools,
+                command=resolved_command,
                 companion_containers=companion_containers,
                 labels={} if labels is None else dict(labels),
                 envs={} if envs is None else dict(envs),

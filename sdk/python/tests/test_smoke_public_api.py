@@ -283,6 +283,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "copies",
         "ports",
         "builtin_tools",
+        "command",
         "companion_containers",
         "labels",
         "envs",

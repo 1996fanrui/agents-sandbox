@@ -141,6 +141,7 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 		Copies:              toProtoCopies(options.copies),
 		Ports:               protoPorts,
 		BuiltinTools:        slicesClone(options.builtinTools),
+		Command:             slicesClone(options.command),
 		CompanionContainers: toProtoCompanionContainers(options.companionContainers),
 		Labels:              cloneStringMap(options.labels),
 		Envs:                cloneStringMap(options.envs),

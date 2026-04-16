@@ -83,6 +83,7 @@ type CompanionContainerSpec struct {
 	Image              string
 	Envs               map[string]string
 	Healthcheck        *HealthcheckConfig
+	Command            []string
 	PostStartOnPrimary []string
 }
 
@@ -363,6 +364,7 @@ func toProtoCompanionContainer(spec CompanionContainerSpec) *agboxv1.CompanionCo
 		Image:              spec.Image,
 		Envs:               cloneStringMap(spec.Envs),
 		Healthcheck:        toProtoHealthcheck(spec.Healthcheck),
+		Command:            slices.Clone(spec.Command),
 		PostStartOnPrimary: slices.Clone(spec.PostStartOnPrimary),
 	}
 }
@@ -401,6 +403,7 @@ func toCompanionContainers(specs []*agboxv1.CompanionContainerSpec) []CompanionC
 			Image:              spec.GetImage(),
 			Envs:               cloneStringMap(spec.GetEnvs()),
 			Healthcheck:        toHealthcheck(spec.GetHealthcheck()),
+			Command:            slices.Clone(spec.GetCommand()),
 			PostStartOnPrimary: slices.Clone(spec.GetPostStartOnPrimary()),
 		})
 	}
