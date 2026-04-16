@@ -16,6 +16,7 @@ class CreateSandboxSpec:
     copies: tuple[CopySpec, ...] = ()
     ports: tuple[PortMapping, ...] = ()
     builtin_tools: tuple[str, ...] = ()
+    command: tuple[str, ...] = ()
     companion_containers: tuple[CompanionContainerSpec, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
     envs: Mapping[str, str] = field(default_factory=dict)

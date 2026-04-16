@@ -70,6 +70,7 @@ type createSandboxOptions struct {
 	copies              []CopySpec
 	ports               []PortMapping
 	builtinTools        []string
+	command             []string
 	companionContainers []CompanionContainerSpec
 	labels              map[string]string
 	envs                map[string]string
@@ -283,6 +284,29 @@ func (o portsOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	return nil
 }
 
+type commandOption []string
+
+// WithCommand sets the primary container command (Docker Cmd).
+// Calling with no arguments is rejected as an empty command array;
+// omit WithCommand entirely to inherit the daemon's default behavior.
+// Empty-string elements are rejected.
+func WithCommand(command ...string) commandOption {
+	return commandOption(slicesClone(command))
+}
+
+func (o commandOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	if len(o) == 0 {
+		return fmt.Errorf("command: empty array is not allowed, omit WithCommand to use the default")
+	}
+	for i, element := range o {
+		if element == "" {
+			return fmt.Errorf("command[%d]: empty string element is not allowed", i)
+		}
+	}
+	opts.command = slicesClone([]string(o))
+	return nil
+}
+
 type builtinToolsOption []string
 
 // WithBuiltinTools sets the built-in tools for sandbox creation.
@@ -303,6 +327,22 @@ func WithCompanionContainers(containers ...CompanionContainerSpec) companionCont
 }
 
 func (o companionContainersOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	for _, companion := range o {
+		if companion.Command != nil && len(companion.Command) == 0 {
+			return fmt.Errorf(
+				"companion_containers[%q].command: empty array is not allowed, omit the field to use the default image CMD",
+				companion.Name,
+			)
+		}
+		for i, element := range companion.Command {
+			if element == "" {
+				return fmt.Errorf(
+					"companion_containers[%q].command[%d]: empty string entry is not allowed",
+					companion.Name, i,
+				)
+			}
+		}
+	}
 	opts.companionContainers = slicesClone([]CompanionContainerSpec(o))
 	return nil
 }

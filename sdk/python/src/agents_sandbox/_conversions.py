@@ -77,6 +77,7 @@ def to_proto_companion_container(spec: CompanionContainerSpec) -> service_pb2.Co
             if spec.healthcheck is None
             else to_proto_healthcheck(spec.healthcheck)
         ),
+        command=[] if spec.command is None else list(spec.command),
         post_start_on_primary=list(spec.post_start_on_primary),
     )
 
@@ -88,6 +89,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
         copies=[to_proto_copy(item) for item in request.create_spec.copies],
         ports=[to_proto_port_mapping(item) for item in request.create_spec.ports],
         builtin_tools=list(request.create_spec.builtin_tools),
+        command=list(request.create_spec.command),
         companion_containers=[to_proto_companion_container(item) for item in request.create_spec.companion_containers],
         labels=dict(request.create_spec.labels),
         envs=dict(request.create_spec.envs),
@@ -166,6 +168,7 @@ def to_companion_container(spec: service_pb2.CompanionContainerSpec) -> Companio
         image=spec.image,
         envs=dict(spec.envs),
         healthcheck=to_healthcheck(spec.healthcheck if spec.HasField("healthcheck") else None),
+        command=tuple(spec.command) if len(spec.command) > 0 else None,
         post_start_on_primary=tuple(spec.post_start_on_primary),
     )
 

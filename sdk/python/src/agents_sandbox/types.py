@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -31,7 +31,29 @@ class CompanionContainerSpec:
     image: str
     envs: Mapping[str, str] = field(default_factory=dict)
     healthcheck: HealthcheckConfig | None = None
+    # ``None`` means "omit the field and inherit the image's built-in CMD".
+    # An explicit empty sequence is rejected; proto3 cannot distinguish "unset"
+    # from "explicitly empty" on repeated fields, so SDK entry layers own that
+    # check (matching the primary ``command`` validation pattern).
+    command: Sequence[str] | None = None
     post_start_on_primary: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.command is not None:
+            command_tuple = tuple(self.command)
+            if len(command_tuple) == 0:
+                raise ValueError(
+                    f"companion_containers[{self.name!r}].command: "
+                    "empty array is not allowed, omit the field to use the "
+                    "default image CMD"
+                )
+            for index, element in enumerate(command_tuple):
+                if element == "":
+                    raise ValueError(
+                        f"companion_containers[{self.name!r}].command[{index}]: "
+                        "empty string entry is not allowed"
+                    )
+            object.__setattr__(self, "command", command_tuple)
 
 
 @dataclass(frozen=True, slots=True)
