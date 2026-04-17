@@ -120,7 +120,9 @@ func TestRestoreReadySandboxContainerExited(t *testing.T) {
 	waitForSandboxState(t, first.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 	first.close()
 
-	// Container exited or missing → should become FAILED.
+	// Container exited (Exists=true, Running=false) → stays READY with notRunningSince set.
+	// With the 5-minute crashloop window, a daemon restart gives the container a fresh grace period;
+	// the sandbox is only declared FAILED after 5 minutes of continuous non-Running state.
 	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
 		PollInterval: 2 * time.Millisecond,
 		runtimeBackend: &scriptedRuntimeBackend{
@@ -132,8 +134,19 @@ func TestRestoreReadySandboxContainerExited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSandbox failed: %v", err)
 	}
-	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
-		t.Fatalf("expected FAILED, got %s", resp.GetSandbox().GetState())
+	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("expected READY (crashloop window pending), got %s", resp.GetSandbox().GetState())
+	}
+	// Verify notRunningSince was set by restorePersistedSandboxes.
+	sandboxID := createResp.GetSandbox().GetSandboxId()
+	second.service.mu.RLock()
+	record := second.service.boxes[sandboxID]
+	hasNotRunningSince := record != nil && record.runtimeState != nil &&
+		record.runtimeState.PrimaryCrashloopState != nil &&
+		record.runtimeState.PrimaryCrashloopState.notRunningSince != nil
+	second.service.mu.RUnlock()
+	if !hasNotRunningSince {
+		t.Fatal("expected PrimaryCrashloopState.notRunningSince to be set after restore with exited container")
 	}
 }
 
@@ -279,7 +292,7 @@ func TestDockerEventPrimaryContainerDie(t *testing.T) {
 
 	eventCh := make(chan ContainerEvent, 10)
 	errCh := make(chan error, 1)
-	backend := fakeRuntimeBackend{
+	backend := &fakeRuntimeBackend{
 		inspectResults: map[string]ContainerInspectResult{},
 		eventCh:        eventCh,
 		errCh:          errCh,
@@ -322,11 +335,14 @@ func TestDockerEventPrimaryContainerDie(t *testing.T) {
 		}
 		return false
 	})
+	// With Stage 2 semantics, handleEvent calls real InspectContainer. Since the fake backend
+	// returns Exists=false for unknown containers, the error code is CONTAINER_NOT_RUNNING
+	// (immediate fail path for missing containers, not the 5-minute crashloop window).
 	var found bool
 	for _, e := range events {
 		if e.GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
-			if eventErrorCode(e) != containerCrashloop {
-				t.Fatalf("expected error_code %s, got %s", containerCrashloop, eventErrorCode(e))
+			if eventErrorCode(e) != containerNotRunning {
+				t.Fatalf("expected error_code %s, got %s", containerNotRunning, eventErrorCode(e))
 			}
 			found = true
 		}
@@ -343,7 +359,7 @@ func TestDockerEventOOM(t *testing.T) {
 
 	eventCh := make(chan ContainerEvent, 10)
 	errCh := make(chan error, 1)
-	backend := fakeRuntimeBackend{
+	backend := &fakeRuntimeBackend{
 		inspectResults: map[string]ContainerInspectResult{},
 		eventCh:        eventCh,
 		errCh:          errCh,
@@ -386,17 +402,21 @@ func TestDockerEventOOM(t *testing.T) {
 		}
 		return false
 	})
+	// With Stage 2 semantics, handleEvent calls real InspectContainer. Since the fake backend
+	// returns Exists=false for unknown containers, the error code is CONTAINER_NOT_RUNNING.
+	// OOM-specific error codes (CONTAINER_OOM) are produced by the 5-minute window path;
+	// see TestReconcile_OOMKilledTriggersOOMErrorCode (AT-EI2G) for that scenario.
 	var found bool
 	for _, e := range events {
 		if e.GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
-			if eventErrorCode(e) != "CONTAINER_OOM" {
-				t.Fatalf("expected error_code CONTAINER_OOM, got %s", eventErrorCode(e))
+			if eventErrorCode(e) != containerNotRunning {
+				t.Fatalf("expected error_code %s, got %s", containerNotRunning, eventErrorCode(e))
 			}
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("expected SANDBOX_FAILED event with OOM error code")
+		t.Fatal("expected SANDBOX_FAILED event")
 	}
 }
 
@@ -409,7 +429,7 @@ func TestDockerEventReconnectReconcile(t *testing.T) {
 	errCh := make(chan error, 10)
 	// Initial inspect returns running so reconcileAll at startup is a no-op.
 	inspectResults := map[string]ContainerInspectResult{}
-	backend := fakeRuntimeBackend{
+	backend := &fakeRuntimeBackend{
 		inspectResults: inspectResults,
 		eventCh:        eventCh,
 		errCh:          errCh,
@@ -427,12 +447,14 @@ func TestDockerEventReconnectReconcile(t *testing.T) {
 	}
 	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
 
-	// Simulate container exited and event stream disconnected.
+	// Simulate container removed (Exists=false) and event stream disconnected.
+	// With the 5-minute window semantics, a missing container (Exists=false) still triggers
+	// an immediate Failed during reconcileAll — the window only applies to existing-but-exited containers.
 	primaryName := "fake-primary-" + createResp.GetSandbox().GetSandboxId()
-	inspectResults[primaryName] = ContainerInspectResult{Exists: true, Running: false}
+	inspectResults[primaryName] = ContainerInspectResult{Exists: false}
 	errCh <- errors.New("connection lost")
 
-	// The watcher will reconnect and reconcileAll will detect the exited container.
+	// The watcher will reconnect and reconcileAll will detect the missing container.
 	waitForSandboxState(t, harness.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_FAILED)
 }
 
@@ -502,7 +524,11 @@ func TestEndToEndRestartRecoveryWithMockDocker(t *testing.T) {
 	waitForExecState(t, second.client, "e2e-exec", agboxv1.ExecState_EXEC_STATE_FINISHED)
 	second.close()
 
-	// ---- Phase 3: Restart with container exited → FAILED ----
+	// ---- Phase 3: Restart with container exited → stays READY (5-min window applied) ----
+	// With the 5-minute crashloop window, a READY sandbox whose primary container is exited
+	// but still exists is NOT immediately failed on daemon restart. Instead, the daemon
+	// keeps it READY and starts the notRunningSince window. It will only fail after 5 minutes
+	// of continuous non-Running state as observed by subsequent reconcile ticks.
 	phase3Backend := newDockerRuntimeBackendForTest(t, newRecoveryHandler(t, primaryContainer, networkName, false, 137))
 
 	third := newPersistentBufconnHarness(t, ctx, ServiceConfig{
@@ -515,8 +541,19 @@ func TestEndToEndRestartRecoveryWithMockDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Phase 3: GetSandbox failed: %v", err)
 	}
-	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
-		t.Fatalf("Phase 3: expected FAILED, got %s", resp.GetSandbox().GetState())
+	// The sandbox stays READY — the daemon will wait for the 5-minute window before declaring FAILED.
+	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("Phase 3: expected READY (crashloop window pending), got %s", resp.GetSandbox().GetState())
+	}
+	// Verify notRunningSince was initialized during restore.
+	third.service.mu.RLock()
+	record := third.service.boxes[sandboxID]
+	hasNotRunningSince := record != nil && record.runtimeState != nil &&
+		record.runtimeState.PrimaryCrashloopState != nil &&
+		record.runtimeState.PrimaryCrashloopState.notRunningSince != nil
+	third.service.mu.RUnlock()
+	if !hasNotRunningSince {
+		t.Fatal("Phase 3: expected PrimaryCrashloopState.notRunningSince to be set after restore with exited container")
 	}
 }
 

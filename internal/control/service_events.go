@@ -456,20 +456,23 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			}
 		}
 
-		// Build runtime state for non-terminal sandboxes.
-		if persistedState != agboxv1.SandboxState_SANDBOX_STATE_DELETED &&
-			persistedState != agboxv1.SandboxState_SANDBOX_STATE_FAILED {
+		// Build runtime state for non-deleted sandboxes.
+		// FAILED sandboxes also get a deterministic runtimeState so DeleteSandbox can clean up
+		// containers and networks retained for post-mortem diagnosis (design §5).
+		if persistedState != agboxv1.SandboxState_SANDBOX_STATE_DELETED {
 			companionContainers := make([]runtimeCompanionContainer, 0, len(createSpec.GetCompanionContainers()))
 			for _, cc := range createSpec.GetCompanionContainers() {
 				companionContainers = append(companionContainers, runtimeCompanionContainer{
-					Name:          cc.GetName(),
-					ContainerName: dockerCompanionContainerName(sandboxID, cc.GetName()),
+					Name:           cc.GetName(),
+					ContainerName:  dockerCompanionContainerName(sandboxID, cc.GetName()),
+					CrashloopState: &crashloopState{},
 				})
 			}
 			record.runtimeState = &sandboxRuntimeState{
-				NetworkName:          dockerNetworkName(sandboxID),
-				PrimaryContainerName: dockerPrimaryContainerName(sandboxID),
-				CompanionContainers:  companionContainers,
+				NetworkName:           dockerNetworkName(sandboxID),
+				PrimaryContainerName:  dockerPrimaryContainerName(sandboxID),
+				CompanionContainers:   companionContainers,
+				PrimaryCrashloopState: &crashloopState{},
 			}
 		}
 
@@ -482,20 +485,29 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			if inspectErr != nil {
 				return fmt.Errorf("inspect primary container for sandbox %s: %w", sandboxID, inspectErr)
 			}
-			if !inspectResult.Exists || !inspectResult.Running {
+			if !inspectResult.Exists {
+				// Container is gone — fail immediately; no window applies.
 				reconciledState = agboxv1.SandboxState_SANDBOX_STATE_FAILED
 				if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-					errorCode:    "CONTAINER_NOT_RUNNING",
+					errorCode:    containerNotRunning,
 					errorMessage: "primary container not running after daemon restart",
 					sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
 				}); err != nil {
 					return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
 				}
-				record.runtimeState = nil
+				// runtimeState is preserved for DeleteSandbox (even though the container is gone,
+				// keeping the state enables best-effort cleanup of the network resource).
 			} else {
-				// Re-apply nftables host isolation rules lost during host reboot or daemon restart.
+				// Container exists (running or exited). Always re-apply nftables rules.
 				if err := s.config.runtimeBackend.ReapplyNetworkIsolation(ctx, record); err != nil {
 					return fmt.Errorf("reapply network isolation for sandbox %s: %w", sandboxID, err)
+				}
+				if !inspectResult.Running {
+					// Container is exited but exists — start the 5-minute non-Running window.
+					// notRunningSince is set to now so the first reconcile tick (15s later) does not
+					// immediately fail; the window gives unless-stopped time to restart.
+					now := s.config.NowFunc()
+					record.runtimeState.PrimaryCrashloopState.notRunningSince = &now
 				}
 			}
 		case agboxv1.SandboxState_SANDBOX_STATE_STOPPED:
@@ -507,7 +519,7 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			if !inspectResult.Exists {
 				reconciledState = agboxv1.SandboxState_SANDBOX_STATE_FAILED
 				if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-					errorCode:    "CONTAINER_NOT_RUNNING",
+					errorCode:    containerNotRunning,
 					errorMessage: "primary container missing after daemon restart",
 					sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
 				}); err != nil {
@@ -547,8 +559,9 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			}
 			record.runtimeState = nil
 		case agboxv1.SandboxState_SANDBOX_STATE_FAILED:
-			// Already failed, no reconciliation needed.
-			record.runtimeState = nil
+			// runtimeState was already built above using deterministic naming.
+			// Keep it so DeleteSandbox can clean up containers and networks retained for diagnosis.
+			// Do NOT call ReapplyNetworkIsolation; nftables rules are not meaningful for FAILED sandboxes.
 		case agboxv1.SandboxState_SANDBOX_STATE_DELETED:
 			// Already deleted, no reconciliation needed.
 			record.runtimeState = nil

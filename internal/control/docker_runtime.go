@@ -82,61 +82,100 @@ type runtimeExecResult struct {
 	ExitCode int32
 }
 
+// crashloopState tracks per-container timing for the 5-minute non-Running window
+// and 30-second Running stability guard. Both fields are nil when never set.
+// This is Category C state (rebuilt from Docker inspect; resets on daemon restart).
+type crashloopState struct {
+	// notRunningSince is when the container first became non-Running in the current
+	// uninterrupted stretch. Nil when the container is Running or the window was just reset.
+	notRunningSince *time.Time
+	// runningSince is when the container most recently became Running.
+	// Nil when the container is not currently Running.
+	runningSince *time.Time
+}
+
 type sandboxRuntimeState struct {
 	NetworkName              string
 	PrimaryContainerName     string
 	CompanionContainers      []runtimeCompanionContainer
 	CompanionContainerStarts companionContainerStarts
+	PrimaryCrashloopState    *crashloopState
 }
 
 type runtimeCompanionContainer struct {
-	Name          string
-	ContainerName string
+	Name           string
+	ContainerName  string
+	CrashloopState *crashloopState
 }
 
 type fakeRuntimeBackend struct {
 	inspectResults map[string]ContainerInspectResult
 	eventCh        chan ContainerEvent
 	errCh          chan error
+	// stopCalls records the sandbox IDs passed to StopSandbox in order.
+	stopCalls []string
+	// stopCallCount is incremented on every StopSandbox call.
+	stopCallCount int
+	// stopSandboxErr is returned by StopSandbox when non-nil (used in AT-STV3 failure path tests).
+	stopSandboxErr error
+	// deleteCalls records the sandbox IDs passed to DeleteSandbox in order.
+	deleteCalls []string
+	// reapplyNetworkCalls records the sandbox IDs passed to ReapplyNetworkIsolation in order.
+	reapplyNetworkCalls []string
 }
 
-func (fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
+func (backend *fakeRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
 	statuses := make(chan companionContainerStatus, len(record.companionContainers))
 	containers := make([]runtimeCompanionContainer, 0, len(record.companionContainers))
 	for _, cc := range record.companionContainers {
 		statuses <- companionContainerStatus{Name: cc.GetName(), Ready: true}
 		containers = append(containers, runtimeCompanionContainer{
-			Name:          cc.GetName(),
-			ContainerName: "fake-companion-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(cc.GetName()),
+			Name:           cc.GetName(),
+			ContainerName:  "fake-companion-" + record.handle.GetSandboxId() + "-" + sanitizeRuntimeName(cc.GetName()),
+			CrashloopState: &crashloopState{},
 		})
 	}
 	close(statuses)
 	return runtimeCreateResult{
 		CompanionContainerStatuses: statuses,
 		RuntimeState: &sandboxRuntimeState{
-			NetworkName:          "fake-network-" + record.handle.GetSandboxId(),
-			PrimaryContainerName: "fake-primary-" + record.handle.GetSandboxId(),
-			CompanionContainers:  containers,
+			NetworkName:           "fake-network-" + record.handle.GetSandboxId(),
+			PrimaryContainerName:  "fake-primary-" + record.handle.GetSandboxId(),
+			CompanionContainers:   containers,
+			PrimaryCrashloopState: &crashloopState{},
 		},
 	}, nil
 }
 
-func (fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord) (runtimeResumeResult, error) {
+func (backend *fakeRuntimeBackend) ResumeSandbox(_ context.Context, record *sandboxRecord) (runtimeResumeResult, error) {
 	statuses := make([]companionContainerStatus, 0, len(record.companionContainers))
 	for _, cc := range record.companionContainers {
 		statuses = append(statuses, companionContainerStatus{Name: cc.GetName(), Ready: true})
 	}
 	return runtimeResumeResult{CompanionContainerStatuses: statuses}, nil
 }
-func (fakeRuntimeBackend) StopSandbox(context.Context, *sandboxRecord) error             { return nil }
-func (fakeRuntimeBackend) DeleteSandbox(context.Context, *sandboxRecord) error           { return nil }
-func (fakeRuntimeBackend) ReapplyNetworkIsolation(context.Context, *sandboxRecord) error { return nil }
 
-func (fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv1.ExecStatus) (runtimeExecResult, error) {
+func (backend *fakeRuntimeBackend) StopSandbox(_ context.Context, record *sandboxRecord) error {
+	backend.stopCallCount++
+	backend.stopCalls = append(backend.stopCalls, record.handle.GetSandboxId())
+	return backend.stopSandboxErr
+}
+
+func (backend *fakeRuntimeBackend) DeleteSandbox(_ context.Context, record *sandboxRecord) error {
+	backend.deleteCalls = append(backend.deleteCalls, record.handle.GetSandboxId())
+	return nil
+}
+
+func (backend *fakeRuntimeBackend) ReapplyNetworkIsolation(_ context.Context, record *sandboxRecord) error {
+	backend.reapplyNetworkCalls = append(backend.reapplyNetworkCalls, record.handle.GetSandboxId())
+	return nil
+}
+
+func (backend *fakeRuntimeBackend) RunExec(_ context.Context, _ *sandboxRecord, _ *agboxv1.ExecStatus) (runtimeExecResult, error) {
 	return runtimeExecResult{ExitCode: 0}, nil
 }
 
-func (backend fakeRuntimeBackend) InspectContainer(_ context.Context, containerName string) (ContainerInspectResult, error) {
+func (backend *fakeRuntimeBackend) InspectContainer(_ context.Context, containerName string) (ContainerInspectResult, error) {
 	if backend.inspectResults != nil {
 		if result, ok := backend.inspectResults[containerName]; ok {
 			return result, nil
@@ -145,7 +184,7 @@ func (backend fakeRuntimeBackend) InspectContainer(_ context.Context, containerN
 	return ContainerInspectResult{}, nil
 }
 
-func (backend fakeRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
+func (backend *fakeRuntimeBackend) WatchContainerEvents(_ context.Context) (<-chan ContainerEvent, <-chan error) {
 	if backend.eventCh != nil {
 		return backend.eventCh, backend.errCh
 	}
@@ -247,10 +286,12 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	state.CompanionContainers = make([]runtimeCompanionContainer, 0, len(record.companionContainers))
 	for _, cc := range record.companionContainers {
 		state.CompanionContainers = append(state.CompanionContainers, runtimeCompanionContainer{
-			Name:          cc.GetName(),
-			ContainerName: dockerCompanionContainerName(record.handle.GetSandboxId(), cc.GetName()),
+			Name:           cc.GetName(),
+			ContainerName:  dockerCompanionContainerName(record.handle.GetSandboxId(), cc.GetName()),
+			CrashloopState: &crashloopState{},
 		})
 	}
+	state.PrimaryCrashloopState = &crashloopState{}
 
 	var portMappings []dockerPortMapping
 	for _, p := range record.createSpec.GetPorts() {

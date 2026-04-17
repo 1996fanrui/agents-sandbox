@@ -8,6 +8,20 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 )
 
+// Hardcoded thresholds for crashloop detection.
+// These are intentionally not configurable; see design §2 for rationale.
+const (
+	// crashloopNonRunningWindow is how long a container must remain continuously
+	// non-Running before the sandbox is declared Failed.
+	crashloopNonRunningWindow = 5 * time.Minute
+	// crashloopRunningGuard is how long a container must remain continuously Running
+	// before its notRunningSince window is reset. Prevents "Running 10s then crash"
+	// cycles from clearing the window on every pass.
+	crashloopRunningGuard = 30 * time.Second
+	// reconcileTickInterval is how often the 15s periodic reconcile ticker fires.
+	reconcileTickInterval = 15 * time.Second
+)
+
 // Error codes used in sandbox failed events.
 const (
 	// containerCrashloop is emitted when the primary container dies (non-OOM).
@@ -31,52 +45,92 @@ type containerEvalDecision struct {
 	errorMessage string
 }
 
-// evaluateContainer inspects the given result and returns a decision about whether the
-// container (primary or companion) should be considered failed.
+// evaluateContainer applies the 5-rule crashloop detection logic to a single container.
+// It mutates cs in place (notRunningSince, runningSince) and returns a decision.
+// nowFunc provides the current time (injectable for tests).
 //
-// Stage 1 semantics: any non-Running state (including Paused) → failed decision.
-// Stage 2 will replace this with the 5-minute non-Running window + 30s Running guard.
-func evaluateContainer(result ContainerInspectResult, isPrimary bool) containerEvalDecision {
-	if result.Running {
-		// Container is healthy; no action needed.
+// Rules (verbatim from design §3):
+//  1. inspect err → caller logs warn, returns zero decision (conservative, no state change).
+//  2. !Exists → immediate fail; window fields not updated.
+//  3. Paused → clear both notRunningSince and runningSince; return zero decision.
+//  4. Running:
+//     - set runningSince if nil.
+//     - if now - runningSince >= 30s → clear both timers (stable running, window reset).
+//     - else → keep notRunningSince unchanged.
+//  5. Non-Running (Exists && !Running && !Paused):
+//     - clear runningSince.
+//     - set notRunningSince if nil.
+//     - if now - notRunningSince > 5min → fail decision (OOM or crashloop error code).
+//     - else → return zero decision (within grace period).
+func evaluateContainer(result ContainerInspectResult, cs *crashloopState, isPrimary bool, nowFunc func() time.Time) containerEvalDecision {
+	now := nowFunc()
+
+	// Rule 2: container does not exist — immediate fail regardless of window.
+	if !result.Exists {
+		errCode := containerNotRunning
+		var errMsg string
+		if isPrimary {
+			errMsg = "primary container not running (detected during reconciliation)"
+		} else {
+			errMsg = "companion container not running (detected during reconciliation)"
+		}
+		if isPrimary {
+			return containerEvalDecision{shouldFail: true, errorCode: errCode, errorMessage: errMsg}
+		}
+		return containerEvalDecision{companionFailed: true, errorCode: errCode, errorMessage: errMsg}
+	}
+
+	// Rule 3: paused — clear both timers, no crashloop counting.
+	if result.Paused {
+		cs.notRunningSince = nil
+		cs.runningSince = nil
 		return containerEvalDecision{}
 	}
 
-	// Non-running: determine error code.
-	errorCode := containerNotRunning
-	errorMessage := "primary container not running (detected during reconciliation)"
-	if !isPrimary {
-		errorMessage = "companion container not running (detected during reconciliation)"
+	// Rule 4: running.
+	if result.Running {
+		if cs.runningSince == nil {
+			cs.runningSince = &now
+		}
+		if now.Sub(*cs.runningSince) >= crashloopRunningGuard {
+			// Stable running — reset both timers.
+			cs.notRunningSince = nil
+			cs.runningSince = nil
+		}
+		// Else: container just started running; keep notRunningSince to guard fast crashloops.
+		return containerEvalDecision{}
 	}
+
+	// Rule 5: non-Running (Exists && !Running && !Paused).
+	cs.runningSince = nil
+	if cs.notRunningSince == nil {
+		cs.notRunningSince = &now
+	}
+	if now.Sub(*cs.notRunningSince) <= crashloopNonRunningWindow {
+		// Within grace window; no action yet.
+		return containerEvalDecision{}
+	}
+
+	// 5-minute window expired — determine error code.
+	errCode := containerCrashloop
+	var errMsg string
 	if result.OOMKilled {
-		errorCode = containerOOM
+		errCode = containerOOM
 		if isPrimary {
-			errorMessage = "primary container OOM killed"
+			errMsg = "primary container OOM killed"
 		} else {
-			errorMessage = "companion container OOM killed"
+			errMsg = "companion container OOM killed"
 		}
-	} else if result.Exists {
-		// Container exists but is not running (exited, paused, restarting, etc.).
-		errorCode = containerCrashloop
-		if isPrimary {
-			errorMessage = "primary container exited"
-		} else {
-			errorMessage = "companion container exited"
-		}
+	} else if isPrimary {
+		errMsg = "primary container exited"
+	} else {
+		errMsg = "companion container exited"
 	}
 
 	if isPrimary {
-		return containerEvalDecision{
-			shouldFail:   true,
-			errorCode:    errorCode,
-			errorMessage: errorMessage,
-		}
+		return containerEvalDecision{shouldFail: true, errorCode: errCode, errorMessage: errMsg}
 	}
-	return containerEvalDecision{
-		companionFailed: true,
-		errorCode:       errorCode,
-		errorMessage:    errorMessage,
-	}
+	return containerEvalDecision{companionFailed: true, errorCode: errCode, errorMessage: errMsg}
 }
 
 // dockerEventWatcher subscribes to container lifecycle events and updates sandbox state accordingly.
@@ -98,6 +152,10 @@ func (w *dockerEventWatcher) run(ctx context.Context) {
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
 
+	// The ticker is created once for the lifetime of run() and shared across reconnects.
+	ticker := time.NewTicker(reconcileTickInterval)
+	defer ticker.Stop()
+
 	for {
 		// Run full reconciliation before subscribing to close the startup/reconnect gap.
 		w.reconcileAll(ctx)
@@ -105,7 +163,7 @@ func (w *dockerEventWatcher) run(ctx context.Context) {
 		eventCh, errCh := w.service.config.runtimeBackend.WatchContainerEvents(ctx)
 		backoff = time.Second // Reset backoff on successful subscription.
 
-		if !w.processEvents(ctx, eventCh, errCh) {
+		if !w.processEvents(ctx, eventCh, errCh, ticker.C) {
 			return // Context cancelled.
 		}
 
@@ -120,9 +178,9 @@ func (w *dockerEventWatcher) run(ctx context.Context) {
 	}
 }
 
-// processEvents drains the event channel until it closes or ctx is cancelled.
+// processEvents drains the event channel and ticker until the event channel closes or ctx is cancelled.
 // Returns false if ctx was cancelled (caller should exit), true if reconnect is needed.
-func (w *dockerEventWatcher) processEvents(ctx context.Context, eventCh <-chan ContainerEvent, errCh <-chan error) bool {
+func (w *dockerEventWatcher) processEvents(ctx context.Context, eventCh <-chan ContainerEvent, errCh <-chan error, tickCh <-chan time.Time) bool {
 	for {
 		select {
 		case <-ctx.Done():
@@ -138,11 +196,17 @@ func (w *dockerEventWatcher) processEvents(ctx context.Context, eventCh <-chan C
 				return true // Event channel closed, reconnect.
 			}
 			w.handleEvent(ctx, event)
+		case <-tickCh:
+			w.reconcileAll(ctx)
 		}
 	}
 }
 
-func (w *dockerEventWatcher) handleEvent(_ context.Context, event ContainerEvent) {
+// handleEvent handles a container lifecycle event by calling InspectContainer on
+// the affected container and running evaluateContainer, mirroring the reconcileAll path.
+// This is level-triggered: the event is just a hint to re-evaluate sooner; all state
+// decisions come from real inspect results and the crashloopState timers.
+func (w *dockerEventWatcher) handleEvent(ctx context.Context, event ContainerEvent) {
 	w.service.mu.Lock()
 	defer w.service.mu.Unlock()
 
@@ -150,7 +214,6 @@ func (w *dockerEventWatcher) handleEvent(_ context.Context, event ContainerEvent
 	if !ok {
 		return
 	}
-
 	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
 		return // Expected for STOPPED/DELETING/DELETED/FAILED/PENDING.
 	}
@@ -158,66 +221,94 @@ func (w *dockerEventWatcher) handleEvent(_ context.Context, event ContainerEvent
 		return
 	}
 
-	// Synthesize a ContainerInspectResult from the event action.
-	// Stage 1 preserves the pre-refactor semantics: any die/oom event on a container that was
-	// previously running is treated as a failed container (Exists=true, Running=false).
-	// Stage 2 will replace this with a real InspectContainer call inside the window evaluation.
-	result := containerEventToInspectResult(event)
 	if event.IsCompanionContainer {
-		decision := evaluateContainer(result, false)
-		if !decision.companionFailed {
+		// Find the matching companion and re-evaluate it.
+		for i := range record.runtimeState.CompanionContainers {
+			cc := &record.runtimeState.CompanionContainers[i]
+			if cc.Name != event.CompanionContainerName {
+				continue
+			}
+			result, err := w.service.config.runtimeBackend.InspectContainer(ctx, cc.ContainerName)
+			if err != nil {
+				w.logger.Warn("handleEvent companion inspect failed",
+					slog.String("sandbox_id", event.SandboxID),
+					slog.String("container", cc.ContainerName),
+					slog.Any("error", err),
+				)
+				return
+			}
+			decision := evaluateContainer(result, cc.CrashloopState, false, w.service.config.NowFunc)
+			if !decision.companionFailed {
+				return
+			}
+			if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
+				companionContainerName: cc.Name,
+				errorCode:              decision.errorCode,
+				errorMessage:           decision.errorMessage,
+				sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
+			}); err != nil {
+				w.logger.Error("handleEvent append companion failed event",
+					slog.String("sandbox_id", event.SandboxID),
+					slog.Any("error", err),
+				)
+			}
 			return
-		}
-		if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
-			companionContainerName: event.CompanionContainerName,
-			errorCode:              decision.errorCode,
-			errorMessage:           decision.errorMessage,
-			sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-		}); err != nil {
-			w.logger.Error("append companion container failed event",
-				slog.String("sandbox_id", event.SandboxID),
-				slog.Any("error", err),
-			)
 		}
 		return
 	}
 
-	// Primary container event.
-	decision := evaluateContainer(result, true)
-	if !decision.shouldFail {
-		return
-	}
-	if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-		errorCode:    decision.errorCode,
-		errorMessage: decision.errorMessage,
-		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-	}); err != nil {
-		w.logger.Error("append sandbox failed event",
+	// Primary container event — inspect and evaluate.
+	result, err := w.service.config.runtimeBackend.InspectContainer(ctx, record.runtimeState.PrimaryContainerName)
+	if err != nil {
+		w.logger.Warn("handleEvent primary inspect failed",
 			slog.String("sandbox_id", event.SandboxID),
 			slog.Any("error", err),
 		)
 		return
 	}
+	decision := evaluateContainer(result, record.runtimeState.PrimaryCrashloopState, true, w.service.config.NowFunc)
+	if !decision.shouldFail {
+		return
+	}
+	w.applyPrimaryFailed(ctx, event.SandboxID, record, decision)
+}
+
+// applyPrimaryFailed transitions the sandbox to FAILED under the lock, then kicks off
+// a best-effort StopSandbox in a goroutine. Callers must hold s.mu.Lock.
+func (w *dockerEventWatcher) applyPrimaryFailed(ctx context.Context, sandboxID string, record *sandboxRecord, decision containerEvalDecision) {
+	if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+		errorCode:    decision.errorCode,
+		errorMessage: decision.errorMessage,
+		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+	}); err != nil {
+		w.logger.Error("applyPrimaryFailed append sandbox failed event",
+			slog.String("sandbox_id", sandboxID),
+			slog.Any("error", err),
+		)
+		return
+	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-	w.logger.Info("sandbox failed due to container event",
-		slog.String("sandbox_id", event.SandboxID),
-		slog.String("action", event.Action),
+	w.logger.Info("sandbox failed during reconciliation",
+		slog.String("sandbox_id", sandboxID),
 		slog.String("error_code", decision.errorCode),
 	)
+
+	// Snapshot the record for the goroutine (avoid holding the lock during docker stop).
+	recordSnapshot := record
+	go func() {
+		if err := w.service.config.runtimeBackend.StopSandbox(ctx, recordSnapshot); err != nil {
+			// StopSandbox failure is non-fatal: sandbox is already FAILED. Log and move on.
+			// Do NOT emit SANDBOX_STOP_FAILED; the sandbox is already in a terminal FAILED state.
+			w.logger.Warn("StopSandbox after sandbox failed: stop containers failed",
+				slog.String("sandbox_id", sandboxID),
+				slog.Any("error", err),
+			)
+		}
+	}()
 }
 
-// containerEventToInspectResult synthesizes a ContainerInspectResult from a container event.
-// This is used in Stage 1 handleEvent to preserve the pre-refactor event-based semantics
-// without performing a live InspectContainer call. Stage 2 replaces this with real inspect.
-func containerEventToInspectResult(event ContainerEvent) ContainerInspectResult {
-	return ContainerInspectResult{
-		Exists:    true,
-		Running:   false,
-		OOMKilled: event.Action == "oom",
-	}
-}
-
-// reconcileAll inspects all READY sandboxes and fails those whose primary container is no longer running.
+// reconcileAll inspects all READY sandboxes and applies crashloop window decisions.
+// Only READY sandboxes are processed; FAILED/STOPPED/DELETING/DELETED are explicitly skipped.
 func (w *dockerEventWatcher) reconcileAll(ctx context.Context) {
 	w.service.mu.Lock()
 	defer w.service.mu.Unlock()
@@ -236,26 +327,15 @@ func (w *dockerEventWatcher) reconcileAll(ctx context.Context) {
 			w.logger.Warn("reconcile inspect failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
 			continue
 		}
-		decision := evaluateContainer(result, true)
+		decision := evaluateContainer(result, record.runtimeState.PrimaryCrashloopState, true, w.service.config.NowFunc)
 		if decision.shouldFail {
-			if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-				errorCode:    decision.errorCode,
-				errorMessage: decision.errorMessage,
-				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-			}); err != nil {
-				w.logger.Error("reconcile append failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
-				continue
-			}
-			record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-			w.logger.Info("sandbox failed during reconciliation",
-				slog.String("sandbox_id", sandboxID),
-				slog.String("error_code", decision.errorCode),
-			)
+			w.applyPrimaryFailed(ctx, sandboxID, record, decision)
 			continue // Primary failed; skip companion evaluation for this sandbox.
 		}
 
 		// Evaluate companion containers.
-		for _, cc := range record.runtimeState.CompanionContainers {
+		for i := range record.runtimeState.CompanionContainers {
+			cc := &record.runtimeState.CompanionContainers[i]
 			ccResult, err := w.service.config.runtimeBackend.InspectContainer(ctx, cc.ContainerName)
 			if err != nil {
 				w.logger.Warn("reconcile companion inspect failed",
@@ -265,7 +345,7 @@ func (w *dockerEventWatcher) reconcileAll(ctx context.Context) {
 				)
 				continue
 			}
-			ccDecision := evaluateContainer(ccResult, false)
+			ccDecision := evaluateContainer(ccResult, cc.CrashloopState, false, w.service.config.NowFunc)
 			if !ccDecision.companionFailed {
 				continue
 			}

@@ -137,7 +137,7 @@ func TestSandboxHandleCreatedAtAndImage(t *testing.T) {
 
 // blockingExecBackend blocks RunExec until the unblock channel is closed.
 type blockingExecBackend struct {
-	fakeRuntimeBackend
+	*fakeRuntimeBackend
 	unblock chan struct{}
 }
 
@@ -151,7 +151,7 @@ func (b *blockingExecBackend) RunExec(ctx context.Context, record *sandboxRecord
 
 func TestListActiveExecsOptionalSandboxID(t *testing.T) {
 	unblock := make(chan struct{})
-	backend := &blockingExecBackend{unblock: unblock}
+	backend := &blockingExecBackend{fakeRuntimeBackend: &fakeRuntimeBackend{}, unblock: unblock}
 	t.Cleanup(func() {
 		// Ensure execs are unblocked when the test ends.
 		select {
