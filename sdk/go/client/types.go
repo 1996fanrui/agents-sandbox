@@ -85,6 +85,9 @@ type CompanionContainerSpec struct {
 	Healthcheck        *HealthcheckConfig
 	Command            []string
 	PostStartOnPrimary []string
+	// DiskLimit is the companion container disk (rootfs) limit expression
+	// (e.g. "10g"). The SDK forwards the raw string to the daemon without parsing.
+	DiskLimit string
 }
 
 // MountSpec is the public mount declaration type.
@@ -366,6 +369,7 @@ func toProtoCompanionContainer(spec CompanionContainerSpec) *agboxv1.CompanionCo
 		Healthcheck:        toProtoHealthcheck(spec.Healthcheck),
 		Command:            slices.Clone(spec.Command),
 		PostStartOnPrimary: slices.Clone(spec.PostStartOnPrimary),
+		DiskLimit:          spec.DiskLimit,
 	}
 }
 
@@ -405,6 +409,7 @@ func toCompanionContainers(specs []*agboxv1.CompanionContainerSpec) []CompanionC
 			Healthcheck:        toHealthcheck(spec.GetHealthcheck()),
 			Command:            slices.Clone(spec.GetCommand()),
 			PostStartOnPrimary: slices.Clone(spec.GetPostStartOnPrimary()),
+			DiskLimit:          spec.GetDiskLimit(),
 		})
 	}
 	return result

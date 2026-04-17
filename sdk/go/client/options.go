@@ -75,6 +75,9 @@ type createSandboxOptions struct {
 	labels              map[string]string
 	envs                map[string]string
 	idleTTL             *time.Duration
+	cpuLimit            *string
+	memoryLimit         *string
+	primaryDiskLimit    *string
 	wait                bool
 }
 
@@ -386,6 +389,50 @@ func (o idleTTLOption) applyCreateSandbox(opts *createSandboxOptions) error {
 		return fmt.Errorf("idle_ttl must not be negative")
 	}
 	opts.idleTTL = &d
+	return nil
+}
+
+type cpuLimitOption string
+
+// WithCPULimit sets the sandbox-scoped CPU limit expression (e.g. "2", "0.5").
+// Shared by the primary container and every companion via a common cgroup.
+// The SDK forwards the raw string to the daemon without parsing.
+func WithCPULimit(limit string) cpuLimitOption {
+	return cpuLimitOption(limit)
+}
+
+func (o cpuLimitOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	opts.cpuLimit = &value
+	return nil
+}
+
+type memoryLimitOption string
+
+// WithMemoryLimit sets the sandbox-scoped memory limit expression (e.g. "4g", "512m").
+// Shared by the primary container and every companion via a common cgroup.
+// The SDK forwards the raw string to the daemon without parsing.
+func WithMemoryLimit(limit string) memoryLimitOption {
+	return memoryLimitOption(limit)
+}
+
+func (o memoryLimitOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	opts.memoryLimit = &value
+	return nil
+}
+
+type primaryDiskLimitOption string
+
+// WithPrimaryDiskLimit sets the primary container disk (rootfs) limit expression (e.g. "10g").
+// The SDK forwards the raw string to the daemon without parsing.
+func WithPrimaryDiskLimit(limit string) primaryDiskLimitOption {
+	return primaryDiskLimitOption(limit)
+}
+
+func (o primaryDiskLimitOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	opts.primaryDiskLimit = &value
 	return nil
 }
 

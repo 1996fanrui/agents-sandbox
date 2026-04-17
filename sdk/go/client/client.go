@@ -149,6 +149,15 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 	if options.idleTTL != nil {
 		createSpec.IdleTtl = durationpb.New(*options.idleTTL)
 	}
+	if options.cpuLimit != nil {
+		createSpec.CpuLimit = *options.cpuLimit
+	}
+	if options.memoryLimit != nil {
+		createSpec.MemoryLimit = *options.memoryLimit
+	}
+	if options.primaryDiskLimit != nil {
+		createSpec.DiskLimit = *options.primaryDiskLimit
+	}
 	request := &agboxv1.CreateSandboxRequest{
 		SandboxId:  valueOrEmpty(options.sandboxID),
 		ConfigYaml: append([]byte(nil), options.configYAML...),
