@@ -134,7 +134,7 @@ func (store scriptedEventStore) LoadExecConfigs(sandboxID string) ([]*agboxv1.Cr
 func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxServiceClient {
 	t.Helper()
 	if config.runtimeBackend == nil {
-		config.runtimeBackend = fakeRuntimeBackend{}
+		config.runtimeBackend = &fakeRuntimeBackend{}
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -180,7 +180,7 @@ func newBufconnClient(t *testing.T, config ServiceConfig) agboxv1.SandboxService
 func newPersistentBufconnHarness(t *testing.T, ctx context.Context, config ServiceConfig, dbPath string) persistentBufconnHarness {
 	t.Helper()
 	if config.runtimeBackend == nil {
-		config.runtimeBackend = fakeRuntimeBackend{}
+		config.runtimeBackend = &fakeRuntimeBackend{}
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -330,7 +330,7 @@ type capturingRuntimeBackend struct {
 func (backend *capturingRuntimeBackend) CreateSandbox(_ context.Context, record *sandboxRecord) (runtimeCreateResult, error) {
 	backend.lastCreateImage = record.createSpec.GetImage()
 	backend.lastCreateSpec = cloneCreateSpec(record.createSpec)
-	return fakeRuntimeBackend{}.CreateSandbox(context.Background(), record)
+	return (&fakeRuntimeBackend{}).CreateSandbox(context.Background(), record)
 }
 
 func (backend *capturingRuntimeBackend) ResumeSandbox(context.Context, *sandboxRecord) (runtimeResumeResult, error) {

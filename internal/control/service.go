@@ -33,9 +33,12 @@ type ServiceConfig struct {
 	DaemonName             string
 	LogLevel               string
 	Logger                 *slog.Logger
-	runtimeBackend         runtimeBackend
-	idRegistry             idRegistry
-	eventStore             eventStore
+	// NowFunc is the clock used for crashloop window evaluation and restore recovery.
+	// Defaults to time.Now when nil. Inject a custom clock in tests for deterministic behaviour.
+	NowFunc        func() time.Time
+	runtimeBackend runtimeBackend
+	idRegistry     idRegistry
+	eventStore     eventStore
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -134,6 +137,9 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 		}
 		config.runtimeBackend = runtimeBackend
 		runtimeCloser = closer
+	}
+	if config.NowFunc == nil {
+		config.NowFunc = time.Now
 	}
 	if config.idRegistry == nil {
 		config.idRegistry = newMemoryIDRegistry()

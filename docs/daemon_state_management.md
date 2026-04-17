@@ -8,6 +8,8 @@ This document defines the classification, persistence strategy, and recovery con
 
 Every piece of daemon state must belong to exactly one category below. If a field exists only in memory and cannot be reconstructed from bbolt + Docker + filesystem, that is a bug.
 
+One important nuance: some Category C fields are **allowed to reset on daemon restart** by design. Per-container crashloop timers (`notRunningSince`, `runningSince`) are Category C fields that intentionally reset on each daemon start — a restart is treated as a new grace period, equivalent to re-running reconcile from scratch. This is not a bug; it is the same philosophy as systemd and k8s restart budgets, which also reset on process restart. The key invariant is that the timers can always be reconstructed by re-observing Docker inspect state.
+
 | Category | Source of Truth | Persistence | Restart Recovery |
 |----------|----------------|-------------|-----------------|
 | A — bbolt-Persisted | bbolt (`ids.db`) | Write before accepting operation | Load from bbolt |
@@ -59,6 +61,8 @@ Recomputed on startup from Category A and B.
 | `companionContainerStarts` channels | Re-inspect companion containers |
 | `SandboxHandle.ErrorCode`, `ErrorMessage`, `StateChangedAt` | Last `SANDBOX_FAILED` event's `SandboxPhaseDetails` (error fields); last state-matching event's `OccurredAt` (timestamp) |
 | `sandboxRuntimeState` | Container names + runtime status from Docker |
+| `notRunningSince` (per primary / per companion) | Docker inspect observations accumulated since last Running or Paused state; reset on daemon restart (intentional — equivalent to a fresh grace period) |
+| `runningSince` (per primary / per companion) | Docker inspect observations since container last entered Running; reset on daemon restart |
 
 ## Category D — Host Filesystem Artifacts
 
@@ -82,12 +86,14 @@ flowchart TD
     QueryB --> Reconcile{Reconcile}
     Reconcile -->|READY + running| ReapplyNftables[Re-apply nftables host isolation]
     ReapplyNftables --> RestoreReady[Restore as READY]
-    Reconcile -->|READY + exited| ToFailed[FAILED]
+    Reconcile -->|READY + exited| StartWindow[READY + notRunningSince=now + ReapplyNftables]
+    Reconcile -->|READY + !Exists| ToFailed[FAILED]
     Reconcile -->|STOPPED + exited| RestoreStopped[Restore as STOPPED]
     Reconcile -->|PENDING + missing| ToFailed2[FAILED]
     Reconcile -->|DELETED / DELETING| Cleanup[Cleanup and finalize]
     Reconcile -->|FAILED| RestoreFailed[Restore as FAILED]
     RestoreReady --> Next[Next sandbox]
+    StartWindow --> Next
     ToFailed --> Next
     RestoreStopped --> Next
     ToFailed2 --> Next

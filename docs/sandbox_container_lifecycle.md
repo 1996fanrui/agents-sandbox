@@ -108,7 +108,6 @@ flowchart TB
 Create-path rules:
 - `CreateSandbox` returns immediately after acceptance; the caller must not infer readiness from the response alone.
 - The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid companion container declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
-- Companion containers only report initial create/start result in V1; not restarted or runtime-monitored after readiness.
 - If materialization fails after resources exist, cleanup continues on a daemon-owned background context with bounded timeout.
 
 ## Resume Path
@@ -141,3 +140,28 @@ flowchart LR
 ## Reconciliation
 
 The daemon owns runtime reconciliation for resources under its namespace: idle sandboxes eligible for stop, resources left after failed materialization, orphaned companion containers, and dedicated networks without live runtime membership. Reconciliation uses structured audit logs and explicit action reasons, deriving decisions from structured Docker metadata and recorded runtime state.
+
+### Crashloop Detection: 5-Minute Non-Running Window with 30-Second Running Guard
+
+Only `READY` sandboxes are reconciled; `FAILED`, `STOPPED`, `DELETING`, and `DELETED` sandboxes are skipped. A **15-second ticker** drives periodic reconciliation; container lifecycle events (die, oom) provide more timely triggers but do not bypass the window evaluation.
+
+Per-container state (`notRunningSince`, `runningSince`) is maintained in memory and reset on daemon restart (Category C — see [Daemon State Management](daemon_state_management.md)).
+
+**Decision rules** (applied to both primary and companion containers):
+
+1. **Inspect error** — log warn; no state change (conservative: short network blip must not fail a sandbox).
+2. **`!Exists`** — immediate fail: no grace period for a container that has been fully removed.
+3. **`Paused`** — clear both `notRunningSince` and `runningSince`; pause is user-controlled and must not count toward crashloop.
+4. **`Running`** — set `runningSince` if nil; if running continuously for ≥ 30 seconds (Running guard), clear both timers (stable, window reset). Short Running bursts (< 30s) do not clear `notRunningSince`.
+5. **Non-Running** (`Exists && !Running && !Paused`) — clear `runningSince`; set `notRunningSince` if nil; if `now − notRunningSince > 5 minutes`, trigger fail decision. OOMKilled containers follow the same 5-minute window (error code `CONTAINER_OOM` instead of `CONTAINER_CRASHLOOP`).
+
+**Primary vs. companion action difference:**
+
+| Trigger | Primary | Companion |
+|---------|---------|-----------|
+| `!Exists` (immediate) | `SANDBOX_FAILED` + `StopSandbox` | `COMPANION_CONTAINER_FAILED` |
+| 5-minute window expired | `SANDBOX_FAILED` + `StopSandbox` | `COMPANION_CONTAINER_FAILED` |
+
+When the primary container fails, the daemon calls `runtimeBackend.StopSandbox` asynchronously to stop all sandbox containers (primary + companions), preventing `unless-stopped` from restarting them. Containers and networks are **not deleted** — they are retained for post-mortem diagnosis and remain cleanable via `agbox sandbox delete`. If `StopSandbox` fails, a warn log is recorded; no additional event is emitted (the sandbox is already `FAILED`).
+
+**Daemon restart behavior:** When a `READY` sandbox has an exited primary container (`Exists=true, Running=false`) on daemon restart, the daemon keeps the sandbox `READY` and initializes `notRunningSince = now`, giving the container a fresh 5-minute grace period rather than failing immediately. This accommodates `unless-stopped` restart backoff (100ms–60s) across daemon restarts.
