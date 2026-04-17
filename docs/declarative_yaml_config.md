@@ -54,6 +54,29 @@ companion_containers:
       retries: 6
 ```
 
+### With Resource Limits
+
+```yaml
+image: coding-runtime:latest
+
+cpu_limit: "2"
+memory_limit: "4g"
+disk_limit: "10g"
+
+companion_containers:
+  postgres:
+    image: postgres:16-alpine
+    disk_limit: "5g"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      start_period: 20s
+      start_interval: 1s
+      retries: 12
+```
+
+`cpu_limit` and `memory_limit` apply at the sandbox scope; the primary and every companion share a per-sandbox systemd slice. `disk_limit` is per-container: the top-level value constrains the primary container, and each companion carries its own `disk_limit`. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for host requirements.
+
 ## Field Reference
 
 | YAML Key | Proto Field | Type | Description |
@@ -69,6 +92,17 @@ companion_containers:
 | `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
 | `command` | `CreateSpec.command` | list of string | Optional override of the primary container's Docker `Cmd`. Omit to keep the daemon's sleep-loop default. Must be a long-lived process; `command: []` and empty-string entries are rejected. See [Configuration Reference: Primary container command](configuration_reference.md#primary-container-command). |
 | `companion_containers.<name>.command` | `CompanionContainerSpec.command` | list of string | Optional override of a companion container's Docker `Cmd`. Omit to keep the image's built-in `CMD`. Same long-lived constraint and validation as the primary `command`. |
+| `cpu_limit` | `CreateSpec.cpu_limit` | string | Docker `--cpus` style, e.g. `"2"`, `"0.5"`. `""` (omitted) = unlimited. Sandbox-scoped: primary and all companions share the cgroup. Requires cgroup v2 + `CgroupDriver=systemd`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+| `memory_limit` | `CreateSpec.memory_limit` | string | Docker `--memory` style, e.g. `"4g"`, `"512m"`. `""` (omitted) = unlimited. Sandbox-scoped: primary and all companions share the cgroup. Requires cgroup v2 + `CgroupDriver=systemd`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+| `disk_limit` | `CreateSpec.disk_limit` | string | Docker `--storage-opt size=` style, e.g. `"10g"`. `""` (omitted) = unlimited. Applies to the primary container only. Requires overlay2 on XFS with `prjquota` + `ftype=1`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+| `companion_containers.<name>.disk_limit` | `CompanionContainerSpec.disk_limit` | string | Per-companion disk limit, same syntax as top-level `disk_limit`. `""` (omitted) = unlimited. Same prerequisites as the primary `disk_limit`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+
+Quick self-check commands for the `disk_limit` prerequisites:
+
+```bash
+docker info --format '{{.Driver}} {{.DockerRootDir}}'
+findmnt -T "$(docker info --format '{{.DockerRootDir}}')" -n -o OPTIONS
+```
 
 ### CopySpec Fields
 
@@ -99,6 +133,14 @@ sandbox = await client.create_sandbox(
     image="custom:latest",
     labels={"team": "my-team"},
 )
+
+# Resource limits via explicit parameters
+sandbox = await client.create_sandbox(
+    image="coding-runtime:latest",
+    cpu_limit="2",
+    memory_limit="4g",
+    disk_limit="10g",
+)
 ```
 
 ### Go SDK
@@ -110,6 +152,14 @@ sandbox, err := client.CreateSandbox(ctx, sdkclient.WithConfigYAML(configYAML))
 sandbox, err := client.CreateSandbox(ctx,
     sdkclient.WithConfigYAML(configYAML),
     sdkclient.WithImage("custom:latest"),
+)
+
+// Resource limits via explicit options
+sandbox, err := client.CreateSandbox(ctx,
+    sdkclient.WithImage("coding-runtime:latest"),
+    sdkclient.WithCPULimit("2"),
+    sdkclient.WithMemoryLimit("4g"),
+    sdkclient.WithPrimaryDiskLimit("10g"),
 )
 ```
 

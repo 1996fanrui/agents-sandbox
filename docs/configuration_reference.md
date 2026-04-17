@@ -56,9 +56,28 @@ The northbound API may override only a narrow subset of behavior:
 | `ports` | Yes | Each sandbox may expose container ports to the host via Docker port publishing (`-p`). Each entry specifies `container_port`, `host_port`, and `protocol` (tcp/udp/sctp). |
 | `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
-| Resource limits | No | V1 does not support request-scoped resource limits |
+| `CreateSpec.cpu_limit` | Yes | Docker `--cpus` style, e.g. `"2"`, `"0.5"`. `""` = unlimited. Sandbox-scoped (primary and all companions share the cgroup). See [Resource Limits Prerequisites](#resource-limits-prerequisites). |
+| `CreateSpec.memory_limit` | Yes | Docker `--memory` style, e.g. `"4g"`, `"512m"`. `""` = unlimited. Sandbox-scoped (primary and all companions share the cgroup). See [Resource Limits Prerequisites](#resource-limits-prerequisites). |
+| `CreateSpec.disk_limit` / `CompanionContainerSpec.disk_limit` | Yes | Docker `--storage-opt size=` style, e.g. `"10g"`. Per-container (primary and each companion carry their own limit). `""` = unlimited. See [Resource Limits Prerequisites](#resource-limits-prerequisites). |
 
 The daemon persists sandbox event history in `ids.db`. For STOPPED sandboxes, once `runtime.cleanup_ttl` elapses since the sandbox entered STOPPED state, the daemon automatically removes Docker resources (containers, network) and deletes the sandbox record from the database. For DELETED sandboxes, once `runtime.cleanup_ttl` elapses since deletion, the daemon purges the retained event history and deletion metadata.
+
+## Resource Limits Prerequisites
+
+Resource limits (`cpu_limit`, `memory_limit`, `disk_limit`) require specific host runtime capabilities. The daemon does not probe these at startup; missing prerequisites surface as `FailedPrecondition` either at validation time (CPU/memory) or at `ContainerCreate` time (disk).
+
+- **CPU / memory limits** require cgroup v2 and Docker's `CgroupDriver=systemd`. When a sandbox sets a non-empty `cpu_limit` or `memory_limit` but either condition is not met, the daemon rejects the request with `FailedPrecondition`. The daemon creates a per-sandbox transient systemd slice (`agbox-<sandbox-id>.slice` under parent `agbox.slice`) and attaches the primary and all companion containers to it via Docker `--cgroup-parent`.
+- **Disk limits** require the overlay2 storage driver on an XFS filesystem mounted with `prjquota` and formatted with `ftype=1`. When the backing storage does not satisfy these constraints, `docker create` fails and the daemon wraps the error as `FailedPrecondition`, preserving the Docker message for diagnosis.
+
+Self-check on the host:
+
+```
+docker info --format '{{.CgroupDriver}} {{.CgroupVersion}}'
+DOCKER_ROOT=$(docker info --format '{{.DockerRootDir}}')
+findmnt -T "$DOCKER_ROOT" -n -o OPTIONS
+```
+
+Expect `systemd 2` for CPU/memory support, and the `findmnt` output to contain `prjquota` for disk support. For XFS, `ftype=1` can be confirmed with `xfs_info "$DOCKER_ROOT" | grep ftype`.
 
 ## Singleton Deployment Rule
 
