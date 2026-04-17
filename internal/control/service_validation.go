@@ -8,10 +8,13 @@ import (
 	"strings"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/1996fanrui/agents-sandbox/internal/control/reslimits"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-func validateCreateSpec(spec *agboxv1.CreateSpec) error {
+func validateCreateSpec(spec *agboxv1.CreateSpec, caps hostCapabilities) error {
 	if spec.GetIdleTtl() != nil && spec.GetIdleTtl().AsDuration() < 0 {
 		return errors.New("idle_ttl must not be negative")
 	}
@@ -118,6 +121,9 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return fmt.Errorf("command[%d]: empty string entry is not allowed", i)
 		}
 	}
+	if err := validateResourceLimits(spec, caps); err != nil {
+		return err
+	}
 	seenBuiltin := make(map[string]struct{}, len(spec.GetBuiltinTools()))
 	for _, builtin := range spec.GetBuiltinTools() {
 		if builtin == "" {
@@ -130,6 +136,40 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return fmt.Errorf("unknown builtin resource %q", builtin)
 		}
 		seenBuiltin[builtin] = struct{}{}
+	}
+	return nil
+}
+
+// validateResourceLimits parses every resource limit string on the spec and
+// gates cpu/memory limits on host capabilities. It returns gRPC status errors
+// directly so the caller can surface them as-is to clients.
+func validateResourceLimits(spec *agboxv1.CreateSpec, caps hostCapabilities) error {
+	cpu, err := reslimits.ParseCPU(spec.GetCpuLimit())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "cpu_limit: %v", err)
+	}
+	mem, err := reslimits.ParseMemoryOrDisk(spec.GetMemoryLimit(), "memory_limit")
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "memory_limit: %v", err)
+	}
+	if _, err := reslimits.ParseMemoryOrDisk(spec.GetDiskLimit(), "disk_limit"); err != nil {
+		return status.Errorf(codes.InvalidArgument, "disk_limit: %v", err)
+	}
+	for _, cc := range spec.GetCompanionContainers() {
+		if cc.GetDiskLimit() == "" {
+			continue
+		}
+		field := fmt.Sprintf("companion_containers[%s].disk_limit", cc.GetName())
+		if _, err := reslimits.ParseMemoryOrDisk(cc.GetDiskLimit(), field); err != nil {
+			return status.Errorf(codes.InvalidArgument, "%s: %v", field, err)
+		}
+	}
+	if cpu > 0 || mem > 0 {
+		if caps.CgroupDriver != "systemd" || !caps.CgroupV2Available {
+			return status.Errorf(codes.FailedPrecondition,
+				"cpu_limit / memory_limit require cgroup v2 + systemd cgroup driver; got driver=%q v2=%v",
+				caps.CgroupDriver, caps.CgroupV2Available)
+		}
 	}
 	return nil
 }

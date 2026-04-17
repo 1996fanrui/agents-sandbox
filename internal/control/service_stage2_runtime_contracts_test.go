@@ -362,7 +362,7 @@ func TestPostStartOnPrimaryRequiresHealthcheck(t *testing.T) {
 			},
 		},
 	}
-	if err := validateCreateSpec(validSpec); err != nil {
+	if err := validateCreateSpec(validSpec, hostCapabilities{}); err != nil {
 		t.Fatalf("companion container post_start_on_primary with healthcheck should be valid: %v", err)
 	}
 
@@ -376,7 +376,7 @@ func TestPostStartOnPrimaryRequiresHealthcheck(t *testing.T) {
 			},
 		},
 	}
-	if err := validateCreateSpec(invalidSpec); err == nil || !strings.Contains(err.Error(), "with post_start_on_primary must define healthcheck") {
+	if err := validateCreateSpec(invalidSpec, hostCapabilities{}); err == nil || !strings.Contains(err.Error(), "with post_start_on_primary must define healthcheck") {
 		t.Fatalf("companion container post_start_on_primary without healthcheck should be rejected, got %v", err)
 	}
 }
@@ -464,6 +464,9 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"idle_ttl",
 				"ports",
 				"command",
+				"cpu_limit",
+				"memory_limit",
+				"disk_limit",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"image":                1,
@@ -476,6 +479,9 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"idle_ttl":             8,
 				"ports":                9,
 				"command":              10,
+				"cpu_limit":            11,
+				"memory_limit":         12,
+				"disk_limit":           13,
 			},
 		},
 		{

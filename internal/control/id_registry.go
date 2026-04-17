@@ -225,6 +225,9 @@ func NewServiceWithPersistentIDStore(ctx context.Context, config ServiceConfig, 
 	if err := service.restorePersistedSandboxes(restoreCtx); err != nil {
 		return nil, nil, errors.Join(err, closeCloser(runtimeCloser), db.Close())
 	}
+	if err := service.reconcileSandboxSlices(restoreCtx); err != nil {
+		return nil, nil, errors.Join(err, closeCloser(runtimeCloser), db.Close())
+	}
 	if err := service.cleanupExpiredEvents(); err != nil {
 		return nil, nil, errors.Join(err, closeCloser(runtimeCloser), db.Close())
 	}

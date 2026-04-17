@@ -92,6 +92,8 @@ func TestCompanionCommandDefaultsToImageCMD(t *testing.T) {
 				"primary-test",
 				[]*agboxv1.CompanionContainerSpec{cc},
 				nil,
+				"",
+				nil,
 				nil,
 				create,
 				start,

@@ -15,7 +15,7 @@ func TestValidateCommandRejectsEmptyStringEntry(t *testing.T) {
 			Image:   "img:test",
 			Command: []string{"foo", "", "bar"},
 		}
-		err := validateCreateSpec(spec)
+		err := validateCreateSpec(spec, hostCapabilities{})
 		if err == nil {
 			t.Fatal("expected validation error for empty string entry")
 		}
@@ -34,7 +34,7 @@ func TestValidateCommandRejectsEmptyStringEntry(t *testing.T) {
 				},
 			},
 		}
-		err := validateCreateSpec(spec)
+		err := validateCreateSpec(spec, hostCapabilities{})
 		if err == nil {
 			t.Fatal("expected validation error for companion empty-string entry")
 		}
