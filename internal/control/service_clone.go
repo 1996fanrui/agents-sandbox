@@ -64,6 +64,9 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		Envs:                cloneStringMap(spec.GetEnvs()),
 		Ports:               clonePortMappings(spec.GetPorts()),
 		Command:             slices.Clone(spec.GetCommand()),
+		CpuLimit:            spec.GetCpuLimit(),
+		MemoryLimit:         spec.GetMemoryLimit(),
+		DiskLimit:           spec.GetDiskLimit(),
 	}
 	if spec.GetIdleTtl() != nil {
 		cloned.IdleTtl = durationpb.New(spec.GetIdleTtl().AsDuration())
@@ -100,6 +103,7 @@ func cloneCompanionContainerSpecs(items []*agboxv1.CompanionContainerSpec) []*ag
 			Healthcheck:        cloneHealthcheck(item.GetHealthcheck()),
 			PostStartOnPrimary: slices.Clone(item.GetPostStartOnPrimary()),
 			Command:            slices.Clone(item.GetCommand()),
+			DiskLimit:          item.GetDiskLimit(),
 		})
 	}
 	return result

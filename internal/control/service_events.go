@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
+	"github.com/coreos/go-systemd/v22/unit"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -675,6 +677,103 @@ func snapshotEvents(record *sandboxRecord) []*agboxv1.SandboxEvent {
 		})
 	}
 	return result
+}
+
+// reconcileSandboxSlices runs once at daemon startup, immediately after
+// restorePersistedSandboxes. It walks restored records to rebuild the slice
+// for every still-active sandbox with cpu/memory limits, then removes any
+// lingering agbox-*.slice units whose sandbox id is no longer tracked. Both
+// operations are idempotent: missing slices are recreated by EnsureSandboxSlice
+// and slices that never existed are silently ignored by RemoveSandboxSlice.
+func (s *Service) reconcileSandboxSlices(ctx context.Context) error {
+	slice := s.config.sliceManager
+	if slice == nil {
+		return nil
+	}
+	s.mu.RLock()
+	liveIDs := make(map[string]struct{}, len(s.boxes))
+	type rebuildTarget struct {
+		sandboxID string
+		cpu       int64
+		mem       int64
+	}
+	var rebuilds []rebuildTarget
+	var removes []string
+	for sandboxID, record := range s.boxes {
+		state := record.handle.GetState()
+		switch state {
+		case agboxv1.SandboxState_SANDBOX_STATE_READY,
+			agboxv1.SandboxState_SANDBOX_STATE_PENDING:
+			limits, err := buildLimits(record.createSpec)
+			if err != nil {
+				s.mu.RUnlock()
+				return fmt.Errorf("reconcile parse limits for %s: %w", sandboxID, err)
+			}
+			if limits.CPUMillicores > 0 || limits.MemoryBytes > 0 {
+				rebuilds = append(rebuilds, rebuildTarget{sandboxID, limits.CPUMillicores, limits.MemoryBytes})
+				liveIDs[sandboxID] = struct{}{}
+			}
+		case agboxv1.SandboxState_SANDBOX_STATE_STOPPED,
+			agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+			agboxv1.SandboxState_SANDBOX_STATE_DELETED:
+			// Only schedule a Remove if the sandbox spec requested a slice.
+			// Calling StopUnit on systemd for every terminal sandbox would hit
+			// polkit on non-root daemons and surface "Authentication required".
+			limits, err := buildLimits(record.createSpec)
+			if err != nil {
+				s.mu.RUnlock()
+				return fmt.Errorf("reconcile parse limits for %s: %w", sandboxID, err)
+			}
+			if limits.CPUMillicores > 0 || limits.MemoryBytes > 0 {
+				removes = append(removes, sandboxID)
+			}
+		}
+	}
+	s.mu.RUnlock()
+
+	for _, target := range rebuilds {
+		if err := slice.EnsureSandboxSlice(ctx, target.sandboxID, target.cpu, target.mem); err != nil {
+			return fmt.Errorf("reconcile ensure slice for %s: %w", target.sandboxID, err)
+		}
+	}
+	for _, sandboxID := range removes {
+		if err := slice.RemoveSandboxSlice(ctx, sandboxID); err != nil {
+			return fmt.Errorf("reconcile remove slice for %s: %w", sandboxID, err)
+		}
+	}
+	existing, err := slice.ListSandboxSlices(ctx)
+	if err != nil {
+		return fmt.Errorf("reconcile list slices: %w", err)
+	}
+	for _, unitName := range existing {
+		sandboxID := sandboxIDFromSliceUnit(unitName)
+		if sandboxID == "" {
+			continue
+		}
+		if _, live := liveIDs[sandboxID]; live {
+			continue
+		}
+		if err := slice.RemoveSandboxSlice(ctx, sandboxID); err != nil {
+			return fmt.Errorf("reconcile remove orphan slice %s: %w", unitName, err)
+		}
+	}
+	return nil
+}
+
+// sandboxIDFromSliceUnit reverses the "agbox-<escaped>.slice" naming to the
+// sandbox id used as the key for RemoveSandboxSlice. Returns "" when the
+// unit name does not match the expected prefix/suffix.
+func sandboxIDFromSliceUnit(unitName string) string {
+	const prefix = "agbox-"
+	const suffix = ".slice"
+	if !strings.HasPrefix(unitName, prefix) || !strings.HasSuffix(unitName, suffix) {
+		return ""
+	}
+	inner := unitName[len(prefix) : len(unitName)-len(suffix)]
+	if inner == "" {
+		return ""
+	}
+	return unit.UnitNameUnescape(inner)
 }
 
 func eventTypeForExec(state agboxv1.ExecState) agboxv1.EventType {

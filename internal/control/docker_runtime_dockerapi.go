@@ -19,6 +19,8 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 	nat "github.com/docker/go-connections/nat"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // execLogContainerDir is the container-side directory for exec log files when output redirection is enabled.
@@ -53,6 +55,12 @@ type dockerContainerSpec struct {
 	Ports        []dockerPortMapping
 	Workdir      string
 	Command      []string
+	// CgroupParent is the systemd slice unit name used as the per-sandbox
+	// cgroup parent. Empty means Docker's default cgroup placement.
+	CgroupParent string
+	// DiskSizeBytes drives HostConfig.StorageOpt["size"] in plain decimal
+	// bytes. Zero means no per-container disk quota.
+	DiskSizeBytes int64
 }
 
 type dockerExecSpec struct {
@@ -168,6 +176,12 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		// "unless-stopped" only skips restart for containers that were in the
 		// stopped state, so stopped sandboxes stay stopped across reboots.
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
+		Resources:     container.Resources{CgroupParent: spec.CgroupParent},
+	}
+	if spec.DiskSizeBytes > 0 {
+		// Docker's storage-opt size= key takes the byte count as a plain
+		// decimal string (no "g"/"m" suffix through the HTTP API).
+		hostConfig.StorageOpt = map[string]string{"size": strconv.FormatInt(spec.DiskSizeBytes, 10)}
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {
@@ -191,16 +205,41 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		Healthcheck:  healthcheck,
 		ExposedPorts: exposedPorts,
 	}, hostConfig, networkingConfig, nil, spec.Name)
-	if err != nil && len(spec.Ports) > 0 {
-		// Wrap with port context so async error messages are actionable.
-		ports := make([]string, 0, len(spec.Ports))
-		for _, p := range spec.Ports {
-			ports = append(ports, fmt.Sprintf("%d->%d/%s", p.HostPort, p.ContainerPort, p.Protocol))
+	if err != nil {
+		if translated := translateDiskLimitError(err); translated != nil {
+			return translated
 		}
-		return fmt.Errorf("failed to create container with port bindings [%s]: %w",
-			strings.Join(ports, ", "), err)
+		if len(spec.Ports) > 0 {
+			// Wrap with port context so async error messages are actionable.
+			ports := make([]string, 0, len(spec.Ports))
+			for _, p := range spec.Ports {
+				ports = append(ports, fmt.Sprintf("%d->%d/%s", p.HostPort, p.ContainerPort, p.Protocol))
+			}
+			return fmt.Errorf("failed to create container with port bindings [%s]: %w",
+				strings.Join(ports, ", "), err)
+		}
 	}
 	return err
+}
+
+// translateDiskLimitError rewrites Docker's native storage-opt prerequisite
+// errors into a FailedPrecondition gRPC status with diagnostic hints. The
+// substrings below come from moby/moby's ContainerCreate path (overlay2 size
+// guard); revisit if Docker rewords them.
+func translateDiskLimitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "storage-opt is supported only for overlay") &&
+		!strings.Contains(msg, "inappropriate ioctl for device") {
+		return nil
+	}
+	return status.Errorf(codes.FailedPrecondition,
+		"disk_limit not supported by Docker runtime: %s. "+
+			"Prerequisites: overlay2 storage driver on XFS with prjquota mount option and ftype=1. "+
+			"Run: docker info --format '{{.Driver}} {{.DockerRootDir}}' and findmnt -T <DockerRootDir> to diagnose.",
+		err)
 }
 
 func primaryContainerEnvironment(mounts []dockerMount) map[string]string {
