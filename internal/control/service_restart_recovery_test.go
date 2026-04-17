@@ -325,8 +325,8 @@ func TestDockerEventPrimaryContainerDie(t *testing.T) {
 	var found bool
 	for _, e := range events {
 		if e.GetEventType() == agboxv1.EventType_SANDBOX_FAILED {
-			if eventErrorCode(e) != "CONTAINER_DIED" {
-				t.Fatalf("expected error_code CONTAINER_DIED, got %s", eventErrorCode(e))
+			if eventErrorCode(e) != containerCrashloop {
+				t.Fatalf("expected error_code %s, got %s", containerCrashloop, eventErrorCode(e))
 			}
 			found = true
 		}

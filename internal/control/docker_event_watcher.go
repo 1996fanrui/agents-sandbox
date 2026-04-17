@@ -8,6 +8,77 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 )
 
+// Error codes used in sandbox failed events.
+const (
+	// containerCrashloop is emitted when the primary container dies (non-OOM).
+	containerCrashloop = "CONTAINER_CRASHLOOP"
+	// containerOOM is emitted when the primary container is killed by OOM.
+	containerOOM = "CONTAINER_OOM"
+	// containerNotRunning is emitted when the container does not exist at inspect time.
+	containerNotRunning = "CONTAINER_NOT_RUNNING"
+)
+
+// containerEvalDecision captures the outcome of evaluateContainer for a single container.
+type containerEvalDecision struct {
+	// shouldFail is true when the sandbox should transition to FAILED.
+	// Only applicable to primary container evaluation.
+	shouldFail bool
+	// companionFailed is true when a companion container should emit COMPANION_CONTAINER_FAILED.
+	companionFailed bool
+	// errorCode is the error code to include in the failed event.
+	errorCode string
+	// errorMessage is the human-readable message for the failed event.
+	errorMessage string
+}
+
+// evaluateContainer inspects the given result and returns a decision about whether the
+// container (primary or companion) should be considered failed.
+//
+// Stage 1 semantics: any non-Running state (including Paused) → failed decision.
+// Stage 2 will replace this with the 5-minute non-Running window + 30s Running guard.
+func evaluateContainer(result ContainerInspectResult, isPrimary bool) containerEvalDecision {
+	if result.Running {
+		// Container is healthy; no action needed.
+		return containerEvalDecision{}
+	}
+
+	// Non-running: determine error code.
+	errorCode := containerNotRunning
+	errorMessage := "primary container not running (detected during reconciliation)"
+	if !isPrimary {
+		errorMessage = "companion container not running (detected during reconciliation)"
+	}
+	if result.OOMKilled {
+		errorCode = containerOOM
+		if isPrimary {
+			errorMessage = "primary container OOM killed"
+		} else {
+			errorMessage = "companion container OOM killed"
+		}
+	} else if result.Exists {
+		// Container exists but is not running (exited, paused, restarting, etc.).
+		errorCode = containerCrashloop
+		if isPrimary {
+			errorMessage = "primary container exited"
+		} else {
+			errorMessage = "companion container exited"
+		}
+	}
+
+	if isPrimary {
+		return containerEvalDecision{
+			shouldFail:   true,
+			errorCode:    errorCode,
+			errorMessage: errorMessage,
+		}
+	}
+	return containerEvalDecision{
+		companionFailed: true,
+		errorCode:       errorCode,
+		errorMessage:    errorMessage,
+	}
+}
+
 // dockerEventWatcher subscribes to container lifecycle events and updates sandbox state accordingly.
 // It runs a reconnect loop: on each (re)connection it first reconciles all READY sandboxes against
 // Docker inspect, then processes the live event stream until it breaks.
@@ -66,12 +137,12 @@ func (w *dockerEventWatcher) processEvents(ctx context.Context, eventCh <-chan C
 			if !ok {
 				return true // Event channel closed, reconnect.
 			}
-			w.handleEvent(event)
+			w.handleEvent(ctx, event)
 		}
 	}
 }
 
-func (w *dockerEventWatcher) handleEvent(event ContainerEvent) {
+func (w *dockerEventWatcher) handleEvent(_ context.Context, event ContainerEvent) {
 	w.service.mu.Lock()
 	defer w.service.mu.Unlock()
 
@@ -80,51 +151,69 @@ func (w *dockerEventWatcher) handleEvent(event ContainerEvent) {
 		return
 	}
 
-	state := record.handle.GetState()
+	if record.handle.GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		return // Expected for STOPPED/DELETING/DELETED/FAILED/PENDING.
+	}
+	if record.runtimeState == nil {
+		return
+	}
 
+	// Synthesize a ContainerInspectResult from the event action.
+	// Stage 1 preserves the pre-refactor semantics: any die/oom event on a container that was
+	// previously running is treated as a failed container (Exists=true, Running=false).
+	// Stage 2 will replace this with a real InspectContainer call inside the window evaluation.
+	result := containerEventToInspectResult(event)
 	if event.IsCompanionContainer {
-		// Companion container event: emit COMPANION_CONTAINER_FAILED but do not change sandbox state.
-		if state == agboxv1.SandboxState_SANDBOX_STATE_READY {
-			if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
-				companionContainerName: event.CompanionContainerName,
-				errorCode:              containerEventErrorCode(event.Action),
-				errorMessage:           "companion container " + event.Action,
-				sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
-			}); err != nil {
-				w.logger.Error("append companion container failed event", slog.String("sandbox_id", event.SandboxID), slog.Any("error", err))
-			}
+		decision := evaluateContainer(result, false)
+		if !decision.companionFailed {
+			return
+		}
+		if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
+			companionContainerName: event.CompanionContainerName,
+			errorCode:              decision.errorCode,
+			errorMessage:           decision.errorMessage,
+			sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
+		}); err != nil {
+			w.logger.Error("append companion container failed event",
+				slog.String("sandbox_id", event.SandboxID),
+				slog.Any("error", err),
+			)
 		}
 		return
 	}
 
 	// Primary container event.
-	if state != agboxv1.SandboxState_SANDBOX_STATE_READY {
-		return // Expected for STOPPED/DELETING/DELETED/FAILED/PENDING.
+	decision := evaluateContainer(result, true)
+	if !decision.shouldFail {
+		return
 	}
-
-	errorCode := containerEventErrorCode(event.Action)
 	if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-		errorCode:    errorCode,
-		errorMessage: "primary container " + event.Action,
+		errorCode:    decision.errorCode,
+		errorMessage: decision.errorMessage,
 		sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
 	}); err != nil {
-		w.logger.Error("append sandbox failed event", slog.String("sandbox_id", event.SandboxID), slog.Any("error", err))
+		w.logger.Error("append sandbox failed event",
+			slog.String("sandbox_id", event.SandboxID),
+			slog.Any("error", err),
+		)
 		return
 	}
 	record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
 	w.logger.Info("sandbox failed due to container event",
 		slog.String("sandbox_id", event.SandboxID),
 		slog.String("action", event.Action),
-		slog.String("error_code", errorCode),
+		slog.String("error_code", decision.errorCode),
 	)
 }
 
-func containerEventErrorCode(action string) string {
-	switch action {
-	case "oom":
-		return "CONTAINER_OOM"
-	default:
-		return "CONTAINER_DIED"
+// containerEventToInspectResult synthesizes a ContainerInspectResult from a container event.
+// This is used in Stage 1 handleEvent to preserve the pre-refactor event-based semantics
+// without performing a live InspectContainer call. Stage 2 replaces this with real inspect.
+func containerEventToInspectResult(event ContainerEvent) ContainerInspectResult {
+	return ContainerInspectResult{
+		Exists:    true,
+		Running:   false,
+		OOMKilled: event.Action == "oom",
 	}
 }
 
@@ -140,27 +229,58 @@ func (w *dockerEventWatcher) reconcileAll(ctx context.Context) {
 		if record.runtimeState == nil {
 			continue
 		}
+
+		// Evaluate primary container.
 		result, err := w.service.config.runtimeBackend.InspectContainer(ctx, record.runtimeState.PrimaryContainerName)
 		if err != nil {
 			w.logger.Warn("reconcile inspect failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
 			continue
 		}
-		if result.Exists && result.Running {
-			continue
+		decision := evaluateContainer(result, true)
+		if decision.shouldFail {
+			if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
+				errorCode:    decision.errorCode,
+				errorMessage: decision.errorMessage,
+				sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+			}); err != nil {
+				w.logger.Error("reconcile append failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
+				continue
+			}
+			record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
+			w.logger.Info("sandbox failed during reconciliation",
+				slog.String("sandbox_id", sandboxID),
+				slog.String("error_code", decision.errorCode),
+			)
+			continue // Primary failed; skip companion evaluation for this sandbox.
 		}
-		errorCode := "CONTAINER_NOT_RUNNING"
-		if result.OOMKilled {
-			errorCode = "CONTAINER_OOM"
+
+		// Evaluate companion containers.
+		for _, cc := range record.runtimeState.CompanionContainers {
+			ccResult, err := w.service.config.runtimeBackend.InspectContainer(ctx, cc.ContainerName)
+			if err != nil {
+				w.logger.Warn("reconcile companion inspect failed",
+					slog.String("sandbox_id", sandboxID),
+					slog.String("container", cc.ContainerName),
+					slog.Any("error", err),
+				)
+				continue
+			}
+			ccDecision := evaluateContainer(ccResult, false)
+			if !ccDecision.companionFailed {
+				continue
+			}
+			if err := w.service.appendEventLocked(record, agboxv1.EventType_COMPANION_CONTAINER_FAILED, eventMutation{
+				companionContainerName: cc.Name,
+				errorCode:              ccDecision.errorCode,
+				errorMessage:           ccDecision.errorMessage,
+				sandboxState:           agboxv1.SandboxState_SANDBOX_STATE_READY,
+			}); err != nil {
+				w.logger.Error("reconcile companion append failed",
+					slog.String("sandbox_id", sandboxID),
+					slog.String("container", cc.Name),
+					slog.Any("error", err),
+				)
+			}
 		}
-		if err := w.service.appendEventLocked(record, agboxv1.EventType_SANDBOX_FAILED, eventMutation{
-			errorCode:    errorCode,
-			errorMessage: "primary container not running (detected during reconciliation)",
-			sandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
-		}); err != nil {
-			w.logger.Error("reconcile append failed", slog.String("sandbox_id", sandboxID), slog.Any("error", err))
-			continue
-		}
-		record.handle.State = agboxv1.SandboxState_SANDBOX_STATE_FAILED
-		w.logger.Info("sandbox failed during reconciliation", slog.String("sandbox_id", sandboxID), slog.String("error_code", errorCode))
 	}
 }
