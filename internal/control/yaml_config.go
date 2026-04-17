@@ -32,6 +32,11 @@ type YAMLConfig struct {
 	// back to the sleep-loop default); non-nil with len == 0 = explicit empty
 	// array (rejected as a misconfiguration).
 	Command *[]string `yaml:"command"`
+	// CPULimit / MemoryLimit / DiskLimit follow Docker CLI syntax. Empty =
+	// unlimited (no enforcement). See CreateSpec in api/proto/service.proto.
+	CPULimit    string `yaml:"cpu_limit"`
+	MemoryLimit string `yaml:"memory_limit"`
+	DiskLimit   string `yaml:"disk_limit"`
 }
 
 // YAMLMountSpec describes a bind-mount from host to container.
@@ -65,6 +70,9 @@ type YAMLCompanionContainerSpec struct {
 	// preserves YAML presence semantics: nil = field omitted (image CMD
 	// applies); non-nil with len == 0 = explicit empty array (rejected).
 	Command *[]string `yaml:"command"`
+	// DiskLimit follows the same Docker --storage-opt size= syntax as
+	// CreateSpec.disk_limit. Empty = unlimited.
+	DiskLimit string `yaml:"disk_limit"`
 }
 
 // YAMLHealthcheckConfig describes the healthcheck for a companion container.
@@ -120,6 +128,9 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 	spec := &agboxv1.CreateSpec{
 		Image:        cfg.Image,
 		BuiltinTools: cfg.BuiltinTools,
+		CpuLimit:     cfg.CPULimit,
+		MemoryLimit:  cfg.MemoryLimit,
+		DiskLimit:    cfg.DiskLimit,
 	}
 	if cfg.Command != nil {
 		spec.Command = append([]string(nil), (*cfg.Command)...)
@@ -207,6 +218,7 @@ func convertCompanionContainerMap(containers map[string]YAMLCompanionContainerSp
 			Name:               name,
 			Image:              cc.Image,
 			PostStartOnPrimary: cc.PostStartOnPrimary,
+			DiskLimit:          cc.DiskLimit,
 		}
 		if cc.Command != nil {
 			protoCC.Command = append([]string(nil), (*cc.Command)...)
@@ -295,6 +307,15 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	// Scalar: override non-empty overwrites.
 	if override.GetImage() != "" {
 		result.Image = override.GetImage()
+	}
+	if override.GetCpuLimit() != "" {
+		result.CpuLimit = override.GetCpuLimit()
+	}
+	if override.GetMemoryLimit() != "" {
+		result.MemoryLimit = override.GetMemoryLimit()
+	}
+	if override.GetDiskLimit() != "" {
+		result.DiskLimit = override.GetDiskLimit()
 	}
 
 	// Repeated: override non-nil (len > 0) replaces entirely.

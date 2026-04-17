@@ -142,7 +142,7 @@ class HealthcheckConfig(_message.Message):
     def __init__(self, test: _Optional[_Iterable[str]] = ..., interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., timeout: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., retries: _Optional[int] = ..., start_period: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., start_interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class CompanionContainerSpec(_message.Message):
-    __slots__ = ("name", "image", "envs", "healthcheck", "post_start_on_primary", "command")
+    __slots__ = ("name", "image", "envs", "healthcheck", "post_start_on_primary", "command", "disk_limit")
     class EnvsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -156,16 +156,18 @@ class CompanionContainerSpec(_message.Message):
     HEALTHCHECK_FIELD_NUMBER: _ClassVar[int]
     POST_START_ON_PRIMARY_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
+    DISK_LIMIT_FIELD_NUMBER: _ClassVar[int]
     name: str
     image: str
     envs: _containers.ScalarMap[str, str]
     healthcheck: HealthcheckConfig
     post_start_on_primary: _containers.RepeatedScalarFieldContainer[str]
     command: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ..., command: _Optional[_Iterable[str]] = ...) -> None: ...
+    disk_limit: str
+    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ..., command: _Optional[_Iterable[str]] = ..., disk_limit: _Optional[str] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports", "command")
+    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports", "command", "cpu_limit", "memory_limit", "disk_limit")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -190,6 +192,9 @@ class CreateSpec(_message.Message):
     IDLE_TTL_FIELD_NUMBER: _ClassVar[int]
     PORTS_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
+    CPU_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    DISK_LIMIT_FIELD_NUMBER: _ClassVar[int]
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
@@ -200,7 +205,10 @@ class CreateSpec(_message.Message):
     idle_ttl: _duration_pb2.Duration
     ports: _containers.RepeatedCompositeFieldContainer[PortMapping]
     command: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., ports: _Optional[_Iterable[_Union[PortMapping, _Mapping]]] = ..., command: _Optional[_Iterable[str]] = ...) -> None: ...
+    cpu_limit: str
+    memory_limit: str
+    disk_limit: str
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., ports: _Optional[_Iterable[_Union[PortMapping, _Mapping]]] = ..., command: _Optional[_Iterable[str]] = ..., cpu_limit: _Optional[str] = ..., memory_limit: _Optional[str] = ..., disk_limit: _Optional[str] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
     __slots__ = ("sandbox_id", "state", "last_event_sequence", "companion_containers", "labels", "created_at", "image", "error_code", "error_message", "state_changed_at")
