@@ -153,6 +153,9 @@ class AgentsSandboxClient:
         labels: Mapping[str, str] | None = None,
         envs: Mapping[str, str] | None = None,
         idle_ttl: datetime.timedelta | None = None,
+        cpu_limit: str = "",
+        memory_limit: str = "",
+        disk_limit: str = "",
         wait: bool = True,
     ) -> SandboxHandle:
         """Create a sandbox and optionally wait until it becomes ready.
@@ -182,6 +185,9 @@ class AgentsSandboxClient:
                 labels={} if labels is None else dict(labels),
                 envs={} if envs is None else dict(envs),
                 idle_ttl=idle_ttl,
+                cpu_limit=cpu_limit,
+                memory_limit=memory_limit,
+                disk_limit=disk_limit,
             ),
             config_yaml=resolved_config_yaml,
         )

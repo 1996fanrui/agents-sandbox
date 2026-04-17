@@ -68,7 +68,7 @@ def to_proto_healthcheck(config: HealthcheckConfig) -> service_pb2.HealthcheckCo
 
 
 def to_proto_companion_container(spec: CompanionContainerSpec) -> service_pb2.CompanionContainerSpec:
-    return service_pb2.CompanionContainerSpec(
+    proto = service_pb2.CompanionContainerSpec(
         name=spec.name,
         image=spec.image,
         envs=dict(spec.envs),
@@ -80,6 +80,8 @@ def to_proto_companion_container(spec: CompanionContainerSpec) -> service_pb2.Co
         command=[] if spec.command is None else list(spec.command),
         post_start_on_primary=list(spec.post_start_on_primary),
     )
+    proto.disk_limit = spec.disk_limit
+    return proto
 
 
 def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb2.CreateSandboxRequest:
@@ -96,6 +98,9 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
     )
     if request.create_spec.idle_ttl is not None:
         create_spec.idle_ttl.CopyFrom(_timedelta_to_duration(request.create_spec.idle_ttl))
+    create_spec.cpu_limit = request.create_spec.cpu_limit
+    create_spec.memory_limit = request.create_spec.memory_limit
+    create_spec.disk_limit = request.create_spec.disk_limit
     return service_pb2.CreateSandboxRequest(
         sandbox_id="" if request.sandbox_id is None else request.sandbox_id,
         create_spec=create_spec,
@@ -170,6 +175,7 @@ def to_companion_container(spec: service_pb2.CompanionContainerSpec) -> Companio
         healthcheck=to_healthcheck(spec.healthcheck if spec.HasField("healthcheck") else None),
         command=tuple(spec.command) if len(spec.command) > 0 else None,
         post_start_on_primary=tuple(spec.post_start_on_primary),
+        disk_limit=spec.disk_limit,
     )
 
 

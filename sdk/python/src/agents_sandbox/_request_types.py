@@ -21,6 +21,9 @@ class CreateSandboxSpec:
     labels: Mapping[str, str] = field(default_factory=dict)
     envs: Mapping[str, str] = field(default_factory=dict)
     idle_ttl: datetime.timedelta | None = None
+    cpu_limit: str = ""
+    memory_limit: str = ""
+    disk_limit: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))

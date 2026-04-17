@@ -288,6 +288,9 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "labels",
         "envs",
         "idle_ttl",
+        "cpu_limit",
+        "memory_limit",
+        "disk_limit",
         "wait",
     ]
     assert "request" not in create_signature.parameters
