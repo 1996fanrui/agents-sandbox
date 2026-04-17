@@ -43,6 +43,7 @@ type ContainerEvent struct {
 type ContainerInspectResult struct {
 	Exists    bool
 	Running   bool
+	Paused    bool
 	ExitCode  int
 	OOMKilled bool
 }
@@ -480,6 +481,7 @@ func (backend *dockerRuntimeBackend) InspectContainer(ctx context.Context, conta
 	result := ContainerInspectResult{
 		Exists:  true,
 		Running: resp.State != nil && resp.State.Running,
+		Paused:  resp.State != nil && resp.State.Paused,
 	}
 	if resp.State != nil {
 		result.ExitCode = resp.State.ExitCode
