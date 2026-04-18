@@ -31,6 +31,10 @@ agbox exec cancel
 agbox exec list
 # Launch interactive agent session
 agbox agent
+# Launch agent session via top-level shortcut (equivalent to agbox agent <type>)
+agbox claude
+agbox codex
+agbox openclaw
 # Generate shell autocompletion script (bash, zsh, fish, powershell)
 agbox completion
 # Print usage for any command
@@ -77,6 +81,8 @@ Provides an out-of-the-box workflow: create a sandbox, optionally copy the proje
 ```bash
 # Use a registered agent type (resolves command + default builtin tools)
 agbox agent claude
+# Equivalent top-level shortcut
+agbox claude
 # Registered agent type with custom workspace
 agbox agent codex --workspace /path/to/project
 # Long-running mode
@@ -87,6 +93,10 @@ agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool cla
 SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
 # Deploy OpenClaw gateway (long-running, persists after CLI exit)
 agbox agent openclaw
+# Set resource limits and environment variables
+agbox claude --cpu-limit 2 --memory-limit 4g --disk-limit 10g --env MY_API_KEY=secret
+# Override sandbox ID
+agbox codex --sandbox-id my-custom-sandbox
 ```
 
 ### Session Modes
@@ -113,7 +123,11 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 | builtinTools | Pre-installed tools | Fixed | Fixed | Fixed | User-specified | `--builtin-tool` |
 | workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | No | `--workspace` (explicit to enable) |
 | .git check | Confirm when workspace lacks .git | Yes | Yes | No | No | None (automatic) |
-| sandboxIDGen | Custom ID generator | No | No | openclaw-XXXX | No | None |
+| envs | Environment variables for container | None | None | None | None | `--env` (repeatable, `KEY=VAL` form) |
+| cpuLimit | CPU limit | None | None | None | None | `--cpu-limit` (Docker `--cpus` format) |
+| memoryLimit | Memory limit | None | None | None | None | `--memory-limit` (Docker `--memory` format) |
+| diskLimit | Disk limit | None | None | None | None | `--disk-limit` (Docker `--storage-opt size=` format) |
+| sandboxIDGen | Custom ID generator | No | No | openclaw-XXXX | No | `--sandbox-id` |
 | configYaml | Embedded sandbox config | No | No | Yes (mounts, ports, envs) | No | None |
 | preFlight | Pre-flight validation | No | No | Auth + config check | No | None |
 | phases | Multi-phase startup | No | No | install + start | No | None |
@@ -125,7 +139,13 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
   - Custom `--command` does not copy by default; passing `--workspace` explicitly enables it.
   - `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
 - `.git` check is declared per agent type (claude/codex enable it; openclaw and custom `--command` do not). When enabled, it triggers if the workspace directory lacks a `.git` entry.
-- openclaw auto-generates sandbox IDs matching `openclaw-XXXX` (4 hex chars); other types let the daemon generate IDs.
+- openclaw auto-generates sandbox IDs matching `openclaw-XXXX` (4 hex chars); other types let the daemon generate IDs. `--sandbox-id` overrides any generator; empty or omitted values fall through to the generator or daemon auto-generation.
+- `--env` passes environment variables to `CreateSpec.Envs`. Multiple `--env` flags are merged; duplicate keys use the last value. The daemon performs key-level merge with `configYaml` envs.
+- `--cpu-limit`, `--memory-limit`, and `--disk-limit` pass resource limits directly to `CreateSpec` fields. Values are not validated by the CLI; invalid formats are rejected by the daemon or Docker.
+
+### Top-Level Agent Shortcuts
+
+Each registered agent type is also available as a top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`. These are exactly equivalent to `agbox agent <type>` — same flags, same behavior, same exit codes. The only difference is that top-level commands do not accept positional arguments (the agent type is implicit in the command name).
 
 ## Exit Codes
 

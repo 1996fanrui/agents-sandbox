@@ -16,12 +16,11 @@ type agentSessionFlagVars struct {
 	mode         string
 	workspace    string
 	builtinTools []string
-	// Pre-reserved for ISSUE-188 (Commit 2 will consume these):
-	envs        []string
-	cpuLimit    string
-	memoryLimit string
-	diskLimit   string
-	sandboxID   string
+	envs         []string
+	cpuLimit     string
+	memoryLimit  string
+	diskLimit    string
+	sandboxID    string
 	// Track which flags were explicitly set by the user:
 	modeOverridden         bool
 	workspaceOverridden    bool
@@ -34,7 +33,6 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 	cmd.Flags().StringVar(&v.mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
 	cmd.Flags().StringVar(&v.workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
 	cmd.Flags().StringArrayVar(&v.builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
-	// ISSUE-188 flags (registered now, consumed in Commit 2):
 	cmd.Flags().StringArrayVar(&v.envs, "env", nil, "Environment variable in KEY=VAL form (repeatable)")
 	cmd.Flags().StringVar(&v.cpuLimit, "cpu-limit", "", "CPU limit (Docker --cpus format, e.g. 2, 0.5)")
 	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
@@ -68,6 +66,10 @@ type agentSessionArgs struct {
 	mode         agentMode // resolved session mode
 	workspace    string    // host directory to copy; empty means "don't copy"
 	builtinTools []string
+	envs         map[string]string
+	cpuLimit     string
+	memoryLimit  string
+	diskLimit    string
 	sandboxID    string                                       // custom sandbox ID (empty = daemon generates)
 	configYaml   string                                       // embedded YAML config
 	phases       []execPhase                                  // multi-phase startup (non-empty replaces command)
@@ -197,8 +199,27 @@ func resolveAgentSessionArgs(
 	}
 	// else: custom --command without --workspace → parsed.workspace stays "".
 
-	// Sandbox ID resolution: use the type's generator if defined.
-	if isRegistered && typeDef.sandboxIDGen != nil {
+	// Parse --env flags into a map.
+	if len(v.envs) > 0 {
+		envMap := make(map[string]string, len(v.envs))
+		for _, raw := range v.envs {
+			key, value, err := parseKeyValueAssignment(raw, "--env")
+			if err != nil {
+				return agentSessionArgs{}, err
+			}
+			envMap[key] = value // last occurrence wins
+		}
+		parsed.envs = envMap
+	}
+
+	parsed.cpuLimit = v.cpuLimit
+	parsed.memoryLimit = v.memoryLimit
+	parsed.diskLimit = v.diskLimit
+
+	// Sandbox ID resolution: --sandbox-id overrides the type's generator.
+	if v.sandboxID != "" {
+		parsed.sandboxID = v.sandboxID
+	} else if isRegistered && typeDef.sandboxIDGen != nil {
 		parsed.sandboxID = typeDef.sandboxIDGen()
 	}
 	// else: parsed.sandboxID stays empty, daemon auto-generates.

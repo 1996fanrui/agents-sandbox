@@ -630,3 +630,48 @@ func TestRunAgentSession_LongRunningNoGitConfirm(t *testing.T) {
 		t.Fatalf("expected workspace copy from %s, got %v", tmpDir, copies)
 	}
 }
+
+func TestRunAgentSessionPropagatesFlagsToCreateSpec(t *testing.T) {
+	eventCh := make(chan *agboxv1.SandboxEvent, 1)
+	mock := newReadyMock(eventCh)
+
+	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
+		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
+	}
+	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
+		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
+		mode:        agentModeLongRunning,
+		command:     []string{"echo"},
+		envs:        map[string]string{"FOO": "bar", "BAZ": "qux"},
+		cpuLimit:    "2",
+		memoryLimit: "4g",
+		diskLimit:   "10g",
+	}, "test", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	req := mock.createSandboxReq
+	if req == nil {
+		t.Fatal("expected CreateSandbox to be called")
+	}
+	spec := req.GetCreateSpec()
+
+	if spec.GetCpuLimit() != "2" {
+		t.Fatalf("expected cpu_limit=2, got %q", spec.GetCpuLimit())
+	}
+	if spec.GetMemoryLimit() != "4g" {
+		t.Fatalf("expected memory_limit=4g, got %q", spec.GetMemoryLimit())
+	}
+	if spec.GetDiskLimit() != "10g" {
+		t.Fatalf("expected disk_limit=10g, got %q", spec.GetDiskLimit())
+	}
+	envs := spec.GetEnvs()
+	if envs["FOO"] != "bar" || envs["BAZ"] != "qux" {
+		t.Fatalf("expected envs={FOO:bar, BAZ:qux}, got %v", envs)
+	}
+}

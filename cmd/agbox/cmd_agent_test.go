@@ -475,3 +475,210 @@ func TestTopLevelCommandRejectsCommandFlag(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestResolveAgentSessionArgsFlags(t *testing.T) {
+	t.Run("single_env", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			envs:       []string{"KEY=VAL"},
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(parsed.envs) != 1 || parsed.envs["KEY"] != "VAL" {
+			t.Fatalf("expected envs={KEY:VAL}, got %v", parsed.envs)
+		}
+	})
+
+	t.Run("env_last_wins", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			envs:       []string{"KEY=V1", "KEY=V2"},
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.envs["KEY"] != "V2" {
+			t.Fatalf("expected last-wins KEY=V2, got %q", parsed.envs["KEY"])
+		}
+	})
+
+	t.Run("env_empty_value", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			envs:       []string{"KEY="},
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if v, ok := parsed.envs["KEY"]; !ok || v != "" {
+			t.Fatalf("expected envs[KEY]=\"\", got %q (ok=%v)", v, ok)
+		}
+	})
+
+	t.Run("env_empty_key", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			envs:       []string{"=VAL"},
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if v, ok := parsed.envs[""]; !ok || v != "VAL" {
+			t.Fatalf("expected envs[\"\"]=\"VAL\", got %q (ok=%v)", v, ok)
+		}
+	})
+
+	t.Run("env_no_equals", func(t *testing.T) {
+		_, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			envs:       []string{"BAD_NO_EQ"},
+		}, "")
+		if err == nil {
+			t.Fatal("expected error for env without =")
+		}
+		if !strings.Contains(err.Error(), "--env") {
+			t.Fatalf("expected error mentioning --env, got %v", err)
+		}
+	})
+
+	t.Run("cpu_limit", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			cpuLimit:   "2",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.cpuLimit != "2" {
+			t.Fatalf("expected cpuLimit=2, got %q", parsed.cpuLimit)
+		}
+	})
+
+	t.Run("memory_limit", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand:  "sleep infinity",
+			memoryLimit: "4g",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.memoryLimit != "4g" {
+			t.Fatalf("expected memoryLimit=4g, got %q", parsed.memoryLimit)
+		}
+	})
+
+	t.Run("disk_limit", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			diskLimit:  "10g",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.diskLimit != "10g" {
+			t.Fatalf("expected diskLimit=10g, got %q", parsed.diskLimit)
+		}
+	})
+
+	t.Run("sandbox_id_override", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			sandboxID:  "custom-abc",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.sandboxID != "custom-abc" {
+			t.Fatalf("expected sandboxID=custom-abc, got %q", parsed.sandboxID)
+		}
+	})
+
+	t.Run("sandbox_id_empty_uses_generator", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			sandboxID: "",
+		}, "openclaw")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		if !re.MatchString(parsed.sandboxID) {
+			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
+		}
+	})
+
+	t.Run("sandbox_id_overrides_generator", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			sandboxID: "custom-id",
+		}, "openclaw")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.sandboxID != "custom-id" {
+			t.Fatalf("expected sandboxID=custom-id, got %q", parsed.sandboxID)
+		}
+	})
+
+	t.Run("no_sandbox_id_openclaw_uses_generator", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{}, "openclaw")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		if !re.MatchString(parsed.sandboxID) {
+			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
+		}
+	})
+
+	t.Run("no_new_flags", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.envs != nil {
+			t.Fatalf("expected nil envs, got %v", parsed.envs)
+		}
+		if parsed.cpuLimit != "" {
+			t.Fatalf("expected empty cpuLimit, got %q", parsed.cpuLimit)
+		}
+		if parsed.memoryLimit != "" {
+			t.Fatalf("expected empty memoryLimit, got %q", parsed.memoryLimit)
+		}
+		if parsed.diskLimit != "" {
+			t.Fatalf("expected empty diskLimit, got %q", parsed.diskLimit)
+		}
+		if parsed.sandboxID != "" {
+			t.Fatalf("expected empty sandboxID, got %q", parsed.sandboxID)
+		}
+	})
+}
+
+func TestTopLevelCommandsInheritNewFlags(t *testing.T) {
+	for _, agentType := range []string{"claude", "codex", "openclaw"} {
+		t.Run(agentType, func(t *testing.T) {
+			parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+				envs:        []string{"FOO=bar"},
+				cpuLimit:    "2",
+				memoryLimit: "4g",
+				diskLimit:   "10g",
+			}, agentType)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if parsed.envs["FOO"] != "bar" {
+				t.Fatalf("expected envs[FOO]=bar, got %v", parsed.envs)
+			}
+			if parsed.cpuLimit != "2" {
+				t.Fatalf("expected cpuLimit=2, got %q", parsed.cpuLimit)
+			}
+			if parsed.memoryLimit != "4g" {
+				t.Fatalf("expected memoryLimit=4g, got %q", parsed.memoryLimit)
+			}
+			if parsed.diskLimit != "10g" {
+				t.Fatalf("expected diskLimit=10g, got %q", parsed.diskLimit)
+			}
+		})
+	}
+}
