@@ -47,11 +47,11 @@ curl -fsSL https://agents-sandbox.com/install.sh | bash
 
 # Run Claude Code in an isolated sandbox with full permissions
 # Equivalent to: claude --dangerously-skip-permissions
-agbox agent claude
+agbox claude
 
 # Run Codex in an isolated sandbox with full permissions
 # Equivalent to: codex --dangerously-bypass-approvals-and-sandbox
-agbox agent codex
+agbox codex
 ```
 
 Same single command — but now the agent is sandboxed, and your host is untouched.

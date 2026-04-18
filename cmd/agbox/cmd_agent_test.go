@@ -94,9 +94,9 @@ func TestResolveAgentSessionArgs_MutualExclusion(t *testing.T) {
 func TestResolveAgentSessionArgs_NeitherTypeNorCommand(t *testing.T) {
 	_, err := resolveAgentSessionArgs(&agentSessionFlagVars{workspace: "/work", workspaceOverridden: true}, "")
 	if err == nil {
-		t.Fatal("expected error when neither agent type nor --command is given")
+		t.Fatal("expected error when --command is missing on agbox agent")
 	}
-	if !strings.Contains(err.Error(), "requires an agent type or --command") {
+	if !strings.Contains(err.Error(), "requires --command") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
@@ -118,19 +118,6 @@ func TestResolveAgentSessionArgs_EmptyCommand(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must not be empty") {
 		t.Fatalf("unexpected error message: %v", err)
-	}
-}
-
-func TestResolveAgentSessionArgs_DuplicateAgentType(t *testing.T) {
-	tmpDir := realTempDir(t)
-	// With cobra, duplicate positional args are prevented by cobra.MaximumNArgs(1).
-	// Here we test resolveAgentSessionArgs directly with a registered agent type.
-	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{workspace: tmpDir, workspaceOverridden: true}, "claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if parsed.agentType != "claude" {
-		t.Fatalf("expected agentType=claude, got %q", parsed.agentType)
 	}
 }
 
@@ -404,53 +391,6 @@ func TestResolveAgentSessionArgs_ConfigYaml(t *testing.T) {
 	}
 }
 
-func TestTopLevelAgentCommandsEquivalent(t *testing.T) {
-	for _, agentType := range []string{"claude", "codex", "openclaw"} {
-		t.Run(agentType, func(t *testing.T) {
-			v := &agentSessionFlagVars{}
-			topLevel, err := resolveAgentSessionArgs(v, agentType)
-			if err != nil {
-				t.Fatalf("top-level resolve error: %v", err)
-			}
-
-			vSub := &agentSessionFlagVars{}
-			subCmd, err := resolveAgentSessionArgs(vSub, agentType)
-			if err != nil {
-				t.Fatalf("sub-command resolve error: %v", err)
-			}
-
-			if topLevel.agentType != subCmd.agentType {
-				t.Fatalf("agentType mismatch: %q vs %q", topLevel.agentType, subCmd.agentType)
-			}
-			if topLevel.mode != subCmd.mode {
-				t.Fatalf("mode mismatch: %q vs %q", topLevel.mode, subCmd.mode)
-			}
-			if len(topLevel.command) != len(subCmd.command) {
-				t.Fatalf("command length mismatch: %v vs %v", topLevel.command, subCmd.command)
-			}
-			for i := range topLevel.command {
-				if topLevel.command[i] != subCmd.command[i] {
-					t.Fatalf("command[%d] mismatch: %q vs %q", i, topLevel.command[i], subCmd.command[i])
-				}
-			}
-			if len(topLevel.builtinTools) != len(subCmd.builtinTools) {
-				t.Fatalf("builtinTools length mismatch: %v vs %v", topLevel.builtinTools, subCmd.builtinTools)
-			}
-			for i := range topLevel.builtinTools {
-				if topLevel.builtinTools[i] != subCmd.builtinTools[i] {
-					t.Fatalf("builtinTools[%d] mismatch: %q vs %q", i, topLevel.builtinTools[i], subCmd.builtinTools[i])
-				}
-			}
-			if topLevel.configYaml != subCmd.configYaml {
-				t.Fatalf("configYaml mismatch")
-			}
-			if len(topLevel.phases) != len(subCmd.phases) {
-				t.Fatalf("phases length mismatch: %d vs %d", len(topLevel.phases), len(subCmd.phases))
-			}
-		})
-	}
-}
-
 func TestTopLevelCommandRejectsPositionalArgs(t *testing.T) {
 	cmd := newAgentTypeCommand("claude")
 	cmd.SilenceErrors = true
@@ -459,6 +399,19 @@ func TestTopLevelCommandRejectsPositionalArgs(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for positional arg on top-level command")
+	}
+}
+
+// TestAgentCommandRejectsPositionalAgentType ensures `agbox agent <type>`
+// is no longer supported — callers must use the top-level per-type command.
+func TestAgentCommandRejectsPositionalAgentType(t *testing.T) {
+	cmd := newAgentCommand()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"claude"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when positional agent type is passed to `agbox agent`")
 	}
 }
 

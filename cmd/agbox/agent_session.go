@@ -46,9 +46,10 @@ func primaryContainerName(sandboxID string) string {
 	return "agbox-primary-" + sanitizeContainerName(sandboxID)
 }
 
-// runAgentSession implements the shared flow for `agbox agent <tool>` and
-// `agbox agent --command "..."`. It validates inputs, connects to the daemon,
-// and dispatches to the appropriate mode handler.
+// runAgentSession implements the shared flow for top-level per-type agent
+// commands (`agbox claude`, `agbox codex`, `agbox openclaw`) and for
+// `agbox agent --command "..."`. It validates inputs, connects to the
+// daemon, and dispatches to the appropriate mode handler.
 func runAgentSession(
 	ctx context.Context,
 	parsed agentSessionArgs,

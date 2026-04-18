@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,17 +40,14 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 }
 
 // buildAgentSessionRunE creates the RunE function for agent session commands.
-// When agentType is non-empty (top-level commands), it skips positional arg parsing.
+// agentType is non-empty for top-level per-type commands (agbox claude, etc.)
+// and empty for the `agbox agent --command` custom-command command.
 func buildAgentSessionRunE(agentType string, v *agentSessionFlagVars) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		resolvedType := agentType
-		if resolvedType == "" && len(args) > 0 {
-			resolvedType = args[0]
-		}
+	return func(cmd *cobra.Command, _ []string) error {
 		v.modeOverridden = cmd.Flags().Changed("mode")
 		v.workspaceOverridden = cmd.Flags().Changed("workspace")
 		v.builtinToolsOverridden = cmd.Flags().Changed("builtin-tool")
-		parsed, err := resolveAgentSessionArgs(v, resolvedType)
+		parsed, err := resolveAgentSessionArgs(v, agentType)
 		if err != nil {
 			return err
 		}
@@ -76,40 +72,31 @@ type agentSessionArgs struct {
 	readyMessage func(sandboxID, containerName string) string // custom ready message
 }
 
-// registeredAgentNames returns the sorted list of pre-registered agent type names.
-func registeredAgentNames() []string {
-	names := make([]string, 0, len(agentTypeDefs))
-	for name := range agentTypeDefs {
-		names = append(names, name)
-	}
-	// Sort for deterministic output.
-	sort.Strings(names)
-	return names
-}
-
+// newAgentCommand builds `agbox agent --command "..."` for running a custom
+// agent binary inside a sandbox. Registered agent types (claude, codex,
+// openclaw) are exposed as top-level commands instead — they are not
+// accepted here as positional arguments.
 func newAgentCommand() *cobra.Command {
 	var v agentSessionFlagVars
-	agentNames := registeredAgentNames()
 	cmd := &cobra.Command{
-		Use:       "agent [agent_type]",
-		Short:     "Launch agent session",
-		Long:      "Launch agent session.\n\nAvailable agent types: " + strings.Join(agentNames, ", ") + "\nOr use --command for a custom agent.",
-		Args:      cobra.MaximumNArgs(1),
-		ValidArgs: agentNames,
-		RunE:      buildAgentSessionRunE("", &v),
+		Use:   "agent",
+		Short: "Launch a custom agent session via --command",
+		Long:  "Launch a sandbox and run a custom agent command specified via --command.\n\nFor pre-registered agents, use the dedicated top-level commands: agbox claude, agbox codex, agbox openclaw.",
+		Args:  cobra.NoArgs,
+		RunE:  buildAgentSessionRunE("", &v),
 	}
 	registerAgentSessionFlags(cmd, &v)
 	return cmd
 }
 
-// newAgentTypeCommand creates a top-level command for a specific agent type
-// (e.g. "agbox claude"), equivalent to "agbox agent <type>".
+// newAgentTypeCommand creates a top-level command for a specific registered
+// agent type (e.g. "agbox claude").
 func newAgentTypeCommand(agentType string) *cobra.Command {
 	var v agentSessionFlagVars
 	cmd := &cobra.Command{
 		Use:   agentType,
 		Short: fmt.Sprintf("Launch %s agent session", agentType),
-		Long:  fmt.Sprintf("Launch %s agent session (equivalent to 'agbox agent %s').", agentType, agentType),
+		Long:  fmt.Sprintf("Launch %s agent session.", agentType),
 		Args:  cobra.NoArgs,
 		RunE:  buildAgentSessionRunE(agentType, &v),
 	}
@@ -138,7 +125,9 @@ func resolveAgentSessionArgs(
 		var ok bool
 		typeDef, ok = agentTypeDefs[agentType]
 		if !ok {
-			return agentSessionArgs{}, usageErrorf("unknown agent type %q; use --command for custom agents", agentType)
+			// Should not happen: agentType is injected by top-level per-type commands
+			// which are registered only for known types.
+			return agentSessionArgs{}, usageErrorf("unknown agent type %q", agentType)
 		}
 		isRegistered = true
 		parsed.agentType = agentType
@@ -156,7 +145,7 @@ func resolveAgentSessionArgs(
 		}
 		parsed.builtinTools = v.builtinTools
 	} else {
-		return agentSessionArgs{}, usageErrorf("agbox agent requires an agent type or --command")
+		return agentSessionArgs{}, usageErrorf("agbox agent requires --command; for pre-registered agents use agbox claude / agbox codex / agbox openclaw")
 	}
 
 	// Mode resolution.

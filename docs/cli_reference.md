@@ -29,12 +29,12 @@ agbox exec get
 agbox exec cancel
 # List active execs
 agbox exec list
-# Launch interactive agent session
-agbox agent
-# Launch agent session via top-level shortcut (equivalent to agbox agent <type>)
+# Launch a pre-registered agent session (top-level command per type)
 agbox claude
 agbox codex
 agbox openclaw
+# Launch a custom agent via --command (only use-case for `agbox agent`)
+agbox agent --command "<binary> [args...]"
 # Generate shell autocompletion script (bash, zsh, fish, powershell)
 agbox completion
 # Print usage for any command
@@ -74,29 +74,31 @@ agbox exec list [sandbox_id] [--json]
 - `cancel`: cancels a running exec. Waits until the exec reaches a terminal state.
 - `list`: lists active execs. Optionally filter by sandbox ID.
 
-## Agent Command
+## Agent Commands
 
-Provides an out-of-the-box workflow: create a sandbox, optionally copy the project directory, run an agent, and manage the sandbox lifecycle.
+Provide an out-of-the-box workflow: create a sandbox, optionally copy the project directory, run an agent, and manage the sandbox lifecycle.
+
+The CLI exposes one top-level command per registered agent type. Use them directly — there is no `agbox agent <type>` form. The generic `agbox agent` entry point is reserved for the custom-command mode (`--command`).
 
 ```bash
-# Use a registered agent type (resolves command + default builtin tools)
-agbox agent claude
-# Equivalent top-level shortcut
+# Pre-registered agents (top-level commands)
 agbox claude
-# Registered agent type with custom workspace
-agbox agent codex --workspace /path/to/project
+agbox codex
+agbox openclaw                                         # deploy OpenClaw gateway (long-running)
+
+# Custom workspace
+agbox codex --workspace /path/to/project
 # Long-running mode
-agbox agent claude --mode long-running
-# Custom command with explicit builtin tools
-agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool claude --builtin-tool git --builtin-tool uv --builtin-tool npm
-# Long-running custom command (stdout emits sandbox_id for scripting)
-SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
-# Deploy OpenClaw gateway (long-running, persists after CLI exit)
-agbox agent openclaw
-# Set resource limits and environment variables
+agbox claude --mode long-running
+# Resource limits and environment variables
 agbox claude --cpu-limit 2 --memory-limit 4g --disk-limit 10g --env MY_API_KEY=secret
 # Override sandbox ID
 agbox codex --sandbox-id my-custom-sandbox
+
+# Custom agent via `agbox agent --command` (the ONLY supported form of `agbox agent`)
+agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool claude --builtin-tool git --builtin-tool uv --builtin-tool npm
+# Long-running custom command (stdout emits sandbox_id for scripting)
+SB_ID=$(agbox agent --command "my-agent" --mode long-running --workspace /path/to/project 2>/dev/null)
 ```
 
 ### Session Modes
@@ -143,9 +145,11 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 - `--env` passes environment variables to `CreateSpec.Envs`. Multiple `--env` flags are merged; duplicate keys use the last value. The daemon performs key-level merge with `configYaml` envs.
 - `--cpu-limit`, `--memory-limit`, and `--disk-limit` pass resource limits directly to `CreateSpec` fields. Values are not validated by the CLI; invalid formats are rejected by the daemon or Docker.
 
-### Top-Level Agent Shortcuts
+### Command Surface
 
-Each registered agent type is also available as a top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`. These are exactly equivalent to `agbox agent <type>` — same flags, same behavior, same exit codes. The only difference is that top-level commands do not accept positional arguments (the agent type is implicit in the command name).
+Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`).
+
+`agbox agent` is reserved exclusively for the custom-command mode: you must pass `--command` and it does not accept a positional agent type. The old `agbox agent <type>` form has been removed — use the per-type top-level command instead.
 
 ## Exit Codes
 
