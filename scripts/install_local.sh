@@ -37,10 +37,41 @@ echo "Installed: ${INSTALL_DIR}/agboxd"
 echo "Installed: ${INSTALL_DIR}/agbox"
 
 # Grant CAP_NET_ADMIN so the daemon can manage nftables rules for sandbox
-# network isolation without running as root. Only applicable on Linux.
-if [[ "$(uname -s)" == "Linux" ]] && command -v setcap >/dev/null 2>&1; then
-  echo "Granting CAP_NET_ADMIN (requires sudo)..."
-  sudo setcap cap_net_admin+ep "${INSTALL_DIR}/agboxd"
+# network isolation without running as root.
+#
+# Also install a polkit rule so agboxd can create transient systemd slices
+# (agbox.slice / agbox-<id>.slice) via system D-Bus without prompting the
+# user during normal sandbox usage. Resource limits (cpu_limit/memory_limit)
+# require this; macOS does not use cgroup slices so no polkit rule is needed.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  if command -v setcap >/dev/null 2>&1; then
+    echo "Granting CAP_NET_ADMIN and installing polkit rule (requires sudo)..."
+    sudo setcap cap_net_admin+ep "${INSTALL_DIR}/agboxd"
+  else
+    echo "Installing polkit rule (requires sudo)..."
+  fi
+
+  POLKIT_RULE_FILE="/etc/polkit-1/rules.d/50-agbox-slice.rules"
+  CURRENT_USER="$(id -un)"
+  POLKIT_TMP="$(mktemp)"
+  cat > "${POLKIT_TMP}" <<POLKIT
+// Allow ${CURRENT_USER} to manage agbox systemd slices without authentication.
+// Required for agboxd to create per-sandbox cgroup slices (cpu_limit/memory_limit)
+// via system D-Bus. Installed by agents-sandbox install_local.sh.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        subject.user === "${CURRENT_USER}" &&
+        action.lookup("unit") !== undefined &&
+        action.lookup("unit").match(/^agbox/)) {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+  if ! sudo diff -q "${POLKIT_RULE_FILE}" "${POLKIT_TMP}" > /dev/null 2>&1; then
+    sudo cp "${POLKIT_TMP}" "${POLKIT_RULE_FILE}"
+    sudo systemctl restart polkit
+  fi
+  rm -f "${POLKIT_TMP}"
 fi
 
 # ---------------------------------------------------------------------------
