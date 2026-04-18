@@ -1,0 +1,2 @@
+image: ghcr.io/agents-sandbox/coding-runtime:latest
+command: ["sh", "-c", "sudo npm install -g http-server@14.0.0 --silent && exec http-server --port 8080"]
