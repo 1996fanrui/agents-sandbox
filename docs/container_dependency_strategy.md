@@ -100,23 +100,23 @@ The runtime must execute under a non-root user inside the sandbox. Bind-mounted 
 
 Docker objects without these labels are never inspected, stopped, or removed by the daemon. Ownership must be derivable from runtime state plus namespaced labels without requiring an external product database snapshot. Cleanup continues on daemon-owned contexts rather than request-scoped cancellation.
 
-## Architectural Exception: `agbox agent`
+## Architectural Exception: agent commands
 
-The rule that all Docker access goes through the daemon's structured runtime client has one deliberate exception: `agbox agent` in interactive mode.
+The rule that all Docker access goes through the daemon's structured runtime client has one deliberate exception: the CLI agent commands in interactive mode.
 
-This subcommand creates a sandbox via gRPC, waits for it to become READY, then — depending on the session mode — either attaches directly or delegates to the daemon's exec model:
+These commands — the per-type top-level entries (`agbox claude`, `agbox codex`, `agbox openclaw`) and the custom-command entry (`agbox agent --command "..."`) — create a sandbox via gRPC, wait for it to become READY, then — depending on the session mode — either attach directly or delegate to the daemon's exec model:
 
 - **Interactive mode** (default): Calls `docker exec -it` directly from the CLI process to attach an interactive TTY session into the primary container. On exit, the sandbox is deleted via gRPC.
 - **Long-running mode** (`--mode long-running`): Submits the agent command via `CreateExec` RPC and waits for exec completion via event subscription. Does not call `docker exec` directly. On exit, the sandbox is not deleted and must be managed manually.
 
-Two agent definition modes are supported:
-- **Pre-registered tool:** `agbox agent claude`, `agbox agent codex` — uses built-in command and builtin-tool defaults from the agent tool registry.
-- **Custom command:** `agbox agent --command "aider --yes" --workspace /path/to/project` — user provides the full command and specifies the workspace directory.
+Two agent definition surfaces are supported:
+- **Pre-registered tool:** `agbox claude`, `agbox codex`, `agbox openclaw` — each is its own top-level command that uses the built-in command and builtin-tool defaults from the agent tool registry. The old `agbox agent <type>` form has been removed.
+- **Custom command:** `agbox agent --command "aider --yes" --workspace /path/to/project` — the only remaining use of `agbox agent`; the user provides the full command and specifies the workspace directory.
 
 **Why the interactive-mode exception is necessary:**
 
-The daemon's exec model is designed for non-interactive batch execution. Adding interactive TTY support at the daemon protocol layer would require gRPC bidirectional streaming plus in-daemon PTY management — significant complexity with little benefit beyond this subcommand. Calling `docker exec -it` directly from the CLI is simpler, keeps the daemon out of the TTY path, and is equivalent to what a user would do manually.
+The daemon's exec model is designed for non-interactive batch execution. Adding interactive TTY support at the daemon protocol layer would require gRPC bidirectional streaming plus in-daemon PTY management — significant complexity with little benefit beyond these commands. Calling `docker exec -it` directly from the CLI is simpler, keeps the daemon out of the TTY path, and is equivalent to what a user would do manually.
 
-**Known constraint:** The CLI's `docker exec` call (interactive mode only) and the daemon's Docker Engine API calls must target the same Docker daemon. If `DOCKER_HOST` or `DOCKER_CONTEXT` differs between the environment where `agboxd` was started and the shell running `agbox agent`, the exec may land on the wrong target. This is rarely a problem when `agboxd` runs as a user process sharing the shell environment.
+**Known constraint:** The CLI's `docker exec` call (interactive mode only) and the daemon's Docker Engine API calls must target the same Docker daemon. If `DOCKER_HOST` or `DOCKER_CONTEXT` differs between the environment where `agboxd` was started and the shell running the agent command, the exec may land on the wrong target. This is rarely a problem when `agboxd` runs as a user process sharing the shell environment.
 
-**Scope:** The direct Docker access exception is strictly limited to `agbox agent` in interactive mode. Long-running mode and all other CLI commands use the daemon's gRPC API exclusively.
+**Scope:** The direct Docker access exception is strictly limited to the agent commands in interactive mode. Long-running mode and all other CLI commands use the daemon's gRPC API exclusively.

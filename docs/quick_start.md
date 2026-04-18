@@ -14,12 +14,12 @@ This installs `agboxd` (daemon) and `agbox` (CLI), then starts the daemon as a u
 
 ```bash
 # Claude Code — full permissions, fully isolated
-agbox agent claude
+agbox claude
 
 # Codex
-agbox agent codex
+agbox codex
 
-# Any custom command
+# Any custom command (agbox agent is only used for the --command form)
 agbox agent --command "aider --yes" --builtin-tool git --builtin-tool uv
 ```
 

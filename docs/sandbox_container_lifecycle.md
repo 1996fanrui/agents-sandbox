@@ -17,7 +17,8 @@ Docker object labels use the reverse-DNS namespace `io.github.1996fanrui.agents-
 
 ## CLI Agent Modes
 
-The `agbox agent` command supports two modes:
+The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`, and
+`agbox agent --command "..."`) support two modes:
 
 - **Interactive** (`--mode interactive`, default): Attaches a TTY to the agent process. The CLI deletes the sandbox on exit. Uses `idle_ttl=10d` as a safety net.
 - **Long-running** (`--mode long-running`): Submits the agent command via `CreateExec` and waits for completion. The CLI can detach (Ctrl+C) without affecting the sandbox. Uses `idle_ttl=0` (disable idle stop). The sandbox must be managed manually via `agbox sandbox stop/delete`.

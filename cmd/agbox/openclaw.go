@@ -122,7 +122,7 @@ Manage:
   agbox sandbox stop %s      # stop gateway
   agbox sandbox resume %s    # restart container only (gateway process lost)
   # To redeploy after resume: delete and recreate
-  agbox sandbox delete %s && agbox agent openclaw
+  agbox sandbox delete %s && agbox openclaw
   agbox sandbox delete %s    # delete sandbox
   agbox exec list %s         # list running execs
 `, gatewayURL, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID)

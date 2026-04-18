@@ -1,7 +1,9 @@
 # Agent Guide
 
-The `agbox agent` command creates a sandbox, installs tools, and runs an AI agent
-in a single step.
+The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`, and
+`agbox agent --command "..."`) create a sandbox, install tools, and run an AI
+agent in a single step. Each registered agent type has its own top-level command;
+`agbox agent` itself is reserved exclusively for the `--command` custom-agent mode.
 
 **Workspace**: the current directory (or `--workspace` path) is copied into
 `/workspace` inside the container. Changes inside the sandbox do **not** affect
@@ -23,14 +25,14 @@ Claude and Codex share identical workflow — only the CLI binary differs.
 
 ```bash
 # Basic usage
-agbox agent claude
-agbox agent codex
+agbox claude
+agbox codex
 
 # Use a specific project directory
-agbox agent claude --workspace /path/to/project
+agbox claude --workspace /path/to/project
 
 # Override builtin tools (each sandbox image defines a default set)
-agbox agent codex --builtin-tool claude --builtin-tool git
+agbox codex --builtin-tool claude --builtin-tool git
 ```
 
 ## OpenClaw
@@ -54,7 +56,7 @@ OPENCLAW_STATE_DIR=~/.openclaw openclaw models auth add --provider openai --api-
 ### Deploy
 
 ```bash
-agbox agent openclaw
+agbox openclaw
 ```
 
 The CLI creates a sandbox, installs `openclaw@latest`, and starts the gateway.
@@ -93,9 +95,13 @@ graph TD
 
 Use [sandbox commands](cli_reference.md) to stop/delete/list sandboxes.
 `agbox sandbox resume` does not restart the gateway — to redeploy, delete and recreate:
-`agbox sandbox delete <sandbox-id> && agbox agent openclaw`.
+`agbox sandbox delete <sandbox-id> && agbox openclaw`.
 
 ## Custom Command
+
+`agbox agent` is the only entry point for the custom-command mode; it requires
+`--command` and does not accept a positional agent type (use `agbox claude` /
+`agbox codex` / `agbox openclaw` for those).
 
 Run any command inside a sandbox:
 
