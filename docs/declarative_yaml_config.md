@@ -66,6 +66,8 @@ disk_limit: "10g"
 companion_containers:
   postgres:
     image: postgres:16-alpine
+    cpu_limit: "1"
+    memory_limit: "512m"
     disk_limit: "5g"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -75,7 +77,7 @@ companion_containers:
       retries: 12
 ```
 
-`cpu_limit` and `memory_limit` apply at the sandbox scope; the primary and every companion share a per-sandbox systemd slice. `disk_limit` is per-container: the top-level value constrains the primary container, and each companion carries its own `disk_limit`. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for host requirements.
+All three limits (`cpu_limit`, `memory_limit`, `disk_limit`) are per-container and use Docker-native HostConfig keys directly: `HostConfig.NanoCPUs`, `HostConfig.Memory`, and `HostConfig.StorageOpt["size"]`. The top-level values constrain the primary container only; each companion carries its own independent set under `companion_containers.<name>`. There is no shared sandbox-level cgroup. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for host requirements.
 
 ## Field Reference
 
@@ -92,10 +94,12 @@ companion_containers:
 | `idle_ttl` | `CreateSpec.idle_ttl` | duration string | Per-sandbox idle TTL override. Omit to use the global daemon default. Set to `"0"` to disable idle stop for this sandbox. |
 | `command` | `CreateSpec.command` | list of string | Optional override of the primary container's Docker `Cmd`. Omit to keep the daemon's sleep-loop default. Must be a long-lived process; `command: []` and empty-string entries are rejected. See [Configuration Reference: Primary container command](configuration_reference.md#primary-container-command). |
 | `companion_containers.<name>.command` | `CompanionContainerSpec.command` | list of string | Optional override of a companion container's Docker `Cmd`. Omit to keep the image's built-in `CMD`. Same long-lived constraint and validation as the primary `command`. |
-| `cpu_limit` | `CreateSpec.cpu_limit` | string | Docker `--cpus` style, e.g. `"2"`, `"0.5"`. `""` (omitted) = unlimited. Sandbox-scoped: primary and all companions share the cgroup. Requires cgroup v2 + `CgroupDriver=systemd`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
-| `memory_limit` | `CreateSpec.memory_limit` | string | Docker `--memory` style, e.g. `"4g"`, `"512m"`. `""` (omitted) = unlimited. Sandbox-scoped: primary and all companions share the cgroup. Requires cgroup v2 + `CgroupDriver=systemd`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
-| `disk_limit` | `CreateSpec.disk_limit` | string | Docker `--storage-opt size=` style, e.g. `"10g"`. `""` (omitted) = unlimited. Applies to the primary container only. Requires overlay2 on XFS with `prjquota` + `ftype=1`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
-| `companion_containers.<name>.disk_limit` | `CompanionContainerSpec.disk_limit` | string | Per-companion disk limit, same syntax as top-level `disk_limit`. `""` (omitted) = unlimited. Same prerequisites as the primary `disk_limit`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+| `cpu_limit` | `CreateSpec.cpu_limit` | string | Docker `--cpus` style, e.g. `"2"`, `"0.5"`. `""` (omitted) = unlimited. Applies to the **primary container** only via `HostConfig.NanoCPUs`. |
+| `memory_limit` | `CreateSpec.memory_limit` | string | Docker `--memory` style, e.g. `"4g"`, `"512m"`. `""` (omitted) = unlimited. Applies to the **primary container** only via `HostConfig.Memory`. |
+| `disk_limit` | `CreateSpec.disk_limit` | string | Docker `--storage-opt size=` style, e.g. `"10g"`. `""` (omitted) = unlimited. Applies to the **primary container** only via `HostConfig.StorageOpt["size"]`. Requires overlay2 on XFS with `prjquota` + `ftype=1`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
+| `companion_containers.<name>.cpu_limit` | `CompanionContainerSpec.cpu_limit` | string | Per-companion CPU limit, same syntax as top-level `cpu_limit`. `""` (omitted) = unlimited. Wired to that companion's `HostConfig.NanoCPUs`. |
+| `companion_containers.<name>.memory_limit` | `CompanionContainerSpec.memory_limit` | string | Per-companion memory limit, same syntax as top-level `memory_limit`. `""` (omitted) = unlimited. Wired to that companion's `HostConfig.Memory`. |
+| `companion_containers.<name>.disk_limit` | `CompanionContainerSpec.disk_limit` | string | Per-companion disk limit, same syntax as top-level `disk_limit`. `""` (omitted) = unlimited. Wired to that companion's `HostConfig.StorageOpt["size"]`. Same prerequisites as the primary `disk_limit`; see [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites). |
 
 Quick self-check commands for the `disk_limit` prerequisites:
 

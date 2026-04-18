@@ -15,7 +15,13 @@ def test_resource_limits_round_trip_into_proto() -> None:
             memory_limit="4g",
             disk_limit="10g",
             companion_containers=(
-                CompanionContainerSpec(name="db", image="postgres:16", disk_limit="5g"),
+                CompanionContainerSpec(
+                    name="db",
+                    image="postgres:16",
+                    cpu_limit="1",
+                    memory_limit="512m",
+                    disk_limit="5g",
+                ),
             ),
         ),
     )
@@ -24,7 +30,10 @@ def test_resource_limits_round_trip_into_proto() -> None:
     assert proto.create_spec.memory_limit == "4g"
     assert proto.create_spec.disk_limit == "10g"
     assert len(proto.create_spec.companion_containers) == 1
-    assert proto.create_spec.companion_containers[0].disk_limit == "5g"
+    companion = proto.create_spec.companion_containers[0]
+    assert companion.cpu_limit == "1"
+    assert companion.memory_limit == "512m"
+    assert companion.disk_limit == "5g"
 
 
 def test_resource_limits_default_to_empty_string_when_unset() -> None:
@@ -40,4 +49,7 @@ def test_resource_limits_default_to_empty_string_when_unset() -> None:
     assert proto.create_spec.cpu_limit == ""
     assert proto.create_spec.memory_limit == ""
     assert proto.create_spec.disk_limit == ""
-    assert proto.create_spec.companion_containers[0].disk_limit == ""
+    companion = proto.create_spec.companion_containers[0]
+    assert companion.cpu_limit == ""
+    assert companion.memory_limit == ""
+    assert companion.disk_limit == ""

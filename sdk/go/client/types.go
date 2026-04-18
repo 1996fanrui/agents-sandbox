@@ -85,6 +85,13 @@ type CompanionContainerSpec struct {
 	Healthcheck        *HealthcheckConfig
 	Command            []string
 	PostStartOnPrimary []string
+	// CPULimit is the companion container CPU limit expression (Docker
+	// `--cpus` style, e.g. "2", "0.5"). Empty = unlimited. The SDK forwards
+	// the raw string to the daemon without parsing.
+	CPULimit string
+	// MemoryLimit is the companion container memory limit expression
+	// (Docker `--memory` style, e.g. "4g", "512m"). Empty = unlimited.
+	MemoryLimit string
 	// DiskLimit is the companion container disk (rootfs) limit expression
 	// (e.g. "10g"). The SDK forwards the raw string to the daemon without parsing.
 	DiskLimit string
@@ -369,6 +376,8 @@ func toProtoCompanionContainer(spec CompanionContainerSpec) *agboxv1.CompanionCo
 		Healthcheck:        toProtoHealthcheck(spec.Healthcheck),
 		Command:            slices.Clone(spec.Command),
 		PostStartOnPrimary: slices.Clone(spec.PostStartOnPrimary),
+		CpuLimit:           spec.CPULimit,
+		MemoryLimit:        spec.MemoryLimit,
 		DiskLimit:          spec.DiskLimit,
 	}
 }
@@ -409,6 +418,8 @@ func toCompanionContainers(specs []*agboxv1.CompanionContainerSpec) []CompanionC
 			Healthcheck:        toHealthcheck(spec.GetHealthcheck()),
 			Command:            slices.Clone(spec.GetCommand()),
 			PostStartOnPrimary: slices.Clone(spec.GetPostStartOnPrimary()),
+			CPULimit:           spec.GetCpuLimit(),
+			MemoryLimit:        spec.GetMemoryLimit(),
 			DiskLimit:          spec.GetDiskLimit(),
 		})
 	}

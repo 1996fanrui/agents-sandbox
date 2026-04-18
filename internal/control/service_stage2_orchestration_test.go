@@ -414,7 +414,7 @@ func TestCompanionContainersLaunchInParallel(t *testing.T) {
 	started := make(chan string, len(containers)*2)
 	release := make(chan struct{})
 
-	starts := startCompanionContainersAsync(context.Background(), "parallel-cc", "network", "primary", containers, nil, "", nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "parallel-cc", "network", "primary", containers, nil, nil, nil, nil, nil, func(context.Context, dockerContainerSpec) error {
 		started <- "create"
 		return nil
 	}, func(_ context.Context, name string) error {
@@ -440,7 +440,7 @@ func TestCompanionContainerStartupCancellationStopsWorkers(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startCompanionContainersAsync(context.Background(), "cancel-cc", "network", "primary", containers, nil, "", nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "cancel-cc", "network", "primary", containers, nil, nil, nil, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}
@@ -467,7 +467,7 @@ func TestDeleteSandboxCancelsOutstandingCompanionContainerStarts(t *testing.T) {
 		{Name: "cache", Image: "redis:7"},
 	}
 	started := make(chan struct{}, 1)
-	starts := startCompanionContainersAsync(context.Background(), "delete-cancel", "network", "primary", containers, nil, "", nil, nil, func(context.Context, dockerContainerSpec) error {
+	starts := startCompanionContainersAsync(context.Background(), "delete-cancel", "network", "primary", containers, nil, nil, nil, nil, nil, func(context.Context, dockerContainerSpec) error {
 		return nil
 	}, func(ctx context.Context, _ string) error {
 		started <- struct{}{}

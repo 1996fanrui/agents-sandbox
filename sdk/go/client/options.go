@@ -394,8 +394,9 @@ func (o idleTTLOption) applyCreateSandbox(opts *createSandboxOptions) error {
 
 type cpuLimitOption string
 
-// WithCPULimit sets the sandbox-scoped CPU limit expression (e.g. "2", "0.5").
-// Shared by the primary container and every companion via a common cgroup.
+// WithCPULimit sets the primary container CPU limit expression (Docker
+// `--cpus` style, e.g. "2", "0.5"). Applies only to the primary container;
+// companions carry their own CPULimit via CompanionContainerSpec.
 // The SDK forwards the raw string to the daemon without parsing.
 func WithCPULimit(limit string) cpuLimitOption {
 	return cpuLimitOption(limit)
@@ -409,8 +410,9 @@ func (o cpuLimitOption) applyCreateSandbox(opts *createSandboxOptions) error {
 
 type memoryLimitOption string
 
-// WithMemoryLimit sets the sandbox-scoped memory limit expression (e.g. "4g", "512m").
-// Shared by the primary container and every companion via a common cgroup.
+// WithMemoryLimit sets the primary container memory limit expression (Docker
+// `--memory` style, e.g. "4g", "512m"). Applies only to the primary container;
+// companions carry their own MemoryLimit via CompanionContainerSpec.
 // The SDK forwards the raw string to the daemon without parsing.
 func WithMemoryLimit(limit string) memoryLimitOption {
 	return memoryLimitOption(limit)

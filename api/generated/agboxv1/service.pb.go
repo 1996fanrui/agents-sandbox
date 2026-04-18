@@ -639,8 +639,12 @@ type CompanionContainerSpec struct {
 	// entrypoint is intentionally not exposed to preserve the image
 	// entrypoint.sh UID/GID + gosu drop-privilege behavior.
 	Command []string `protobuf:"bytes,6,rep,name=command,proto3" json:"command,omitempty"`
+	// Same semantics as CreateSpec.cpu_limit, scoped to this companion container.
+	CpuLimit string `protobuf:"bytes,7,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`
+	// Same semantics as CreateSpec.memory_limit, scoped to this companion container.
+	MemoryLimit string `protobuf:"bytes,8,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
 	// Same semantics as CreateSpec.disk_limit, scoped to this companion container.
-	DiskLimit     string `protobuf:"bytes,7,opt,name=disk_limit,json=diskLimit,proto3" json:"disk_limit,omitempty"`
+	DiskLimit     string `protobuf:"bytes,9,opt,name=disk_limit,json=diskLimit,proto3" json:"disk_limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -717,6 +721,20 @@ func (x *CompanionContainerSpec) GetCommand() []string {
 	return nil
 }
 
+func (x *CompanionContainerSpec) GetCpuLimit() string {
+	if x != nil {
+		return x.CpuLimit
+	}
+	return ""
+}
+
+func (x *CompanionContainerSpec) GetMemoryLimit() string {
+	if x != nil {
+		return x.MemoryLimit
+	}
+	return ""
+}
+
 func (x *CompanionContainerSpec) GetDiskLimit() string {
 	if x != nil {
 		return x.DiskLimit
@@ -744,10 +762,13 @@ type CreateSpec struct {
 	// entrypoint.sh UID/GID + gosu drop-privilege behavior.
 	Command []string `protobuf:"bytes,10,rep,name=command,proto3" json:"command,omitempty"`
 	// Docker --cpus style, e.g. "2", "0.5". "" = unlimited.
+	// Applies to the primary container.
 	CpuLimit string `protobuf:"bytes,11,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`
 	// Docker --memory style, e.g. "4g", "512m". "" = unlimited.
+	// Applies to the primary container.
 	MemoryLimit string `protobuf:"bytes,12,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
 	// Docker --storage-opt size= style, e.g. "10g". "" = unlimited.
+	// Applies to the primary container.
 	DiskLimit     string `protobuf:"bytes,13,opt,name=disk_limit,json=diskLimit,proto3" json:"disk_limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2467,16 +2488,18 @@ const file_service_proto_rawDesc = "" +
 	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x18\n" +
 	"\aretries\x18\x04 \x01(\rR\aretries\x12<\n" +
 	"\fstart_period\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\vstartPeriod\x12@\n" +
-	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\xe6\x02\n" +
+	"\x0estart_interval\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\rstartInterval\"\xa6\x03\n" +
 	"\x16CompanionContainerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12>\n" +
 	"\x04envs\x18\x03 \x03(\v2*.agbox.v1.CompanionContainerSpec.EnvsEntryR\x04envs\x12=\n" +
 	"\vhealthcheck\x18\x04 \x01(\v2\x1b.agbox.v1.HealthcheckConfigR\vhealthcheck\x121\n" +
 	"\x15post_start_on_primary\x18\x05 \x03(\tR\x12postStartOnPrimary\x12\x18\n" +
-	"\acommand\x18\x06 \x03(\tR\acommand\x12\x1d\n" +
+	"\acommand\x18\x06 \x03(\tR\acommand\x12\x1b\n" +
+	"\tcpu_limit\x18\a \x01(\tR\bcpuLimit\x12!\n" +
+	"\fmemory_limit\x18\b \x01(\tR\vmemoryLimit\x12\x1d\n" +
 	"\n" +
-	"disk_limit\x18\a \x01(\tR\tdiskLimit\x1a7\n" +
+	"disk_limit\x18\t \x01(\tR\tdiskLimit\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb3\x05\n" +

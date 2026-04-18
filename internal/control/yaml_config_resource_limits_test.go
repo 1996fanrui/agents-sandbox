@@ -1,12 +1,13 @@
 package control
 
 import (
+	"strings"
 	"testing"
 )
 
-// TestYAMLResourceLimitsPassthrough covers AT-I7UX: resource limit strings on
-// both the primary spec and companion containers flow verbatim from YAML into
-// the generated proto CreateSpec.
+// TestYAMLResourceLimitsPassthrough covers AT-YAM1: resource limit strings
+// on both the primary spec and companion containers flow verbatim from YAML
+// into the generated proto CreateSpec.
 func TestYAMLResourceLimitsPassthrough(t *testing.T) {
 	raw := []byte(`
 image: "example:latest"
@@ -16,6 +17,8 @@ disk_limit: "10g"
 companion_containers:
   db:
     image: postgres:16
+    cpu_limit: "1"
+    memory_limit: "512m"
     disk_limit: "5g"
 `)
 
@@ -45,7 +48,31 @@ companion_containers:
 	if cc.GetName() != "db" {
 		t.Fatalf("companion name mismatch: got %q", cc.GetName())
 	}
+	if cc.GetCpuLimit() != "1" {
+		t.Fatalf("companion cpu_limit: got %q, want %q", cc.GetCpuLimit(), "1")
+	}
+	if cc.GetMemoryLimit() != "512m" {
+		t.Fatalf("companion memory_limit: got %q, want %q", cc.GetMemoryLimit(), "512m")
+	}
 	if cc.GetDiskLimit() != "5g" {
-		t.Fatalf("companion disk_limit mismatch: got %q, want %q", cc.GetDiskLimit(), "5g")
+		t.Fatalf("companion disk_limit: got %q, want %q", cc.GetDiskLimit(), "5g")
+	}
+}
+
+// TestYAMLCompanionUnknownResourceLimitFieldRejected guards against
+// regressing back to a disk-only YAML schema by smuggling an unknown
+// companion field past KnownFields(true).
+func TestYAMLCompanionUnknownResourceLimitFieldRejected(t *testing.T) {
+	raw := []byte(`
+image: "example:latest"
+companion_containers:
+  db:
+    image: postgres:16
+    bogus_limit: "1"
+`)
+	if _, err := parseYAMLConfig(raw); err == nil {
+		t.Fatal("expected parse to reject unknown companion field")
+	} else if !strings.Contains(err.Error(), "bogus_limit") {
+		t.Fatalf("error should mention unknown field, got %v", err)
 	}
 }

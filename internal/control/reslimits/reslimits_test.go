@@ -78,3 +78,23 @@ func TestParseEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestLimitsHasSymmetricCompanionMaps asserts the Limits struct exposes
+// parallel per-companion maps for cpu / memory / disk limits. Guards against
+// regressing back to a disk-only companion model.
+func TestLimitsHasSymmetricCompanionMaps(t *testing.T) {
+	limits := Limits{
+		CompanionCPUMillicores: map[string]int64{"db": 500},
+		CompanionMemoryBytes:   map[string]int64{"db": 536870912},
+		CompanionDiskBytes:     map[string]int64{"db": 5368709120},
+	}
+	if limits.CompanionCPUMillicores["db"] != 500 {
+		t.Fatalf("CompanionCPUMillicores[db]=%d", limits.CompanionCPUMillicores["db"])
+	}
+	if limits.CompanionMemoryBytes["db"] != 536870912 {
+		t.Fatalf("CompanionMemoryBytes[db]=%d", limits.CompanionMemoryBytes["db"])
+	}
+	if limits.CompanionDiskBytes["db"] != 5368709120 {
+		t.Fatalf("CompanionDiskBytes[db]=%d", limits.CompanionDiskBytes["db"])
+	}
+}

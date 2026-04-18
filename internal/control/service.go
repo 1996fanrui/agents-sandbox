@@ -35,12 +35,10 @@ type ServiceConfig struct {
 	Logger                 *slog.Logger
 	// NowFunc is the clock used for crashloop window evaluation and restore recovery.
 	// Defaults to time.Now when nil. Inject a custom clock in tests for deterministic behaviour.
-	NowFunc          func() time.Time
-	HostCapabilities hostCapabilities
-	runtimeBackend   runtimeBackend
-	sliceManager     sliceManager
-	idRegistry       idRegistry
-	eventStore       eventStore
+	NowFunc        func() time.Time
+	runtimeBackend runtimeBackend
+	idRegistry     idRegistry
+	eventStore     eventStore
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -140,11 +138,6 @@ func NewService(config ServiceConfig) (*Service, io.Closer, error) {
 		config.runtimeBackend = runtimeBackend
 		runtimeCloser = closer
 	}
-	if config.sliceManager == nil {
-		// Tests that inject a runtimeBackend manually still need a slice
-		// manager so the create path is uniformly callable; default to noop.
-		config.sliceManager = noopSliceManager{}
-	}
 	if config.NowFunc == nil {
 		config.NowFunc = time.Now
 	}
@@ -194,7 +187,7 @@ func (s *Service) CreateSandbox(_ context.Context, req *agboxv1.CreateSandboxReq
 	if req.GetCreateSpec().GetImage() == "" {
 		return nil, status.Error(codes.InvalidArgument, "create_spec.image is required")
 	}
-	if err := validateCreateSpec(req.GetCreateSpec(), s.config.HostCapabilities); err != nil {
+	if err := validateCreateSpec(req.GetCreateSpec()); err != nil {
 		// validateCreateSpec returns gRPC status errors for resource-limit
 		// failures; legacy checks return plain errors. Preserve status errors
 		// as-is so callers see the precise code (InvalidArgument or

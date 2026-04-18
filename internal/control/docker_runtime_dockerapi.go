@@ -55,9 +55,13 @@ type dockerContainerSpec struct {
 	Ports        []dockerPortMapping
 	Workdir      string
 	Command      []string
-	// CgroupParent is the systemd slice unit name used as the per-sandbox
-	// cgroup parent. Empty means Docker's default cgroup placement.
-	CgroupParent string
+	// CPUMillicores drives HostConfig.NanoCPUs (multiplied by 1_000_000).
+	// Zero means no per-container CPU quota.
+	CPUMillicores int64
+	// MemoryBytes drives HostConfig.Memory in bytes. Zero means no
+	// per-container memory quota. HostConfig.MemorySwap is intentionally
+	// left at Docker's default (= 2 * Memory on hosts with swap).
+	MemoryBytes int64
 	// DiskSizeBytes drives HostConfig.StorageOpt["size"] in plain decimal
 	// bytes. Zero means no per-container disk quota.
 	DiskSizeBytes int64
@@ -176,7 +180,14 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		// "unless-stopped" only skips restart for containers that were in the
 		// stopped state, so stopped sandboxes stay stopped across reboots.
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyUnlessStopped},
-		Resources:     container.Resources{CgroupParent: spec.CgroupParent},
+	}
+	if spec.CPUMillicores > 0 {
+		// 1 millicore = 1e6 NanoCPUs. HostConfig.NanoCPUs is Docker's native
+		// per-container CPU quota (equivalent to `docker run --cpus`).
+		hostConfig.Resources.NanoCPUs = spec.CPUMillicores * 1_000_000
+	}
+	if spec.MemoryBytes > 0 {
+		hostConfig.Resources.Memory = spec.MemoryBytes
 	}
 	if spec.DiskSizeBytes > 0 {
 		// Docker's storage-opt size= key takes the byte count as a plain

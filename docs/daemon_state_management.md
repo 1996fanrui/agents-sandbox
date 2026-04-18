@@ -30,7 +30,7 @@ Daemon-originated intent and history. Write to bbolt **before** accepting the op
 | Sandbox config | `sandbox-config` | sandbox_id | `proto.Marshal(CreateSpec)` |
 | Exec config | `exec-config:{sandbox_id}` | exec_id | `proto.Marshal(CreateExecRequest)` |
 
-`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. Resource-limit strings (`cpu_limit`, `memory_limit`, `disk_limit` on the primary, and `disk_limit` on each `CompanionContainerSpec`) are part of this `CreateSpec` blob and ride the existing persistence path — no separate bucket is introduced. These strings are immutable after create and serve as the authoritative source for rebuilding the per-sandbox systemd slice on restart.
+`sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. Resource-limit strings (`cpu_limit`, `memory_limit`, `disk_limit` on the primary and the same three fields on each `CompanionContainerSpec`) are part of this `CreateSpec` blob and ride the existing persistence path — no separate bucket is introduced. These strings are immutable after create and are re-parsed on each container create and on restart recovery to rebuild the per-container `HostConfig.NanoCPUs` / `HostConfig.Memory` / `HostConfig.StorageOpt["size"]` values. Resource limits are not daemon-independent persistent state: they are always derived from `CreateSpec`, and there are no sandbox-scoped cgroup resources to reconcile separately from the containers themselves.
 
 ## Category B — Docker Runtime State
 
@@ -105,10 +105,6 @@ flowchart TD
 ```
 
 After all sandboxes are recovered, the daemon subscribes to Docker events for real-time container state changes. On connection loss, it performs a full reconcile via docker inspect then re-subscribes.
-
-### systemd Slice Reconcile
-
-For sandboxes that persisted a non-empty `cpu_limit` or `memory_limit` in their `CreateSpec`, the daemon re-parses the strings during restart recovery and re-runs `EnsureSandboxSlice` (idempotent) so the transient `agbox-<sandbox-id>.slice` unit is recreated with the same properties. The slice itself is not persisted — it is pure Category C state derived from the Category A `CreateSpec`. After all sandbox records have been processed, the daemon enumerates existing per-sandbox slices via systemd and removes any whose sandbox record is gone (orphan reclamation), mirroring the orphan-network handling in `deleteRuntimeArtifacts`.
 
 ## bbolt Value Type Constraint
 

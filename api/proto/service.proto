@@ -112,8 +112,12 @@ message CompanionContainerSpec {
   // entrypoint is intentionally not exposed to preserve the image
   // entrypoint.sh UID/GID + gosu drop-privilege behavior.
   repeated string command = 6;
+  // Same semantics as CreateSpec.cpu_limit, scoped to this companion container.
+  string cpu_limit = 7;
+  // Same semantics as CreateSpec.memory_limit, scoped to this companion container.
+  string memory_limit = 8;
   // Same semantics as CreateSpec.disk_limit, scoped to this companion container.
-  string disk_limit = 7;
+  string disk_limit = 9;
 }
 
 message CreateSpec {
@@ -135,10 +139,13 @@ message CreateSpec {
   // entrypoint.sh UID/GID + gosu drop-privilege behavior.
   repeated string command = 10;
   // Docker --cpus style, e.g. "2", "0.5". "" = unlimited.
+  // Applies to the primary container.
   string cpu_limit = 11;
   // Docker --memory style, e.g. "4g", "512m". "" = unlimited.
+  // Applies to the primary container.
   string memory_limit = 12;
   // Docker --storage-opt size= style, e.g. "10g". "" = unlimited.
+  // Applies to the primary container.
   string disk_limit = 13;
 }
 

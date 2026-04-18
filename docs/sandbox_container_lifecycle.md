@@ -109,7 +109,7 @@ Create-path rules:
 - `CreateSandbox` returns immediately after acceptance; the caller must not infer readiness from the response alone.
 - The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid companion container declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
 - If materialization fails after resources exist, cleanup continues on a daemon-owned background context with bounded timeout.
-- Create-failure cleanup removes the per-sandbox systemd slice alongside the dedicated network and any partially created containers.
+- Create-failure cleanup removes the dedicated network and any partially created containers.
 
 ## Resume Path
 
@@ -138,18 +138,17 @@ flowchart LR
 - After `SANDBOX_DELETED`, the daemon retains the event stream for `runtime.cleanup_ttl` before removing retained history.
 - Containers are created with Docker `RestartPolicy=unless-stopped`, so previously-running sandboxes come back automatically after a host or Docker daemon restart, while sandboxes stopped via `agbox sandbox stop` remain stopped until `ResumeSandbox`.
 
-## Resource Limits via systemd Slice
+## Per-container Resource Limits
 
-When a sandbox sets a non-empty `cpu_limit` or `memory_limit`, the daemon creates a per-sandbox transient systemd slice named `agbox-<sandbox-id>.slice` under the fixed parent `agbox.slice`. The slice is the single cgroup that owns CPU and memory quotas for the sandbox: the primary container and every companion share it via Docker `HostConfig.CgroupParent`. When both `cpu_limit` and `memory_limit` are empty, no slice is created and no `--cgroup-parent` is passed — containers fall back to Docker's default parent cgroup.
+Resource limits are expressed once per container (primary and each companion independently) and sent straight to Docker as native HostConfig fields. Each container carries its own three limits; there is no sandbox-wide resource pool and the daemon keeps no resource-limit state of its own.
 
-Slice lifecycle:
+For each container:
 
-- **Create**: the slice is allocated during `CreateSandbox`, before the dedicated network and container create steps, only when at least one of `cpu_limit` / `memory_limit` is non-empty. Slice creation uses systemd D-Bus `StartTransientUnit` with `CPUQuotaPerSecUSec` and/or `MemoryMax` properties derived from the parsed limits.
-- **Runtime-only**: the slice itself is a runtime resource, not persisted state. Its properties are derived each time from the `cpu_limit` / `memory_limit` strings on the sandbox record.
-- **Destroy**: `StopSandbox`, `DeleteSandbox`, and `cleanup_ttl`-driven removal each call the idempotent slice-removal path alongside Docker network removal.
-- **Restart recovery**: on daemon restart the slice is rebuilt from the sandbox record via `EnsureSandboxSlice`; enumerated slices whose sandbox records no longer exist are reclaimed during startup reconcile. See [Daemon State Management](daemon_state_management.md).
+- `cpu_limit` → `HostConfig.NanoCPUs` (= millicores × 1_000_000).
+- `memory_limit` → `HostConfig.Memory`; `HostConfig.MemorySwap` is left at Docker's default.
+- `disk_limit` → `HostConfig.StorageOpt["size"]` as a plain decimal byte count.
 
-`disk_limit` does not use the slice; it is passed per-container to Docker as `HostConfig.StorageOpt["size"]`.
+Any of the three limits can be omitted independently; an omitted limit means Docker applies no enforcement for that dimension on that container. There is no sandbox-wide resource pool — two containers in the same sandbox do not compete against a shared budget, and one container hitting its limit does not constrain its siblings. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for the host-side prerequisites that each key requires.
 
 ## Reconciliation
 
