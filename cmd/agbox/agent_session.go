@@ -152,6 +152,10 @@ func runInteractiveSession(
 			Image:        defaultImage,
 			BuiltinTools: parsed.builtinTools,
 			Copies:       copies,
+			Envs:         parsed.envs,
+			CpuLimit:     parsed.cpuLimit,
+			MemoryLimit:  parsed.memoryLimit,
+			DiskLimit:    parsed.diskLimit,
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
 				"agent-type": agentLabel,
@@ -273,6 +277,10 @@ func runLongRunningSession(
 			Image:        defaultImage,
 			BuiltinTools: parsed.builtinTools,
 			Copies:       copies,
+			Envs:         parsed.envs,
+			CpuLimit:     parsed.cpuLimit,
+			MemoryLimit:  parsed.memoryLimit,
+			DiskLimit:    parsed.diskLimit,
 			Labels: map[string]string{
 				"created-by": "agbox-cli",
 				"agent-type": agentLabel,
