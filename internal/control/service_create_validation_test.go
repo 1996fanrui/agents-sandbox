@@ -578,6 +578,31 @@ func TestCreateSandboxRejectsUnknownBuiltinToolsBeforeRuntime(t *testing.T) {
 	}
 }
 
+func TestCreateSandboxAcceptsOpenCodeBuiltinTool(t *testing.T) {
+	runtime := &capturingRuntimeBackend{}
+	client := newBufconnClient(t, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  runtime,
+	})
+
+	createResp, err := client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId: "session-opencode-builtin",
+		CreateSpec: &agboxv1.CreateSpec{
+			Image:        "ghcr.io/agents-sandbox/coding-runtime:test",
+			BuiltinTools: []string{"opencode"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with opencode builtin tool failed: %v", err)
+	}
+	waitForSandboxState(t, client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	if got := runtime.lastCreateSpec.GetBuiltinTools(); len(got) != 1 || got[0] != "opencode" {
+		t.Fatalf("unexpected builtin tools passed to runtime: %v", got)
+	}
+}
+
 func TestCreateSandboxRejectsInvalidCompanionContainerSpecsBeforeRuntime(t *testing.T) {
 	runtime := &capturingRuntimeBackend{}
 	client := newBufconnClient(t, ServiceConfig{

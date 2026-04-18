@@ -22,30 +22,33 @@ const ContainerUserHome = "/home/agbox"
 type MountID string
 
 const (
-	MountIDClaude        MountID = ".claude"
-	MountIDClaudeJSON    MountID = ".claude.json"
-	MountIDCodex         MountID = ".codex"
-	MountIDAgents        MountID = ".agents"
-	MountIDGHAuth        MountID = "gh-auth"
-	MountIDSSHAgent      MountID = "ssh-agent"
-	MountIDSSHKnownHosts MountID = "ssh-known-hosts"
-	MountIDUVCache       MountID = "uv-cache"
-	MountIDUVData        MountID = "uv-data"
-	MountIDNPM           MountID = "npm"
-	MountIDApt           MountID = "apt"
-	MountIDPulseAudio    MountID = "pulse-audio"
+	MountIDClaude         MountID = ".claude"
+	MountIDClaudeJSON     MountID = ".claude.json"
+	MountIDCodex          MountID = ".codex"
+	MountIDAgents         MountID = ".agents"
+	MountIDGHAuth         MountID = "gh-auth"
+	MountIDSSHAgent       MountID = "ssh-agent"
+	MountIDSSHKnownHosts  MountID = "ssh-known-hosts"
+	MountIDUVCache        MountID = "uv-cache"
+	MountIDUVData         MountID = "uv-data"
+	MountIDNPM            MountID = "npm"
+	MountIDApt            MountID = "apt"
+	MountIDPulseAudio     MountID = "pulse-audio"
+	MountIDOpenCodeConfig MountID = "opencode-config"
+	MountIDOpenCodeData   MountID = "opencode-data"
 )
 
 // ToolID is the canonical identifier for a tooling capability.
 type ToolID string
 
 const (
-	ToolIDClaude ToolID = "claude"
-	ToolIDCodex  ToolID = "codex"
-	ToolIDGit    ToolID = "git"
-	ToolIDUV     ToolID = "uv"
-	ToolIDNPM    ToolID = "npm"
-	ToolIDApt    ToolID = "apt"
+	ToolIDClaude   ToolID = "claude"
+	ToolIDCodex    ToolID = "codex"
+	ToolIDGit      ToolID = "git"
+	ToolIDUV       ToolID = "uv"
+	ToolIDNPM      ToolID = "npm"
+	ToolIDApt      ToolID = "apt"
+	ToolIDOpenCode ToolID = "opencode"
 )
 
 // MacOSKeychainCredential declares that a credential file may be absent from
@@ -173,6 +176,20 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		Mode:            CapabilityModeSocket,
 		Optional:        true,
 	},
+	{
+		ID:              MountIDOpenCodeConfig,
+		DefaultHostPath: "~/.config/opencode",
+		ContainerTarget: path.Join(ContainerUserHome, ".config/opencode"),
+		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
+	},
+	{
+		ID:              MountIDOpenCodeData,
+		DefaultHostPath: "~/.local/share/opencode",
+		ContainerTarget: path.Join(ContainerUserHome, ".local/share/opencode"),
+		Mode:            CapabilityModeReadWrite,
+		Optional:        true,
+	},
 })
 
 func buildMountIndex(mounts []CapabilityMount) map[MountID]CapabilityMount {
@@ -184,12 +201,13 @@ func buildMountIndex(mounts []CapabilityMount) map[MountID]CapabilityMount {
 }
 
 var builtInToolingCapabilities = map[ToolID]ToolingCapability{
-	ToolIDClaude: {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON, MountIDPulseAudio}},
-	ToolIDCodex:  {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
-	ToolIDGit:    {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth, MountIDSSHKnownHosts}},
-	ToolIDUV:     {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
-	ToolIDNPM:    {MountIDs: []MountID{MountIDNPM}},
-	ToolIDApt:    {MountIDs: []MountID{MountIDApt}},
+	ToolIDClaude:   {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON, MountIDPulseAudio}},
+	ToolIDCodex:    {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
+	ToolIDGit:      {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth, MountIDSSHKnownHosts}},
+	ToolIDUV:       {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
+	ToolIDNPM:      {MountIDs: []MountID{MountIDNPM}},
+	ToolIDApt:      {MountIDs: []MountID{MountIDApt}},
+	ToolIDOpenCode: {MountIDs: []MountID{MountIDOpenCodeConfig, MountIDOpenCodeData}},
 }
 
 func BuiltInToolingCapabilities() []ToolingCapability {
