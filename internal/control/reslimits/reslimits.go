@@ -10,10 +10,12 @@ import (
 )
 
 type Limits struct {
-	CPUMillicores      int64
-	MemoryBytes        int64
-	PrimaryDiskBytes   int64
-	CompanionDiskBytes map[string]int64
+	CPUMillicores          int64
+	MemoryBytes            int64
+	PrimaryDiskBytes       int64
+	CompanionCPUMillicores map[string]int64
+	CompanionMemoryBytes   map[string]int64
+	CompanionDiskBytes     map[string]int64
 }
 
 func ParseCPU(raw string) (int64, error) {

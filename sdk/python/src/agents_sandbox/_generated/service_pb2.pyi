@@ -142,7 +142,7 @@ class HealthcheckConfig(_message.Message):
     def __init__(self, test: _Optional[_Iterable[str]] = ..., interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., timeout: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., retries: _Optional[int] = ..., start_period: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., start_interval: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class CompanionContainerSpec(_message.Message):
-    __slots__ = ("name", "image", "envs", "healthcheck", "post_start_on_primary", "command", "disk_limit")
+    __slots__ = ("name", "image", "envs", "healthcheck", "post_start_on_primary", "command", "cpu_limit", "memory_limit", "disk_limit")
     class EnvsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -156,6 +156,8 @@ class CompanionContainerSpec(_message.Message):
     HEALTHCHECK_FIELD_NUMBER: _ClassVar[int]
     POST_START_ON_PRIMARY_FIELD_NUMBER: _ClassVar[int]
     COMMAND_FIELD_NUMBER: _ClassVar[int]
+    CPU_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    MEMORY_LIMIT_FIELD_NUMBER: _ClassVar[int]
     DISK_LIMIT_FIELD_NUMBER: _ClassVar[int]
     name: str
     image: str
@@ -163,8 +165,10 @@ class CompanionContainerSpec(_message.Message):
     healthcheck: HealthcheckConfig
     post_start_on_primary: _containers.RepeatedScalarFieldContainer[str]
     command: _containers.RepeatedScalarFieldContainer[str]
+    cpu_limit: str
+    memory_limit: str
     disk_limit: str
-    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ..., command: _Optional[_Iterable[str]] = ..., disk_limit: _Optional[str] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ..., command: _Optional[_Iterable[str]] = ..., cpu_limit: _Optional[str] = ..., memory_limit: _Optional[str] = ..., disk_limit: _Optional[str] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
     __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports", "command", "cpu_limit", "memory_limit", "disk_limit")

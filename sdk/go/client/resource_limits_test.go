@@ -31,9 +31,11 @@ func TestCreateSandboxResourceLimitOptions(t *testing.T) {
 		WithMemoryLimit("4g"),
 		WithPrimaryDiskLimit("10g"),
 		WithCompanionContainers(CompanionContainerSpec{
-			Name:      "db",
-			Image:     "postgres:16",
-			DiskLimit: "5g",
+			Name:        "db",
+			Image:       "postgres:16",
+			CPULimit:    "1",
+			MemoryLimit: "512m",
+			DiskLimit:   "5g",
 		}),
 		WithWait(false),
 	)
@@ -56,6 +58,12 @@ func TestCreateSandboxResourceLimitOptions(t *testing.T) {
 	companions := spec.GetCompanionContainers()
 	if len(companions) != 1 {
 		t.Fatalf("expected 1 companion, got %d", len(companions))
+	}
+	if companions[0].GetCpuLimit() != "1" {
+		t.Fatalf("companion CpuLimit: got %q, want %q", companions[0].GetCpuLimit(), "1")
+	}
+	if companions[0].GetMemoryLimit() != "512m" {
+		t.Fatalf("companion MemoryLimit: got %q, want %q", companions[0].GetMemoryLimit(), "512m")
 	}
 	if companions[0].GetDiskLimit() != "5g" {
 		t.Fatalf("companion DiskLimit: got %q, want %q", companions[0].GetDiskLimit(), "5g")

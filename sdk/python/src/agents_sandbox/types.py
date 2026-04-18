@@ -37,6 +37,8 @@ class CompanionContainerSpec:
     # check (matching the primary ``command`` validation pattern).
     command: Sequence[str] | None = None
     post_start_on_primary: tuple[str, ...] = ()
+    cpu_limit: str = ""
+    memory_limit: str = ""
     disk_limit: str = ""
 
     def __post_init__(self) -> None:

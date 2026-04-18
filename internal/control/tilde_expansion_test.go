@@ -98,7 +98,7 @@ func TestValidateCreateSpecTildeExpansion(t *testing.T) {
 			{Source: copySource, Target: "~/some-dir"},
 		},
 	}
-	if err := validateCreateSpec(spec, hostCapabilities{}); err != nil {
+	if err := validateCreateSpec(spec); err != nil {
 		t.Fatalf("validateCreateSpec: %v", err)
 	}
 	if spec.Mounts[0].Target != profile.ContainerUserHome+"/.config/foo" {
@@ -126,7 +126,7 @@ func TestValidateCreateSpecTildeSourceExpansion(t *testing.T) {
 			{Source: "~/.agents-sandbox-test-tilde", Target: "/container/test"},
 		},
 	}
-	if err := validateCreateSpec(spec, hostCapabilities{}); err != nil {
+	if err := validateCreateSpec(spec); err != nil {
 		t.Fatalf("validateCreateSpec: %v", err)
 	}
 	if spec.Mounts[0].Source != testDir {
@@ -145,7 +145,7 @@ func TestValidateCreateSpecTildeBareMountSource(t *testing.T) {
 			{Source: "~", Target: "/container/home"},
 		},
 	}
-	if err := validateCreateSpec(spec, hostCapabilities{}); err != nil {
+	if err := validateCreateSpec(spec); err != nil {
 		t.Fatalf("validateCreateSpec: %v", err)
 	}
 	if spec.Mounts[0].Source != homeDir {
@@ -189,7 +189,7 @@ func TestValidateCreateSpecTildeUsernameRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCreateSpec(tt.spec, hostCapabilities{})
+			err := validateCreateSpec(tt.spec)
 			if err == nil {
 				t.Fatal("expected error for ~username syntax")
 			}
@@ -219,7 +219,7 @@ func TestValidateCreateSpecNonTildeAbsolutePathsUnchanged(t *testing.T) {
 			{Source: copySource, Target: "/container/copy"},
 		},
 	}
-	if err := validateCreateSpec(spec, hostCapabilities{}); err != nil {
+	if err := validateCreateSpec(spec); err != nil {
 		t.Fatalf("validateCreateSpec: %v", err)
 	}
 	if spec.Mounts[0].Source != mountSource {
@@ -284,7 +284,7 @@ func TestValidateCreateSpecRelativePathRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCreateSpec(tt.spec, hostCapabilities{})
+			err := validateCreateSpec(tt.spec)
 			if err == nil {
 				t.Fatalf("expected error containing %q", tt.want)
 			}
@@ -336,7 +336,7 @@ func TestValidateCreateSpecRelativeSourceExistsRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCreateSpec(tt.spec, hostCapabilities{})
+			err := validateCreateSpec(tt.spec)
 			if err == nil {
 				t.Fatalf("expected error containing %q", tt.want)
 			}

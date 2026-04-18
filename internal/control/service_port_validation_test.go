@@ -100,7 +100,7 @@ func TestValidateCreateSpec_PortMapping(t *testing.T) {
 				Image: "ghcr.io/agents-sandbox/coding-runtime:test",
 				Ports: tc.ports,
 			}
-			err := validateCreateSpec(spec, hostCapabilities{})
+			err := validateCreateSpec(spec)
 			if tc.expectError {
 				if err == nil {
 					t.Fatal("expected error, got nil")

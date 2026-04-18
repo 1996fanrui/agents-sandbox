@@ -762,7 +762,7 @@ func TestValidateCreateSpec_RejectRootCopySource(t *testing.T) {
 					{Source: tc.source, Target: "/workspace"},
 				},
 			}
-			err := validateCreateSpec(spec, hostCapabilities{})
+			err := validateCreateSpec(spec)
 			if err == nil {
 				t.Fatalf("expected error for copy source %q, got nil", tc.source)
 			}

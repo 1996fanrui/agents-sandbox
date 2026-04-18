@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"sync"
 	"time"
@@ -196,7 +195,6 @@ type dockerRuntimeBackend struct {
 	config       ServiceConfig
 	dockerClient *client.Client
 	nftConn      nftablesConnector
-	slice        sliceManager
 }
 
 func newDockerRuntimeBackend(config *ServiceConfig) (runtimeBackend, io.Closer, error) {
@@ -204,40 +202,16 @@ func newDockerRuntimeBackend(config *ServiceConfig) (runtimeBackend, io.Closer, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize docker client: %w", err)
 	}
-	// Probe cgroup capabilities once at daemon startup; the snapshot gates
-	// validate-time rejection of cpu_limit / memory_limit on hosts that lack
-	// systemd + cgroup v2.
-	if (config.HostCapabilities == hostCapabilities{}) {
-		config.HostCapabilities = probeHostCapabilities(context.Background(), dockerClient, config.Logger)
-	}
-	if config.sliceManager == nil {
-		if mgr, err := newSystemdSliceManager(context.Background()); err == nil {
-			config.sliceManager = mgr
-		} else {
-			// macOS / non-systemd Linux / CI environments: degrade to noop
-			// so disk_limit still works and cpu/memory limits are rejected
-			// cleanly at validate time via hostCapabilities.
-			config.Logger.Info("systemd slice manager unavailable, falling back to noop", slog.Any("error", err))
-			config.sliceManager = noopSliceManager{}
-		}
-	}
 	backend := &dockerRuntimeBackend{
 		config:       *config,
 		dockerClient: dockerClient,
 		nftConn:      newNftablesConnector(config.Logger),
-		slice:        config.sliceManager,
 	}
 	return backend, backend, nil
 }
 
 func (backend *dockerRuntimeBackend) Close() error {
-	if backend == nil {
-		return nil
-	}
-	if closer, ok := backend.slice.(interface{ Close() }); ok {
-		closer.Close()
-	}
-	if backend.dockerClient == nil {
+	if backend == nil || backend.dockerClient == nil {
 		return nil
 	}
 	return backend.dockerClient.Close()
@@ -252,7 +226,6 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
-	sliceCreated := false
 	cleanupRequired := false
 	var ccStarts companionContainerStarts
 	defer func() {
@@ -263,9 +236,6 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
-		if sliceCreated {
-			_ = backend.sliceOrNoop().RemoveSandboxSlice(cleanupCtx, record.handle.GetSandboxId())
-		}
 	}()
 
 	mounts, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state)
@@ -296,16 +266,6 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 	}
 
 	cleanupRequired = true
-	if limits.CPUMillicores > 0 || limits.MemoryBytes > 0 {
-		if err := backend.sliceOrNoop().EnsureSandboxSlice(ctx, record.handle.GetSandboxId(), limits.CPUMillicores, limits.MemoryBytes); err != nil {
-			return runtimeCreateResult{}, err
-		}
-		sliceCreated = true
-	}
-	cgroupParent := ""
-	if sliceCreated {
-		cgroupParent = backend.sliceOrNoop().SliceNameFor(record.handle.GetSandboxId())
-	}
 	if err := backend.ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -322,7 +282,7 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 
-	ccStarts = startCompanionContainersAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.companionContainers, userLabels, cgroupParent, limits.CompanionDiskBytes, backend, func(ctx context.Context, spec dockerContainerSpec) error {
+	ccStarts = startCompanionContainersAsync(ctx, record.handle.GetSandboxId(), state.NetworkName, state.PrimaryContainerName, record.companionContainers, userLabels, limits.CompanionCPUMillicores, limits.CompanionMemoryBytes, limits.CompanionDiskBytes, backend, func(ctx context.Context, spec dockerContainerSpec) error {
 		return backend.dockerContainerCreate(ctx, spec)
 	}, func(ctx context.Context, name string) error {
 		return backend.dockerContainerStart(ctx, name)
@@ -360,7 +320,8 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		Environment:   primaryEnv,
 		Workdir:       "/workspace",
 		Command:       primaryCommand,
-		CgroupParent:  cgroupParent,
+		CPUMillicores: limits.CPUMillicores,
+		MemoryBytes:   limits.MemoryBytes,
 		DiskSizeBytes: limits.PrimaryDiskBytes,
 	}); err != nil {
 		return runtimeCreateResult{}, err
@@ -438,7 +399,8 @@ func startCompanionContainersAsync(
 	primaryContainerName string,
 	containers []*agboxv1.CompanionContainerSpec,
 	userLabels map[string]string,
-	cgroupParent string,
+	companionCPUMillicores map[string]int64,
+	companionMemoryBytes map[string]int64,
 	companionDiskBytes map[string]int64,
 	backend *dockerRuntimeBackend,
 	createContainer func(context.Context, dockerContainerSpec) error,
@@ -464,7 +426,8 @@ func startCompanionContainersAsync(
 				Healthcheck:  cc.GetHealthcheck(),
 				// nil/empty passes nil to Docker so the image CMD applies.
 				Command:       cc.GetCommand(),
-				CgroupParent:  cgroupParent,
+				CPUMillicores: companionCPUMillicores[cc.GetName()],
+				MemoryBytes:   companionMemoryBytes[cc.GetName()],
 				DiskSizeBytes: companionDiskBytes[cc.GetName()],
 			}); err != nil {
 				status.Ready = false
@@ -519,13 +482,6 @@ func collectCompanionContainerStatuses(results <-chan companionContainerStatus) 
 	return statuses
 }
 
-func (backend *dockerRuntimeBackend) sliceOrNoop() sliceManager {
-	if backend.slice == nil {
-		return noopSliceManager{}
-	}
-	return backend.slice
-}
-
 func (backend *dockerRuntimeBackend) StopSandbox(ctx context.Context, record *sandboxRecord) error {
 	if record.runtimeState == nil {
 		return errors.New("sandbox runtime state is missing")
@@ -539,34 +495,15 @@ func (backend *dockerRuntimeBackend) StopSandbox(ctx context.Context, record *sa
 			return err
 		}
 	}
-	return backend.removeSliceIfPresent(ctx, record)
+	return nil
 }
 
 func (backend *dockerRuntimeBackend) DeleteSandbox(ctx context.Context, record *sandboxRecord) error {
 	if record.runtimeState == nil {
-		return backend.removeSliceIfPresent(ctx, record)
-	}
-	record.runtimeState.CompanionContainerStarts.CancelAndWait()
-	if err := backend.removeSliceIfPresent(ctx, record); err != nil {
-		return err
-	}
-	return backend.deleteRuntimeArtifacts(ctx, record.runtimeState)
-}
-
-// removeSliceIfPresent only calls the system bus when the sandbox's spec
-// actually requested cpu/memory limits. Otherwise the Stop/Delete path would
-// hit systemd for every sandbox and surface a polkit "Authentication required"
-// error on hosts where the daemon is not root and has no pre-authorized
-// policy (typical CI environments).
-func (backend *dockerRuntimeBackend) removeSliceIfPresent(ctx context.Context, record *sandboxRecord) error {
-	limits, err := buildLimits(record.createSpec)
-	if err != nil {
-		return fmt.Errorf("parse persisted limits: %w", err)
-	}
-	if limits.CPUMillicores == 0 && limits.MemoryBytes == 0 {
 		return nil
 	}
-	return backend.sliceOrNoop().RemoveSandboxSlice(ctx, record.handle.GetSandboxId())
+	record.runtimeState.CompanionContainerStarts.CancelAndWait()
+	return backend.deleteRuntimeArtifacts(ctx, record.runtimeState)
 }
 
 func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context, state *sandboxRuntimeState) error {

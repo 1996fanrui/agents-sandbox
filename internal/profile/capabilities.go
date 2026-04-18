@@ -2,7 +2,7 @@ package profile
 
 import (
 	"path"
-	"sort"
+	"slices"
 )
 
 type CapabilityMode string
@@ -198,7 +198,7 @@ func BuiltInToolingCapabilities() []ToolingCapability {
 	for key := range builtInToolingCapabilities {
 		keys = append(keys, key)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	for _, key := range keys {
 		capabilities = append(capabilities, builtInToolingCapabilities[key])
 	}

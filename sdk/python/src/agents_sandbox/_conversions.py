@@ -80,6 +80,8 @@ def to_proto_companion_container(spec: CompanionContainerSpec) -> service_pb2.Co
         command=[] if spec.command is None else list(spec.command),
         post_start_on_primary=list(spec.post_start_on_primary),
     )
+    proto.cpu_limit = spec.cpu_limit
+    proto.memory_limit = spec.memory_limit
     proto.disk_limit = spec.disk_limit
     return proto
 
@@ -175,6 +177,8 @@ def to_companion_container(spec: service_pb2.CompanionContainerSpec) -> Companio
         healthcheck=to_healthcheck(spec.healthcheck if spec.HasField("healthcheck") else None),
         command=tuple(spec.command) if len(spec.command) > 0 else None,
         post_start_on_primary=tuple(spec.post_start_on_primary),
+        cpu_limit=spec.cpu_limit,
+        memory_limit=spec.memory_limit,
         disk_limit=spec.disk_limit,
     )
 

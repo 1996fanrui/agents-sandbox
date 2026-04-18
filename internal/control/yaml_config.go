@@ -70,9 +70,12 @@ type YAMLCompanionContainerSpec struct {
 	// preserves YAML presence semantics: nil = field omitted (image CMD
 	// applies); non-nil with len == 0 = explicit empty array (rejected).
 	Command *[]string `yaml:"command"`
-	// DiskLimit follows the same Docker --storage-opt size= syntax as
-	// CreateSpec.disk_limit. Empty = unlimited.
-	DiskLimit string `yaml:"disk_limit"`
+	// CPULimit / MemoryLimit / DiskLimit follow the same Docker CLI syntax as
+	// the top-level CreateSpec fields, scoped to this companion container.
+	// Empty = unlimited.
+	CPULimit    string `yaml:"cpu_limit"`
+	MemoryLimit string `yaml:"memory_limit"`
+	DiskLimit   string `yaml:"disk_limit"`
 }
 
 // YAMLHealthcheckConfig describes the healthcheck for a companion container.
@@ -218,6 +221,8 @@ func convertCompanionContainerMap(containers map[string]YAMLCompanionContainerSp
 			Name:               name,
 			Image:              cc.Image,
 			PostStartOnPrimary: cc.PostStartOnPrimary,
+			CpuLimit:           cc.CPULimit,
+			MemoryLimit:        cc.MemoryLimit,
 			DiskLimit:          cc.DiskLimit,
 		}
 		if cc.Command != nil {
