@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,6 +9,57 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+// agentSessionFlagVars holds the raw flag values for an agent session command.
+type agentSessionFlagVars struct {
+	rawCommand   string
+	mode         string
+	workspace    string
+	builtinTools []string
+	// Pre-reserved for ISSUE-188 (Commit 2 will consume these):
+	envs        []string
+	cpuLimit    string
+	memoryLimit string
+	diskLimit   string
+	sandboxID   string
+	// Track which flags were explicitly set by the user:
+	modeOverridden         bool
+	workspaceOverridden    bool
+	builtinToolsOverridden bool
+}
+
+// registerAgentSessionFlags registers all agent session flags on a cobra command.
+func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
+	cmd.Flags().StringVar(&v.rawCommand, "command", "", "Custom command to run (mutually exclusive with agent type)")
+	cmd.Flags().StringVar(&v.mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
+	cmd.Flags().StringVar(&v.workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
+	cmd.Flags().StringArrayVar(&v.builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
+	// ISSUE-188 flags (registered now, consumed in Commit 2):
+	cmd.Flags().StringArrayVar(&v.envs, "env", nil, "Environment variable in KEY=VAL form (repeatable)")
+	cmd.Flags().StringVar(&v.cpuLimit, "cpu-limit", "", "CPU limit (Docker --cpus format, e.g. 2, 0.5)")
+	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
+	cmd.Flags().StringVar(&v.diskLimit, "disk-limit", "", "Disk limit (Docker --storage-opt size= format, e.g. 10g)")
+	cmd.Flags().StringVar(&v.sandboxID, "sandbox-id", "", "Custom sandbox ID (overrides agent type default)")
+}
+
+// buildAgentSessionRunE creates the RunE function for agent session commands.
+// When agentType is non-empty (top-level commands), it skips positional arg parsing.
+func buildAgentSessionRunE(agentType string, v *agentSessionFlagVars) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		resolvedType := agentType
+		if resolvedType == "" && len(args) > 0 {
+			resolvedType = args[0]
+		}
+		v.modeOverridden = cmd.Flags().Changed("mode")
+		v.workspaceOverridden = cmd.Flags().Changed("workspace")
+		v.builtinToolsOverridden = cmd.Flags().Changed("builtin-tool")
+		parsed, err := resolveAgentSessionArgs(v, resolvedType)
+		if err != nil {
+			return err
+		}
+		return runAgentSession(cmd.Context(), parsed, cmd.OutOrStdout(), cmd.ErrOrStderr(), lookupEnvFromCmd(cmd))
+	}
+}
 
 // agentSessionArgs holds the parsed arguments for an agent session.
 type agentSessionArgs struct {
@@ -34,69 +86,45 @@ func registeredAgentNames() []string {
 }
 
 func newAgentCommand() *cobra.Command {
-	var (
-		rawCommand   string
-		mode         string
-		workspace    string
-		builtinTools []string
-	)
-
+	var v agentSessionFlagVars
 	agentNames := registeredAgentNames()
-
 	cmd := &cobra.Command{
 		Use:       "agent [agent_type]",
 		Short:     "Launch agent session",
 		Long:      "Launch agent session.\n\nAvailable agent types: " + strings.Join(agentNames, ", ") + "\nOr use --command for a custom agent.",
 		Args:      cobra.MaximumNArgs(1),
 		ValidArgs: agentNames,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			agentType := ""
-			if len(args) > 0 {
-				agentType = args[0]
-			}
-
-			modeOverridden := cmd.Flags().Changed("mode")
-			workspaceOverridden := cmd.Flags().Changed("workspace")
-			builtinToolsOverridden := cmd.Flags().Changed("builtin-tool")
-
-			parsed, err := resolveAgentSessionArgs(
-				agentType, rawCommand,
-				mode, modeOverridden,
-				workspace, workspaceOverridden,
-				builtinTools, builtinToolsOverridden,
-			)
-			if err != nil {
-				return err
-			}
-
-			return runAgentSession(cmd.Context(), parsed, cmd.OutOrStdout(), cmd.ErrOrStderr(), lookupEnvFromCmd(cmd))
-		},
+		RunE:      buildAgentSessionRunE("", &v),
 	}
+	registerAgentSessionFlags(cmd, &v)
+	return cmd
+}
 
-	cmd.Flags().StringVar(&rawCommand, "command", "", "Custom command to run (mutually exclusive with agent type)")
-	cmd.Flags().StringVar(&mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
-	cmd.Flags().StringVar(&workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
-	cmd.Flags().StringArrayVar(&builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
-
+// newAgentTypeCommand creates a top-level command for a specific agent type
+// (e.g. "agbox claude"), equivalent to "agbox agent <type>".
+func newAgentTypeCommand(agentType string) *cobra.Command {
+	var v agentSessionFlagVars
+	cmd := &cobra.Command{
+		Use:   agentType,
+		Short: fmt.Sprintf("Launch %s agent session", agentType),
+		Long:  fmt.Sprintf("Launch %s agent session (equivalent to 'agbox agent %s').", agentType, agentType),
+		Args:  cobra.NoArgs,
+		RunE:  buildAgentSessionRunE(agentType, &v),
+	}
+	registerAgentSessionFlags(cmd, &v)
 	return cmd
 }
 
 // resolveAgentSessionArgs validates and resolves agent session arguments into
 // an agentSessionArgs struct. It is a pure function suitable for unit testing.
 func resolveAgentSessionArgs(
+	v *agentSessionFlagVars,
 	agentType string,
-	rawCommand string,
-	mode string,
-	modeOverridden bool,
-	workspace string,
-	workspaceOverridden bool,
-	builtinTools []string,
-	builtinToolsOverridden bool,
 ) (agentSessionArgs, error) {
 	var parsed agentSessionArgs
 
 	// Validate mutual exclusion: agent type vs --command.
-	if agentType != "" && rawCommand != "" {
+	if agentType != "" && v.rawCommand != "" {
 		return agentSessionArgs{}, usageErrorf("cannot use --command with agent type %q", agentType)
 	}
 
@@ -113,27 +141,27 @@ func resolveAgentSessionArgs(
 		isRegistered = true
 		parsed.agentType = agentType
 		parsed.command = typeDef.command
-		if builtinToolsOverridden {
-			parsed.builtinTools = builtinTools
+		if v.builtinToolsOverridden {
+			parsed.builtinTools = v.builtinTools
 		} else {
 			parsed.builtinTools = typeDef.builtinTools
 		}
-	} else if rawCommand != "" {
+	} else if v.rawCommand != "" {
 		// Custom command: split the string into argv.
-		parsed.command = strings.Fields(rawCommand)
+		parsed.command = strings.Fields(v.rawCommand)
 		if len(parsed.command) == 0 {
 			return agentSessionArgs{}, usageErrorf("--command must not be empty")
 		}
-		parsed.builtinTools = builtinTools
+		parsed.builtinTools = v.builtinTools
 	} else {
 		return agentSessionArgs{}, usageErrorf("agbox agent requires an agent type or --command")
 	}
 
 	// Mode resolution.
-	if modeOverridden {
-		switch agentMode(mode) {
+	if v.modeOverridden {
+		switch agentMode(v.mode) {
 		case agentModeInteractive, agentModeLongRunning:
-			parsed.mode = agentMode(mode)
+			parsed.mode = agentMode(v.mode)
 		default:
 			return agentSessionArgs{}, usageErrorf("--mode must be %q or %q", agentModeInteractive, agentModeLongRunning)
 		}
@@ -145,12 +173,12 @@ func resolveAgentSessionArgs(
 	}
 
 	// Workspace resolution.
-	if workspaceOverridden {
+	if v.workspaceOverridden {
 		// User explicitly provided --workspace; validate the path.
-		if workspace == "" {
+		if v.workspace == "" {
 			return agentSessionArgs{}, usageErrorf("--workspace must not be empty")
 		}
-		resolved, err := validateWorkspacePath(workspace)
+		resolved, err := validateWorkspacePath(v.workspace)
 		if err != nil {
 			return agentSessionArgs{}, err
 		}
