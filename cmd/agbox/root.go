@@ -48,6 +48,9 @@ func run(
 		newSandboxCommand(),
 		newExecCommand(),
 		newAgentCommand(),
+		newAgentTypeCommand("claude"),
+		newAgentTypeCommand("codex"),
+		newAgentTypeCommand("openclaw"),
 	)
 
 	err := rootCmd.ExecuteContext(ctx)
