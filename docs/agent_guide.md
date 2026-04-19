@@ -1,7 +1,7 @@
 # Agent Guide
 
-The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`, and
-`agbox agent --command "..."`) create a sandbox, install tools, and run an AI
+The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`,
+and `agbox agent --command "..."`) create a sandbox, install tools, and run an AI
 agent in a single step. Each registered agent type has its own top-level command;
 `agbox agent` itself is reserved exclusively for the `--command` custom-agent mode.
 
@@ -17,6 +17,7 @@ to confirm before copying.
 | `claude` | interactive | Launches Claude Code with a TTY — type prompts, see responses in real time |
 | `codex` | interactive | Launches Codex CLI with a TTY |
 | `openclaw` | long-running | Deploys an OpenClaw gateway accessible via browser |
+| `paseo` | long-running | Deploys a Paseo daemon inside a sandbox |
 | `--command` | interactive (default) | Runs any custom command inside a sandbox |
 
 ## Claude / Codex
@@ -41,6 +42,10 @@ Deploys an [OpenClaw](https://docs.openclaw.ai) gateway inside a sandbox. Unlike
 Claude/Codex, this is a long-running service — the sandbox persists after the CLI
 exits.
 
+The gateway runs as the container primary command (under tini) in a dedicated
+`openclaw-runtime` image. The CLI creates the sandbox, waits for READY, then
+detaches. The gateway may take a few seconds to accept traffic after READY.
+
 ### Prerequisites
 
 Add LLM credentials to `~/.openclaw` on the host (mounted into the sandbox — see [Architecture](#architecture)):
@@ -59,7 +64,8 @@ OPENCLAW_STATE_DIR=~/.openclaw openclaw models auth add --provider openai --api-
 agbox openclaw
 ```
 
-The CLI creates a sandbox, installs `openclaw@latest`, and starts the gateway.
+The CLI creates a sandbox with the gateway as the container primary command and waits
+for it to become READY.
 
 ### Access the Gateway
 
@@ -93,15 +99,42 @@ graph TD
     browser -->|port mapping| gw
 ```
 
-Use [sandbox commands](cli_reference.md) to stop/delete/list sandboxes.
-`agbox sandbox resume` does not restart the gateway — to redeploy, delete and recreate:
+`agbox sandbox resume` restarts the container (and the gateway primary command restarts with it).
+To force a full redeployment, delete and recreate:
 `agbox sandbox delete <sandbox-id> && agbox openclaw`.
+
+## Paseo
+
+Deploys a [Paseo](https://paseo.sh) daemon inside a sandbox. Like OpenClaw,
+this is a long-running service — the sandbox persists after the CLI exits.
+
+```bash
+agbox paseo
+```
+
+The paseo daemon starts as the container primary command. Three environment
+variables are set by default to disable STT/TTS model downloads and
+external skills.
+
+To get the pairing URL:
+
+```bash
+agbox paseo url <sandbox-id>
+```
+
+### Builtin Tool Filtering
+
+Paseo declares a broad set of builtin tools (`claude`, `codex`, `npm`, `uv`,
+`apt`, `opencode`). During pre-flight, the CLI checks whether each tool's
+required host paths exist. Tools whose required (non-optional) mounts are
+missing are silently filtered out — a skip message is printed to stderr.
+Tools with only optional mounts are never filtered.
 
 ## Custom Command
 
 `agbox agent` is the only entry point for the custom-command mode; it requires
 `--command` and does not accept a positional agent type (use `agbox claude` /
-`agbox codex` / `agbox openclaw` for those).
+`agbox codex` / `agbox openclaw` / `agbox paseo` for those).
 
 Run any command inside a sandbox:
 

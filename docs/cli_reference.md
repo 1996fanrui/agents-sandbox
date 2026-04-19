@@ -33,6 +33,7 @@ agbox exec list
 agbox claude
 agbox codex
 agbox openclaw
+agbox paseo
 # Launch a custom agent via --command (only use-case for `agbox agent`)
 agbox agent --command "<binary> [args...]"
 # Generate shell autocompletion script (bash, zsh, fish, powershell)
@@ -85,6 +86,7 @@ The CLI exposes one top-level command per registered agent type. Use them direct
 agbox claude
 agbox codex
 agbox openclaw                                         # deploy OpenClaw gateway (long-running)
+agbox paseo                                            # deploy Paseo daemon (long-running)
 
 # Custom workspace
 agbox codex --workspace /path/to/project
@@ -107,33 +109,32 @@ The agent command supports two session modes, controlled by `--mode`. The mode d
 
 | Strategy | Interactive (default) | Long-running |
 |----------|----------------------|-------------|
-| Execution method | `docker exec -it` (TTY attached, real-time output) | `CreateExec` RPC + event subscription waiting for terminal state |
-| Wait behavior | Blocks until `docker exec` subprocess exits | Blocks until exec reaches terminal state (FINISHED/FAILED/CANCELLED) |
-| Ctrl+C behavior | Signal forwarded to container process → wait for exit → delete sandbox | CLI detaches, sandbox and exec continue running |
-| Output display | Real-time stdout/stderr streamed via TTY | No streaming; prints status at submission and at terminal state |
-| Sandbox cleanup on exit | Always deleted | Cleaned up only on pre-delivery failure; sandbox persists after delivery |
+| Execution method | `docker exec -it` (TTY attached, real-time output) | Container primary command (under tini); CLI waits for READY and detaches |
+| Wait behavior | Blocks until `docker exec` subprocess exits | Blocks until sandbox reaches READY state |
+| Ctrl+C behavior | Signal forwarded to container process → wait for exit → delete sandbox | CLI detaches, sandbox keeps running |
+| Output display | Real-time stdout/stderr streamed via TTY | No streaming; prints readyMessage (if defined) and sandbox ID |
+| Sandbox cleanup on exit | Always deleted | Cleaned up only on pre-READY failure; sandbox persists after READY |
 | idle_ttl | 10d (safety net) | 0 (disabled) |
 
 ### Agent Type Capabilities
 
 Agent types declare their own capabilities, orthogonal to session mode. Each capability is controlled by exactly one dimension (mode or agent type), never both:
 
-| Capability | Description | claude | codex | openclaw | Custom `--command` | User override flag |
-|-----------|-------------|--------|-------|----------|-------------------|-------------------|
-| mode | Default session mode | interactive | interactive | long-running | interactive | `--mode` |
-| command | Container command | Fixed | Fixed | Fixed (multi-phase) | User-specified | `--command` |
-| builtinTools | Pre-installed tools | Fixed | Fixed | Fixed | User-specified | `--builtin-tool` |
-| workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | No | `--workspace` (explicit to enable) |
-| .git check | Confirm when workspace lacks .git | Yes | Yes | No | No | None (automatic) |
-| envs | Environment variables for container | None | None | None | None | `--env` (repeatable, `KEY=VAL` form) |
-| cpuLimit | CPU limit | None | None | None | None | `--cpu-limit` (Docker `--cpus` format) |
-| memoryLimit | Memory limit | None | None | None | None | `--memory-limit` (Docker `--memory` format) |
-| diskLimit | Disk limit | None | None | None | None | `--disk-limit` (Docker `--storage-opt size=` format) |
-| sandboxIDGen | Custom ID generator | No | No | openclaw-XXXX | No | `--sandbox-id` |
-| configYaml | Embedded sandbox config | No | No | Yes (mounts, ports, envs) | No | None |
-| preFlight | Pre-flight validation | No | No | Auth + config check | No | None |
-| phases | Multi-phase startup | No | No | install + start | No | None |
-| readyMessage | Custom ready output | No | No | Management commands | No | None |
+| Capability | Description | claude | codex | openclaw | paseo | Custom `--command` | User override flag |
+|-----------|-------------|--------|-------|----------|-------|-------------------|-------------------|
+| mode | Default session mode | interactive | interactive | long-running | long-running | interactive | `--mode` |
+| command | Container primary command (under tini in long-running; docker exec in interactive) | Fixed | Fixed | Fixed (gateway run) | Fixed (daemon start) | User-specified | `--command` |
+| builtinTools | Pre-installed tools | Fixed | Fixed | Fixed | Fixed (filtered by preFlight) | User-specified | `--builtin-tool` |
+| workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | No | No | `--workspace` (explicit to enable) |
+| .git check | Confirm when workspace lacks .git | Yes | Yes | No | No | No | None (automatic) |
+| envs | Environment variables for container | None | None | None | None | None | `--env` (repeatable, `KEY=VAL` form) |
+| cpuLimit | CPU limit | None | None | None | None | None | `--cpu-limit` (Docker `--cpus` format) |
+| memoryLimit | Memory limit | None | None | None | None | None | `--memory-limit` (Docker `--memory` format) |
+| diskLimit | Disk limit | None | None | None | None | None | `--disk-limit` (Docker `--storage-opt size=` format) |
+| sandboxIDGen | Custom ID generator | No | No | openclaw-XXXXXX | paseo-XXXXXX | No | `--sandbox-id` |
+| configYaml | Embedded sandbox config | No | No | Yes (image, command, mounts, ports, envs) | Yes (image, command, envs) | No | None |
+| preFlight | Pre-flight validation | No | No | Auth check | Builtin tool host-path filter | No | None |
+| readyMessage | Custom ready output | No | No | Management commands | Management commands + active tools | No | None |
 
 - `--workspace` is optional at the top level.
   - claude/codex declare workspace copy and default to cwd.
@@ -141,15 +142,28 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
   - Custom `--command` does not copy by default; passing `--workspace` explicitly enables it.
   - `/` and `$HOME` are rejected as workspace paths (symlinks are resolved before comparison).
 - `.git` check is declared per agent type (claude/codex enable it; openclaw and custom `--command` do not). When enabled, it triggers if the workspace directory lacks a `.git` entry.
-- openclaw auto-generates sandbox IDs matching `openclaw-XXXX` (4 hex chars); other types let the daemon generate IDs. `--sandbox-id` overrides any generator; empty or omitted values fall through to the generator or daemon auto-generation.
+- openclaw auto-generates sandbox IDs matching `openclaw-XXXXXX` (6 hex chars); paseo auto-generates `paseo-XXXXXX`; other types let the daemon generate IDs. `--sandbox-id` overrides any generator; empty or omitted values fall through to the generator or daemon auto-generation.
 - `--env` passes environment variables to `CreateSpec.Envs`. Multiple `--env` flags are merged; duplicate keys use the last value. The daemon performs key-level merge with `configYaml` envs.
 - `--cpu-limit`, `--memory-limit`, and `--disk-limit` pass resource limits directly to `CreateSpec` fields. Values are not validated by the CLI; invalid formats are rejected by the daemon or Docker.
 
 ### Command Surface
 
-Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`).
+Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--command`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`).
+
+`--command` can be used with registered agent types to override the default command. In interactive mode, it replaces the TTY command launched via `docker exec`. In long-running mode, it replaces the container primary command (under tini). The value is split by whitespace via `strings.Fields` (no shell quoting).
 
 `agbox agent` is reserved exclusively for the custom-command mode: you must pass `--command` and it does not accept a positional agent type. The old `agbox agent <type>` form has been removed — use the per-type top-level command instead.
+
+### Paseo Subcommands
+
+The `agbox paseo` command additionally exposes subcommands:
+
+```bash
+# Print the paseo pairing URL (runs `paseo daemon pair` inside the sandbox)
+agbox paseo url <sandbox_id>
+```
+
+- `url`: creates an exec running `/usr/local/bin/paseo daemon pair` inside the sandbox, waits for it to finish, and prints the stdout (pairing URL).
 
 ## Exit Codes
 
