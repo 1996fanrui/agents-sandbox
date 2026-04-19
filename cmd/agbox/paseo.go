@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/profile"
 )
 
@@ -91,25 +93,68 @@ func expandHostPath(p, home string) string {
 }
 
 // paseoReadyMessageFactory returns a readyMessage closure that captures the
-// filtered builtin tools list. The factory makes a defensive copy of activeTools
-// to prevent caller mutation from affecting the closure.
-func paseoReadyMessageFactory(activeTools []string) func(sandboxID, containerName string) string {
+// filtered builtin tools list and the pair URL fetched at startup. The factory
+// makes a defensive copy of activeTools to prevent caller mutation from
+// affecting the closure. pairURL is embedded verbatim (trailing whitespace
+// trimmed); multi-line output is preserved with aligned indentation.
+func paseoReadyMessageFactory(activeTools []string, pairURL string) func(sandboxID, containerName string) string {
 	clone := append([]string(nil), activeTools...)
+	trimmed := strings.TrimRight(pairURL, " \t\r\n")
 	return func(sandboxID, containerName string) string {
 		toolsLine := "(none)"
 		if len(clone) > 0 {
 			toolsLine = strings.Join(clone, ", ")
 		}
+		// For multi-line URL output, indent continuation lines to align under
+		// the first line, so the block reads as a single logical field.
+		pairBlock := trimmed
+		if strings.Contains(trimmed, "\n") {
+			pairBlock = strings.ReplaceAll(trimmed, "\n", "\n    ")
+		}
 		return fmt.Sprintf(`
 Paseo daemon is running.
-  Pair URL:   agbox paseo url %s
+  Pair URL: %s
   Active builtin tools: %s
+  Get URL again: agbox paseo url %s
 
 Manage:
   agbox sandbox stop %s      # stop sandbox
   agbox sandbox resume %s    # restart container (primary command restarts with it)
   agbox sandbox delete %s    # delete sandbox
   agbox exec list %s         # list running execs
-`, sandboxID, toolsLine, sandboxID, sandboxID, sandboxID, sandboxID)
+`, pairBlock, toolsLine, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID)
 	}
+}
+
+// fetchPaseoPairURL runs `paseo daemon pair` inside the sandbox and returns
+// its stdout. On failure it writes the exec stderr log (if any) to errOut
+// before returning the error. Shared by `agbox paseo url` and the auto-fetch
+// path at session startup.
+func fetchPaseoPairURL(ctx context.Context, client sandboxExecClient, sandboxID string, errOut io.Writer) (string, error) {
+	createResp, err := client.CreateExec(ctx, &agboxv1.CreateExecRequest{
+		SandboxId: sandboxID,
+		Command:   []string{"/usr/local/bin/paseo", "daemon", "pair"},
+	})
+	if err != nil {
+		return "", runtimeErrorf("create exec: %v", err)
+	}
+
+	if err := waitForExecDone(ctx, client, createResp.GetExecId(), sandboxID); err != nil {
+		if stderrLogPath := createResp.GetStderrLogPath(); stderrLogPath != "" {
+			if logData, readErr := os.ReadFile(stderrLogPath); readErr == nil && len(logData) > 0 {
+				_, _ = fmt.Fprintf(errOut, "%s", logData)
+			}
+		}
+		return "", err
+	}
+
+	stdoutLogPath := createResp.GetStdoutLogPath()
+	if stdoutLogPath == "" {
+		return "", nil
+	}
+	logData, readErr := os.ReadFile(stdoutLogPath)
+	if readErr != nil {
+		return "", runtimeErrorf("read stdout log: %v", readErr)
+	}
+	return string(logData), nil
 }

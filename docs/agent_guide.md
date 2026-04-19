@@ -116,7 +116,8 @@ The paseo daemon starts as the container primary command. Three environment
 variables are set by default to disable STT/TTS model downloads and
 external skills.
 
-To get the pairing URL:
+On successful startup, the ready message embeds the pairing URL (fetched by
+running `paseo daemon pair` inside the sandbox). To fetch it again later:
 
 ```bash
 agbox paseo url <sandbox-id>

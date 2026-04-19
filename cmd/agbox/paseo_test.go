@@ -307,18 +307,42 @@ func TestRunAgentSession_Paseo_ReadyMessageIncludesFilteredTools(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Simulate the preFlight and factory injection that runAgentSession does.
+	// Simulate the preFlight that runAgentSession does; the readyMessage
+	// factory is now injected by runLongRunningSession after fetching the
+	// pair URL, so set agentType so that path is exercised.
 	var preFlightStderr bytes.Buffer
 	if err := paseoPreFlightWithHome(&preFlightStderr, &parsed, home); err != nil {
 		t.Fatalf("preFlight error: %v", err)
 	}
-	parsed.readyMessage = paseoReadyMessageFactory(parsed.builtinTools)
+	parsed.agentType = "paseo"
+
+	stdoutDir := t.TempDir()
+	stdoutLog := filepath.Join(stdoutDir, "stdout.log")
+	if err := os.WriteFile(stdoutLog, []byte("https://paseo.sh/pair/auto-fetch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	mock := newReadyOnlyMock()
+	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
+		return &agboxv1.CreateExecResponse{ExecId: "exec-pair", StdoutLogPath: stdoutLog}, nil
+	}
+	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
+		return &agboxv1.GetExecResponse{Exec: &agboxv1.ExecStatus{
+			ExecId:            "exec-pair",
+			SandboxId:         "sb-001",
+			State:             agboxv1.ExecState_EXEC_STATE_FINISHED,
+			ExitCode:          0,
+			LastEventSequence: 3,
+		}}, nil
+	}
+
 	var stdout, stderr bytes.Buffer
 	err = runLongRunningSession(context.Background(), mock, parsed, "paseo", &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "https://paseo.sh/pair/auto-fetch") {
+		t.Fatalf("stderr should contain fetched pair URL, got:\n%s", stderr.String())
 	}
 
 	stderrStr := stderr.String()
@@ -344,14 +368,22 @@ func TestRunAgentSession_Paseo_ReadyMessageIncludesFilteredTools(t *testing.T) {
 
 func TestPaseoReadyMessageFactory_WithTools(t *testing.T) {
 	// AT-PD: factory with tools.
-	factory := paseoReadyMessageFactory([]string{"claude", "npm", "uv"})
+	factory := paseoReadyMessageFactory([]string{"claude", "npm", "uv"}, "https://paseo.sh/pair/abc123\n")
 	msg := factory("paseo-abc0", "agbox-primary-paseo-abc0")
 
 	if !strings.Contains(msg, "Paseo daemon is running") {
 		t.Fatalf("missing Paseo header, got:\n%s", msg)
 	}
-	if !strings.Contains(msg, "agbox paseo url paseo-abc0") {
-		t.Fatalf("missing pair URL command, got:\n%s", msg)
+	if !strings.Contains(msg, "Pair URL: https://paseo.sh/pair/abc123") {
+		t.Fatalf("missing fetched pair URL, got:\n%s", msg)
+	}
+	// Trailing whitespace from the URL output must be trimmed so the line
+	// does not carry a dangling newline before the next field.
+	if strings.Contains(msg, "https://paseo.sh/pair/abc123\n\n") {
+		t.Fatalf("pair URL trailing whitespace not trimmed, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Get URL again: agbox paseo url paseo-abc0") {
+		t.Fatalf("missing retry hint, got:\n%s", msg)
 	}
 	if !strings.Contains(msg, "claude, npm, uv") {
 		t.Fatalf("expected tools list, got:\n%s", msg)
@@ -361,10 +393,19 @@ func TestPaseoReadyMessageFactory_WithTools(t *testing.T) {
 	}
 }
 
+func TestPaseoReadyMessageFactory_MultiLineURL(t *testing.T) {
+	// Continuation lines must be indented to align under the first line.
+	factory := paseoReadyMessageFactory(nil, "line1\nline2\n")
+	msg := factory("paseo-xyz", "c")
+	if !strings.Contains(msg, "Pair URL: line1\n    line2") {
+		t.Fatalf("multi-line URL not aligned, got:\n%s", msg)
+	}
+}
+
 func TestPaseoReadyMessageFactory_EmptyTools(t *testing.T) {
 	// AT-PE: factory with nil/empty.
 	for _, input := range [][]string{nil, {}} {
-		factory := paseoReadyMessageFactory(input)
+		factory := paseoReadyMessageFactory(input, "https://paseo.sh/pair/x")
 		msg := factory("paseo-0001", "c")
 		if !strings.Contains(msg, "(none)") {
 			t.Fatalf("expected (none) for empty tools, got:\n%s", msg)
@@ -375,7 +416,7 @@ func TestPaseoReadyMessageFactory_EmptyTools(t *testing.T) {
 func TestPaseoReadyMessageFactory_DefensiveCopy(t *testing.T) {
 	// AT-PF: mutate input after factory.
 	tools := []string{"claude", "npm"}
-	factory := paseoReadyMessageFactory(tools)
+	factory := paseoReadyMessageFactory(tools, "https://paseo.sh/pair/x")
 	tools[0] = "MUTATED"
 
 	msg := factory("x", "y")

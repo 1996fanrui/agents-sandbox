@@ -163,7 +163,7 @@ The `agbox paseo` command additionally exposes subcommands:
 agbox paseo url <sandbox_id>
 ```
 
-- `url`: creates an exec running `/usr/local/bin/paseo daemon pair` inside the sandbox, waits for it to finish, and prints the stdout (pairing URL).
+- `url`: creates an exec running `/usr/local/bin/paseo daemon pair` inside the sandbox, waits for it to finish, and prints the stdout (pairing URL). The same URL is also embedded in the ready message printed by `agbox paseo` on successful startup; this subcommand is used to re-fetch it later.
 
 ## Exit Codes
 
