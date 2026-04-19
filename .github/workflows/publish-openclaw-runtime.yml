@@ -1,0 +1,72 @@
+name: Publish OpenClaw Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to publish, for example 1.2.3 or v1.2.3
+        required: true
+        type: string
+  push:
+    tags:
+      - "image-openclaw-v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/agents-sandbox/openclaw-runtime
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -e
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            raw_version="${GITHUB_REF_NAME}"
+          else
+            raw_version="${{ inputs.version }}"
+          fi
+
+          version="${raw_version#image-openclaw-v}"
+          version="${version#v}"
+          if [ -z "${version}" ]; then
+            echo "Release version cannot be empty." >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push openclaw runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: images/openclaw-runtime
+          file: images/openclaw-runtime/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: OPENCLAW_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_NAME }}:latest
