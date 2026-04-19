@@ -6,7 +6,7 @@ This document describes the runtime lifecycle contract owned by `agents-sandbox`
 
 | Resource | Notes |
 |----------|-------|
-| Primary container | Main execution target for `CreateExec` |
+| Primary container | Runs the service process as its primary command (under tini) |
 | Dedicated network | One per sandbox; shared bridge and host network are not supported. On Linux, an nftables DOCKER-USER rule blocks container→host traffic (applied on create, re-applied on daemon restart recovery, removed on delete). On macOS, `host.docker.internal` is overridden to `0.0.0.0` via `--add-host`. |
 | Companion containers | Declared via `CompanionContainerSpec`, on the same network |
 | Persistent event history | Stored in bbolt; lifecycle and exec events survive daemon restart until retention cleanup |
@@ -17,13 +17,13 @@ Docker object labels use the reverse-DNS namespace `io.github.1996fanrui.agents-
 
 ## CLI Agent Modes
 
-The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`, and
-`agbox agent --command "..."`) support two modes:
+The agent commands (`agbox claude`, `agbox codex`, `agbox openclaw`,
+`agbox paseo`, and `agbox agent --command "..."`) support two modes:
 
 - **Interactive** (`--mode interactive`, default): Attaches a TTY to the agent process. The CLI deletes the sandbox on exit. Uses `idle_ttl=10d` as a safety net.
-- **Long-running** (`--mode long-running`): Submits the agent command via `CreateExec` and waits for completion. The CLI can detach (Ctrl+C) without affecting the sandbox. Uses `idle_ttl=0` (disable idle stop). The sandbox must be managed manually via `agbox sandbox stop/delete`.
+- **Long-running** (`--mode long-running`): Creates the sandbox and waits for it to become READY, then detaches. The container primary command (declared in configYaml or overridden via `--command`) runs as the service process under tini. Uses `idle_ttl=0` (disable idle stop). The sandbox must be managed manually via `agbox sandbox stop/delete`.
 
-In long-running mode, if sandbox setup or exec creation fails before delivery, the sandbox is automatically cleaned up.
+In long-running mode, if sandbox setup fails before READY, the sandbox is automatically cleaned up.
 
 ## Primary Container Main Process
 

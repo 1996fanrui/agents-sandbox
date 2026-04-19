@@ -34,6 +34,7 @@ Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to
 | `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (rw), `~/.local/share/uv` → `/home/agbox/.local/share/uv` (rw) |
 | `npm` | `~/.npm` → `/home/agbox/.npm` (read-write) |
 | `apt` | `~/.cache/agents-sandbox-apt` → `/var/cache/apt/archives` (read-write) |
+| `opencode` | `~/.config/opencode` → `/home/agbox/.config/opencode` (rw), `~/.local/share/opencode` → `/home/agbox/.local/share/opencode` (rw) |
 
 Notes:
 - `codex` mounts both `~/.codex` and `~/.agents`; `~/.agents` is the shared agents state directory.
@@ -104,13 +105,13 @@ Docker objects without these labels are never inspected, stopped, or removed by 
 
 The rule that all Docker access goes through the daemon's structured runtime client has one deliberate exception: the CLI agent commands in interactive mode.
 
-These commands — the per-type top-level entries (`agbox claude`, `agbox codex`, `agbox openclaw`) and the custom-command entry (`agbox agent --command "..."`) — create a sandbox via gRPC, wait for it to become READY, then — depending on the session mode — either attach directly or delegate to the daemon's exec model:
+These commands — the per-type top-level entries (`agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`) and the custom-command entry (`agbox agent --command "..."`) — create a sandbox via gRPC, wait for it to become READY, then — depending on the session mode — either attach directly or delegate to the daemon's exec model:
 
 - **Interactive mode** (default): Calls `docker exec -it` directly from the CLI process to attach an interactive TTY session into the primary container. On exit, the sandbox is deleted via gRPC.
-- **Long-running mode** (`--mode long-running`): Submits the agent command via `CreateExec` RPC and waits for exec completion via event subscription. Does not call `docker exec` directly. On exit, the sandbox is not deleted and must be managed manually.
+- **Long-running mode** (`--mode long-running`): Creates the sandbox with the service process as the container primary command (under tini). The CLI waits for sandbox READY and detaches. Does not use `CreateExec` for the service process. On exit, the sandbox is not deleted and must be managed manually.
 
 Two agent definition surfaces are supported:
-- **Pre-registered tool:** `agbox claude`, `agbox codex`, `agbox openclaw` — each is its own top-level command that uses the built-in command and builtin-tool defaults from the agent tool registry. The old `agbox agent <type>` form has been removed.
+- **Pre-registered tool:** `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo` — each is its own top-level command that uses the built-in command and builtin-tool defaults from the agent tool registry. The old `agbox agent <type>` form has been removed.
 - **Custom command:** `agbox agent --command "aider --yes" --workspace /path/to/project` — the only remaining use of `agbox agent`; the user provides the full command and specifies the workspace directory.
 
 **Why the interactive-mode exception is necessary:**

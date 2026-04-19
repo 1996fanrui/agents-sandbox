@@ -81,13 +81,20 @@ func TestResolveAgentSessionArgs_CustomCommandWithBuiltinTools(t *testing.T) {
 	}
 }
 
-func TestResolveAgentSessionArgs_MutualExclusion(t *testing.T) {
-	_, err := resolveAgentSessionArgs(&agentSessionFlagVars{rawCommand: "aider", workspace: "/work", workspaceOverridden: true}, "claude")
-	if err == nil {
-		t.Fatal("expected error for agent type + --command")
+func TestResolveAgentSessionArgs_CommandFlag_NotMutuallyExclusive(t *testing.T) {
+	// AT-C3: --command + agent type is NOW allowed.
+	tmpDir := realTempDir(t)
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{rawCommand: "aider", workspace: tmpDir, workspaceOverridden: true}, "claude")
+	if err != nil {
+		t.Fatalf("expected no error for agent type + --command, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cannot use --command with agent type") {
-		t.Fatalf("unexpected error message: %v", err)
+	// rawCommand should override the type's default command.
+	if len(parsed.command) != 1 || parsed.command[0] != "aider" {
+		t.Fatalf("expected command=[aider], got %v", parsed.command)
+	}
+	// agentType is still set.
+	if parsed.agentType != "claude" {
+		t.Fatalf("expected agentType=claude, got %q", parsed.agentType)
 	}
 }
 
@@ -328,23 +335,16 @@ func TestResolveAgentSessionArgs_Openclaw(t *testing.T) {
 			t.Fatalf("builtinTools[%d]: expected %q, got %q", i, tool, parsed.builtinTools[i])
 		}
 	}
-	if len(parsed.phases) != 3 {
-		t.Fatalf("expected 3 phases, got %d", len(parsed.phases))
-	}
-	if parsed.phases[0].label != "Installing openclaw..." {
-		t.Fatalf("expected phases[0].label=%q, got %q", "Installing openclaw...", parsed.phases[0].label)
-	}
-	if parsed.phases[1].label != "Initializing config..." {
-		t.Fatalf("expected phases[1].label=%q, got %q", "Initializing config...", parsed.phases[1].label)
-	}
-	if parsed.phases[2].label != "Starting gateway..." {
-		t.Fatalf("expected phases[2].label=%q, got %q", "Starting gateway...", parsed.phases[2].label)
-	}
-	if len(parsed.command) != 0 {
-		t.Fatalf("expected empty command (phases replaces it), got %v", parsed.command)
-	}
 	if parsed.configYaml == "" {
 		t.Fatal("expected non-empty configYaml")
+	}
+	// configYaml should contain the image.
+	if !strings.Contains(parsed.configYaml, "image:") {
+		t.Fatalf("expected configYaml to contain image:, got:\n%s", parsed.configYaml)
+	}
+	// image should be empty because configYaml specifies it.
+	if parsed.image != "" {
+		t.Fatalf("expected empty image (configYaml provides it), got %q", parsed.image)
 	}
 
 	// openclaw typedef does not set copyWorkspace, so workspace should be empty.
@@ -359,7 +359,7 @@ func TestResolveAgentSessionArgs_SandboxID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{6}$`)
 		if !re.MatchString(parsed.sandboxID) {
 			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
 		}
@@ -415,17 +415,16 @@ func TestAgentCommandRejectsPositionalAgentType(t *testing.T) {
 	}
 }
 
-func TestTopLevelCommandRejectsCommandFlag(t *testing.T) {
+func TestTopLevelCommandAllowsCommandFlag(t *testing.T) {
+	// --command is now allowed with top-level agent type commands (overrides default command).
 	cmd := newAgentTypeCommand("claude")
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetArgs([]string{"--command", "foo"})
+	// The command will fail due to no daemon, but NOT due to mutual exclusion.
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for --command on top-level command")
-	}
-	if !strings.Contains(err.Error(), "cannot use --command with agent type") {
-		t.Fatalf("unexpected error message: %v", err)
+	if err != nil && strings.Contains(err.Error(), "cannot use --command with agent type") {
+		t.Fatalf("--command should no longer be rejected with agent type: %v", err)
 	}
 }
 
@@ -554,7 +553,7 @@ func TestResolveAgentSessionArgsFlags(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{6}$`)
 		if !re.MatchString(parsed.sandboxID) {
 			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
 		}
@@ -577,7 +576,7 @@ func TestResolveAgentSessionArgsFlags(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+		re := regexp.MustCompile(`^openclaw-[0-9a-f]{6}$`)
 		if !re.MatchString(parsed.sandboxID) {
 			t.Fatalf("expected sandboxID matching %s, got %q", re.String(), parsed.sandboxID)
 		}
@@ -633,5 +632,150 @@ func TestTopLevelCommandsInheritNewFlags(t *testing.T) {
 				t.Fatalf("expected diskLimit=10g, got %q", parsed.diskLimit)
 			}
 		})
+	}
+}
+
+func TestResolveAgentSessionArgs_CommandFlag_Interactive(t *testing.T) {
+	// AT-C1: --command in interactive mode replaces TTY command.
+	tmpDir := realTempDir(t)
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		rawCommand: "my-custom-agent --flag",
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.mode != agentModeInteractive {
+		t.Fatalf("expected mode=interactive, got %q", parsed.mode)
+	}
+	if len(parsed.command) != 2 || parsed.command[0] != "my-custom-agent" || parsed.command[1] != "--flag" {
+		t.Fatalf("expected command=[my-custom-agent --flag], got %v", parsed.command)
+	}
+
+	// Also test with registered type + --command override.
+	parsed2, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		rawCommand:          "custom-cmd",
+		workspace:           tmpDir,
+		workspaceOverridden: true,
+	}, "claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed2.mode != agentModeInteractive {
+		t.Fatalf("expected mode=interactive, got %q", parsed2.mode)
+	}
+	if len(parsed2.command) != 1 || parsed2.command[0] != "custom-cmd" {
+		t.Fatalf("expected command=[custom-cmd], got %v", parsed2.command)
+	}
+}
+
+func TestResolveAgentSessionArgs_CommandFlag_LongRunning(t *testing.T) {
+	// AT-C2: --command in long-running mode replaces container primary command.
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		rawCommand:     "my-service start",
+		mode:           "long-running",
+		modeOverridden: true,
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.mode != agentModeLongRunning {
+		t.Fatalf("expected mode=long-running, got %q", parsed.mode)
+	}
+	if len(parsed.command) != 2 || parsed.command[0] != "my-service" || parsed.command[1] != "start" {
+		t.Fatalf("expected command=[my-service start], got %v", parsed.command)
+	}
+}
+
+func TestResolveAgentSessionArgs_Image_ConfigYamlWithImage_Empty(t *testing.T) {
+	// AT-C4: when configYaml contains image:, parsed.image should be empty.
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{}, "openclaw")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.image != "" {
+		t.Fatalf("expected empty image when configYaml has image:, got %q", parsed.image)
+	}
+}
+
+func TestResolveAgentSessionArgs_Image_NoConfigYaml_UsesDefault(t *testing.T) {
+	// AT-C5: when no configYaml, parsed.image should be defaultImage.
+	tmpDir := realTempDir(t)
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		workspace:           tmpDir,
+		workspaceOverridden: true,
+	}, "claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.image != defaultImage {
+		t.Fatalf("expected image=%q, got %q", defaultImage, parsed.image)
+	}
+}
+
+func TestResolveAgentSessionArgs_Image_ConfigYamlWithoutImage_UsesDefault(t *testing.T) {
+	// AT-C6: configYaml without image: uses defaultImage.
+	// Test with custom command (no configYaml).
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		rawCommand: "sleep infinity",
+	}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.image != defaultImage {
+		t.Fatalf("expected image=%q, got %q", defaultImage, parsed.image)
+	}
+}
+
+func TestResolveAgentSessionArgs_EnvsIsolation_NoDefaultEnvInjection(t *testing.T) {
+	// AT-EN: envs should only contain user --env values, not configYaml envs.
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+		envs: []string{"MY_KEY=my_val"},
+	}, "openclaw")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(parsed.envs) != 1 || parsed.envs["MY_KEY"] != "my_val" {
+		t.Fatalf("expected envs={MY_KEY:my_val}, got %v", parsed.envs)
+	}
+	// configYaml envs must NOT leak into parsed.envs.
+	if _, found := parsed.envs["OPENCLAW_STATE_DIR"]; found {
+		t.Fatal("configYaml envs should NOT be in parsed.envs")
+	}
+}
+
+func TestResolveAgentSessionArgs_BuiltinToolsIsCopy(t *testing.T) {
+	// AT-SB: builtinTools must be a defensive copy.
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{}, "openclaw")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Mutating parsed.builtinTools must not affect typeDef.
+	original := make([]string, len(parsed.builtinTools))
+	copy(original, parsed.builtinTools)
+	parsed.builtinTools[0] = "MUTATED"
+
+	typeDef := agentTypeDefs["openclaw"]
+	if typeDef.builtinTools[0] == "MUTATED" {
+		t.Fatal("modifying parsed.builtinTools must not affect agentTypeDefs")
+	}
+	if typeDef.builtinTools[0] != original[0] {
+		t.Fatalf("expected typeDef.builtinTools[0]=%q, got %q", original[0], typeDef.builtinTools[0])
+	}
+}
+
+func TestResolveAgentSessionArgs_BuiltinToolsIsCopy_Paseo(t *testing.T) {
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{}, "paseo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i := range parsed.builtinTools {
+		parsed.builtinTools[i] = "CORRUPTED"
+	}
+	parsed2, err := resolveAgentSessionArgs(&agentSessionFlagVars{}, "paseo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed2.builtinTools[0] != "claude" {
+		t.Fatalf("agentTypeDefs[paseo].builtinTools polluted: got %q", parsed2.builtinTools[0])
 	}
 }
