@@ -64,11 +64,6 @@ func runAgentSession(
 		}
 	}
 
-	// Inject paseo readyMessage factory after preFlight has filtered builtinTools.
-	if parsed.agentType == "paseo" {
-		parsed.readyMessage = paseoReadyMessageFactory(parsed.builtinTools)
-	}
-
 	// Workspace existence check (only when workspace is non-empty).
 	if parsed.workspace != "" {
 		if _, err := os.Stat(parsed.workspace); err != nil {
@@ -333,8 +328,19 @@ func runLongRunningSession(
 	_, _ = fmt.Fprintf(stderr, "  Shell: docker exec -it --user agbox %s bash\n", containerName)
 
 	// After READY, container is running. Set detachSuccess so deferred cleanup
-	// does not delete the sandbox.
+	// does not delete the sandbox. Any error beyond this point leaves the
+	// sandbox alive so the user can still interact with it (e.g. via
+	// `agbox paseo url`).
 	detachSuccess = true
+
+	// For paseo, fetch the pair URL now and inject it into the ready message.
+	if parsed.agentType == "paseo" {
+		pairURL, err := fetchPaseoPairURL(ctx, client, sandboxID, stderr)
+		if err != nil {
+			return err
+		}
+		parsed.readyMessage = paseoReadyMessageFactory(parsed.builtinTools, pairURL)
+	}
 
 	// Print readyMessage if defined.
 	if parsed.readyMessage != nil {

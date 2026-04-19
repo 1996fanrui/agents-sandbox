@@ -55,6 +55,6 @@ var agentTypeDefs = map[string]agentTypeDef{
 		configYaml:   paseoConfigYaml,
 		sandboxIDGen: paseoSandboxIDGen,
 		preFlight:    paseoPreFlight,
-		// readyMessage injected by runAgentSession after preFlight filters builtinTools.
+		// readyMessage injected by runLongRunningSession after fetching the pair URL.
 	},
 }

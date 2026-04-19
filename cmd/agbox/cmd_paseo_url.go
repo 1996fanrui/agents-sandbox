@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
 
-	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/1996fanrui/agents-sandbox/internal/platform"
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 	"github.com/spf13/cobra"
@@ -34,32 +31,12 @@ func newPaseoURLCommand() *cobra.Command {
 }
 
 func runPaseoURL(ctx context.Context, client sandboxExecClient, sandboxID string, stdout, stderr io.Writer) error {
-	createResp, err := client.CreateExec(ctx, &agboxv1.CreateExecRequest{
-		SandboxId: sandboxID,
-		Command:   []string{"/usr/local/bin/paseo", "daemon", "pair"},
-	})
+	urlOutput, err := fetchPaseoPairURL(ctx, client, sandboxID, stderr)
 	if err != nil {
-		return runtimeErrorf("create exec: %v", err)
-	}
-
-	if err := waitForExecDone(ctx, client, createResp.GetExecId(), sandboxID); err != nil {
-		// Read stderr log if available.
-		if stderrLogPath := createResp.GetStderrLogPath(); stderrLogPath != "" {
-			if logData, readErr := os.ReadFile(stderrLogPath); readErr == nil && len(logData) > 0 {
-				_, _ = fmt.Fprintf(stderr, "%s", logData)
-			}
-		}
 		return err
 	}
-
-	// Read and print stdout log (contains the pair URL).
-	stdoutLogPath := createResp.GetStdoutLogPath()
-	if stdoutLogPath != "" {
-		logData, readErr := os.ReadFile(stdoutLogPath)
-		if readErr != nil {
-			return runtimeErrorf("read stdout log: %v", readErr)
-		}
-		_, _ = stdout.Write(logData)
+	if urlOutput != "" {
+		_, _ = stdout.Write([]byte(urlOutput))
 	}
 	return nil
 }
