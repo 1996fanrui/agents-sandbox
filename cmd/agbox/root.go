@@ -51,6 +51,7 @@ func run(
 		newAgentTypeCommand("claude"),
 		newAgentTypeCommand("codex"),
 		newAgentTypeCommand("openclaw"),
+		newPaseoTopLevelCommand(),
 	)
 
 	err := rootCmd.ExecuteContext(ctx)
@@ -67,8 +68,12 @@ func run(
 		return exitCodeForError(err)
 	}
 
-	// Cobra flag parse errors are usage errors: print error + usage to stderr.
-	_, _ = fmt.Fprintln(stderr, err)
+	// Cobra flag/arg parse errors are usage errors: print error + usage to stderr.
+	_, _ = fmt.Fprintf(stderr, "Error: %s\n", err)
+	if sub, _, findErr := rootCmd.Find(args); findErr == nil && sub != nil {
+		_, _ = fmt.Fprintln(stderr)
+		_, _ = fmt.Fprint(stderr, sub.UsageString())
+	}
 	return exitCodeUsageError
 }
 
