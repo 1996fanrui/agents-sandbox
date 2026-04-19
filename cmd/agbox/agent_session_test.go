@@ -171,57 +171,77 @@ func TestRunAgentSession_InteractiveTTYCheck(t *testing.T) {
 	}
 }
 
-func TestRunAgentSession_LongRunningNoTTY(t *testing.T) {
-	// Long-running mode should NOT fail with TTY error; it proceeds to CreateSandbox.
+// newReadyOnlyMock creates a mockAgentClient where subscribe delivers a READY
+// event immediately. No CreateExec/GetExec needed.
+func newReadyOnlyMock() *mockAgentClient {
 	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	getExecCalls := 0
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1", StdoutLogPath: "/logs/stdout", StderrLogPath: "/logs/stderr"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		getExecCalls++
-		if getExecCalls == 1 {
-			// Baseline: running.
-			return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-		}
-		// Terminal: finished.
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 4, 0), nil
-	}
-
-	// Send an event to unblock the wait loop.
 	eventCh <- &agboxv1.SandboxEvent{
-		EventId: "ev-1", Sequence: 4, SandboxId: "sb-001",
-		Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}},
+		EventId: "ev-ready", Sequence: 2, SandboxId: "sb-001",
+		SandboxState: agboxv1.SandboxState_SANDBOX_STATE_READY,
+		Details: &agboxv1.SandboxEvent_SandboxPhase{SandboxPhase: &agboxv1.SandboxPhaseDetails{
+			Phase: "ready",
+		}},
+	}
+	return &mockAgentClient{
+		createSandboxFn: func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			return &agboxv1.CreateSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         "sb-001",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
+				},
+			}, nil
+		},
+		getSandboxFn: func(_ context.Context, id string) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         id,
+					State:             agboxv1.SandboxState_SANDBOX_STATE_READY,
+					LastEventSequence: 2,
+				},
+			}, nil
+		},
+		deleteSandboxFn: func(_ context.Context, _ string) (*agboxv1.AcceptedResponse, error) {
+			return &agboxv1.AcceptedResponse{Accepted: true}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			return &mockEventStream{events: eventCh}, nil
+		},
+	}
+}
+
+func TestRunLongRunningSession_SingleHappyPath(t *testing.T) {
+	// AT-L1: sandbox READY → detach, stdout = sandbox_id, no delete.
+	mock := newReadyOnlyMock()
+
+	readyMsg := func(sandboxID, containerName string) string {
+		return fmt.Sprintf("ready: %s %s\n", sandboxID, containerName)
 	}
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"sleep", "infinity"},
+		mode:         agentModeLongRunning,
+		command:      []string{"my-service", "start"},
+		readyMessage: readyMsg,
 	}, "test", &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Verify no TTY error occurred (we reached sandbox creation).
-	if mock.createSandboxReq == nil {
-		t.Fatal("expected CreateSandbox to be called")
+
+	if got := strings.TrimSpace(stdout.String()); got != "sb-001" {
+		t.Fatalf("expected stdout=%q, got %q", "sb-001", got)
+	}
+	if !strings.Contains(stderr.String(), "ready: sb-001") {
+		t.Fatalf("expected readyMessage in stderr, got:\n%s", stderr.String())
+	}
+	if mock.deleteCalled {
+		t.Fatal("expected DeleteSandbox NOT to be called on success")
 	}
 }
 
 func TestRunAgentSession_LongRunningIdleTTL(t *testing.T) {
 	// Verify idle_ttl=0 in CreateSandbox request.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		// Return terminal immediately so the test finishes.
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
-	}
+	mock := newReadyOnlyMock()
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
@@ -232,7 +252,6 @@ func TestRunAgentSession_LongRunningIdleTTL(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify idle_ttl was set to 0.
 	req := mock.createSandboxReq
 	if req == nil {
 		t.Fatal("expected CreateSandbox to be called")
@@ -248,58 +267,36 @@ func TestRunAgentSession_LongRunningIdleTTL(t *testing.T) {
 }
 
 func TestRunAgentSession_LongRunningOutput(t *testing.T) {
-	// Verify stdout=sandbox_id, stderr has status info.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
+	// Verify stdout=sandbox_id, stderr has readyMessage.
+	mock := newReadyOnlyMock()
 
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1", StdoutLogPath: "/logs/exec-1.stdout.log", StderrLogPath: "/logs/exec-1.stderr.log"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
+	readyMsg := func(sandboxID, containerName string) string {
+		return fmt.Sprintf("Service running on %s (container: %s)\n", sandboxID, containerName)
 	}
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"echo", "hello"},
+		mode:         agentModeLongRunning,
+		command:      []string{"echo", "hello"},
+		readyMessage: readyMsg,
 	}, "test", &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// stdout should contain only the sandbox_id.
 	if got := strings.TrimSpace(stdout.String()); got != "sb-001" {
 		t.Fatalf("expected stdout=%q, got %q", "sb-001", got)
 	}
 
-	// stderr should contain key access info.
 	stderrStr := stderr.String()
-	for _, want := range []string{
-		"Sandbox ID: sb-001",
-		"Exec ID:    exec-1",
-		"echo hello",
-		"/logs/exec-1.stdout.log",
-		"/logs/exec-1.stderr.log",
-		"Exec finished (exit_code=0)",
-	} {
-		if !strings.Contains(stderrStr, want) {
-			t.Fatalf("stderr missing %q, got:\n%s", want, stderrStr)
-		}
+	if !strings.Contains(stderrStr, "Service running on sb-001") {
+		t.Fatalf("stderr missing readyMessage, got:\n%s", stderrStr)
 	}
 }
 
 func TestRunAgentSession_LongRunningNoDelete(t *testing.T) {
-	// Verify DeleteSandbox is NOT called on successful exec delivery + completion.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
-	}
+	// Verify DeleteSandbox is NOT called after READY (detachSuccess=true).
+	mock := newReadyOnlyMock()
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
@@ -315,31 +312,43 @@ func TestRunAgentSession_LongRunningNoDelete(t *testing.T) {
 	}
 }
 
-func TestRunAgentSession_LongRunningExecFailCleanup(t *testing.T) {
-	// Verify DeleteSandbox IS called when CreateExec fails.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
+func TestRunLongRunningSession_SandboxFailed_ReturnsError(t *testing.T) {
+	// AT-L3: sandbox enters FAILED → error returned, sandbox cleaned up.
+	failedEventCh := make(chan *agboxv1.SandboxEvent, 1)
+	failedEventCh <- &agboxv1.SandboxEvent{
+		EventId: "ev-fail", Sequence: 2, SandboxId: "sb-001",
+		SandboxState: agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+		Details: &agboxv1.SandboxEvent_SandboxPhase{SandboxPhase: &agboxv1.SandboxPhaseDetails{
+			Phase: "materialization",
+		}},
+	}
 
-	// Make GetSandbox return DELETED to satisfy deleteAndWait.
-	origGetSandbox := mock.getSandboxFn
-	deletePhase := false
-	mock.getSandboxFn = func(ctx context.Context, id string) (*agboxv1.GetSandboxResponse, error) {
-		if deletePhase {
-			return &agboxv1.GetSandboxResponse{
+	mock := &mockAgentClient{
+		createSandboxFn: func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			return &agboxv1.CreateSandboxResponse{
 				Sandbox: &agboxv1.SandboxHandle{
-					SandboxId: id,
-					State:     agboxv1.SandboxState_SANDBOX_STATE_DELETED,
+					SandboxId:         "sb-001",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
 				},
 			}, nil
-		}
-		return origGetSandbox(ctx, id)
-	}
-	mock.deleteSandboxFn = func(_ context.Context, _ string) (*agboxv1.AcceptedResponse, error) {
-		deletePhase = true
-		return &agboxv1.AcceptedResponse{Accepted: true}, nil
-	}
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return nil, fmt.Errorf("exec creation failed")
+		},
+		getSandboxFn: func(_ context.Context, id string) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         id,
+					State:             agboxv1.SandboxState_SANDBOX_STATE_FAILED,
+					LastEventSequence: 2,
+					ErrorMessage:      "image pull failed",
+				},
+			}, nil
+		},
+		deleteSandboxFn: func(_ context.Context, _ string) (*agboxv1.AcceptedResponse, error) {
+			return &agboxv1.AcceptedResponse{Accepted: true}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			return &mockEventStream{events: failedEventCh}, nil
+		},
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -348,180 +357,67 @@ func TestRunAgentSession_LongRunningExecFailCleanup(t *testing.T) {
 		command: []string{"echo"},
 	}, "test", &stdout, &stderr)
 	if err == nil {
-		t.Fatal("expected error from CreateExec failure")
+		t.Fatal("expected error when sandbox fails")
 	}
 
 	if !mock.deleteCalled {
-		t.Fatal("expected DeleteSandbox to be called on CreateExec failure")
+		t.Fatal("expected DeleteSandbox to be called when sandbox fails before READY")
 	}
 }
 
-func TestRunLongRunningSession_ExecSuccess(t *testing.T) {
-	// Exec FINISHED with exit_code=0.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	getExecCalls := 0
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		getExecCalls++
-		if getExecCalls == 1 {
-			return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-		}
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 4, 0), nil
-	}
-
-	eventCh <- &agboxv1.SandboxEvent{
-		EventId: "ev-1", Sequence: 4, SandboxId: "sb-001",
-		Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}},
-	}
+func TestRunLongRunningSession_CommandFromParsedOverridesYaml(t *testing.T) {
+	// AT-L5: command from parsed args is passed to CreateSpec.
+	mock := newReadyOnlyMock()
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
 		mode:    agentModeLongRunning,
-		command: []string{"echo"},
+		command: []string{"custom-cmd", "--flag"},
 	}, "test", &stdout, &stderr)
 	if err != nil {
-		t.Fatalf("expected exit code 0, got error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stderr.String(), "Exec finished (exit_code=0)") {
-		t.Fatalf("expected success message in stderr, got:\n%s", stderr.String())
+
+	req := mock.createSandboxReq
+	if req == nil {
+		t.Fatal("expected CreateSandbox to be called")
+	}
+	cmd := req.GetCreateSpec().GetCommand()
+	if len(cmd) != 2 || cmd[0] != "custom-cmd" || cmd[1] != "--flag" {
+		t.Fatalf("expected command=[custom-cmd --flag], got %v", cmd)
 	}
 }
 
-func TestRunLongRunningSession_ExecFailed(t *testing.T) {
-	// Exec FAILED with exit_code=0 and an error message → exit 125.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	getExecCalls := 0
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		getExecCalls++
-		if getExecCalls == 1 {
-			return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-		}
-		return &agboxv1.GetExecResponse{
-			Exec: &agboxv1.ExecStatus{
-				ExecId:            "exec-1",
-				SandboxId:         "sb-001",
-				State:             agboxv1.ExecState_EXEC_STATE_FAILED,
-				ExitCode:          0,
-				Error:             "container OOM",
-				LastEventSequence: 4,
-			},
-		}, nil
-	}
-
-	eventCh <- &agboxv1.SandboxEvent{
-		EventId: "ev-1", Sequence: 4, SandboxId: "sb-001",
-		Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}},
-	}
-
-	var stdout, stderr bytes.Buffer
-	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"echo"},
-	}, "test", &stdout, &stderr)
-	if exitCodeForError(err) != 125 {
-		t.Fatalf("expected exit code 125, got %d (err=%v)", exitCodeForError(err), err)
-	}
-	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "Exec failed (exit_code=0)") {
-		t.Fatalf("expected failure message, got:\n%s", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "Error: container OOM") {
-		t.Fatalf("expected error detail, got:\n%s", stderrStr)
-	}
-}
-
-func TestRunLongRunningSession_ExecNonZeroExit(t *testing.T) {
-	// Exec FINISHED with exit_code=42 → exit 42.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	getExecCalls := 0
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		getExecCalls++
-		if getExecCalls == 1 {
-			return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-		}
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 4, 42), nil
+func TestRunLongRunningSession_CtrlCBeforeReady(t *testing.T) {
+	// Signal before READY → cleanup (detachSuccess=false).
+	blockingCh := make(chan *agboxv1.SandboxEvent) // unbuffered, blocks forever
+	mock := &mockAgentClient{
+		createSandboxFn: func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
+			return &agboxv1.CreateSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         "sb-001",
+					State:             agboxv1.SandboxState_SANDBOX_STATE_PENDING,
+					LastEventSequence: 1,
+				},
+			}, nil
+		},
+		getSandboxFn: func(_ context.Context, id string) (*agboxv1.GetSandboxResponse, error) {
+			return &agboxv1.GetSandboxResponse{
+				Sandbox: &agboxv1.SandboxHandle{
+					SandboxId:         id,
+					State:             agboxv1.SandboxState_SANDBOX_STATE_DELETED,
+					LastEventSequence: 5,
+				},
+			}, nil
+		},
+		deleteSandboxFn: func(_ context.Context, _ string) (*agboxv1.AcceptedResponse, error) {
+			return &agboxv1.AcceptedResponse{Accepted: true}, nil
+		},
+		subscribeFn: func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			return &mockEventStream{events: blockingCh}, nil
+		},
 	}
 
-	eventCh <- &agboxv1.SandboxEvent{
-		EventId: "ev-1", Sequence: 4, SandboxId: "sb-001",
-		Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}},
-	}
-
-	var stdout, stderr bytes.Buffer
-	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"false"},
-	}, "test", &stdout, &stderr)
-	if exitCodeForError(err) != 42 {
-		t.Fatalf("expected exit code 42, got %d (err=%v)", exitCodeForError(err), err)
-	}
-	if !strings.Contains(stderr.String(), "Exec finished (exit_code=42)") {
-		t.Fatalf("expected exit code message, got:\n%s", stderr.String())
-	}
-}
-
-func TestRunLongRunningSession_ExecCancelled(t *testing.T) {
-	// Exec CANCELLED → exit 125.
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	getExecCalls := 0
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		getExecCalls++
-		if getExecCalls == 1 {
-			return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-		}
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_CANCELLED, 4, 0), nil
-	}
-
-	eventCh <- &agboxv1.SandboxEvent{
-		EventId: "ev-1", Sequence: 4, SandboxId: "sb-001",
-		Details: &agboxv1.SandboxEvent_Exec{Exec: &agboxv1.ExecEventDetails{ExecId: "exec-1"}},
-	}
-
-	var stdout, stderr bytes.Buffer
-	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"echo"},
-	}, "test", &stdout, &stderr)
-	if exitCodeForError(err) != 125 {
-		t.Fatalf("expected exit code 125, got %d (err=%v)", exitCodeForError(err), err)
-	}
-	if !strings.Contains(stderr.String(), "Exec cancelled") {
-		t.Fatalf("expected cancel message, got:\n%s", stderr.String())
-	}
-}
-
-func TestRunLongRunningSession_CtrlCDetach(t *testing.T) {
-	// Signal after exec delivery → detach, no delete, no cancel.
-	eventCh := make(chan *agboxv1.SandboxEvent) // unbuffered; blocks until signal
-	mock := newReadyMock(eventCh)
-
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_RUNNING, 3, 0), nil
-	}
-
-	// Run in goroutine so we can inject a signal.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -534,25 +430,20 @@ func TestRunLongRunningSession_CtrlCDetach(t *testing.T) {
 		}, "test", &stdout, &stderr)
 	}()
 
-	// Wait for "Waiting for exec" to appear, then cancel via context to simulate detach.
 	cancel()
-
 	err := <-resultCh
 	if err == nil {
 		t.Fatal("expected error from context cancellation")
 	}
 
-	// DeleteSandbox should NOT be called (detachSuccess=true after exec delivery).
-	if mock.deleteCalled {
-		t.Fatal("expected DeleteSandbox NOT to be called on detach")
-	}
-	if mock.cancelCalled {
-		t.Fatal("expected CancelExec NOT to be called on detach")
+	if !mock.deleteCalled {
+		t.Fatal("expected DeleteSandbox to be called when cancelled before READY")
 	}
 }
 
 func TestRunLongRunningSession_SignalBeforeDelivery(t *testing.T) {
-	// CreateSandbox succeeds, but signal arrives before CreateExec → cleanup.
+	// CreateSandbox succeeds, context cancelled before READY → cleanup.
+	blockingCh := make(chan *agboxv1.SandboxEvent) // unbuffered, blocks forever
 	mock := &mockAgentClient{
 		createSandboxFn: func(_ context.Context, _ *agboxv1.CreateSandboxRequest) (*agboxv1.CreateSandboxResponse, error) {
 			return &agboxv1.CreateSandboxResponse{
@@ -572,44 +463,40 @@ func TestRunLongRunningSession_SignalBeforeDelivery(t *testing.T) {
 				},
 			}, nil
 		},
-		// CreateExec: make it fail as if the signal interrupts before exec.
-		createExecFn: func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-			return nil, fmt.Errorf("context cancelled")
+		subscribeFn: func(_ context.Context, _ string, _ uint64, _ bool) (rawclient.SandboxEventStream, error) {
+			return &mockEventStream{events: blockingCh}, nil
 		},
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resultCh := make(chan error, 1)
 	var stdout, stderr bytes.Buffer
-	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
-		mode:    agentModeLongRunning,
-		command: []string{"echo"},
-	}, "test", &stdout, &stderr)
+	go func() {
+		resultCh <- runLongRunningSession(ctx, mock, agentSessionArgs{
+			mode:    agentModeLongRunning,
+			command: []string{"echo"},
+		}, "test", &stdout, &stderr)
+	}()
+
+	cancel()
+	err := <-resultCh
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	// Sandbox should be cleaned up since exec was never delivered.
 	if !mock.deleteCalled {
-		t.Fatal("expected DeleteSandbox to be called when exec delivery fails")
+		t.Fatal("expected DeleteSandbox to be called when signal arrives before READY")
 	}
 }
 
 func TestRunAgentSession_LongRunningNoGitConfirm(t *testing.T) {
 	// Workspace without .git, long-running mode → no confirmation prompt.
-	// If confirmation were triggered, it would fail (no stdin TTY in tests).
 	tmpDir := realTempDir(t)
-
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
-	}
+	mock := newReadyOnlyMock()
 
 	var stdout, stderr bytes.Buffer
-	// Call runLongRunningSession directly; no .git in tmpDir, yet no prompt.
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
 		mode:      agentModeLongRunning,
 		agentType: "claude",
@@ -620,7 +507,6 @@ func TestRunAgentSession_LongRunningNoGitConfirm(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify workspace was included in copies.
 	req := mock.createSandboxReq
 	if req == nil {
 		t.Fatal("expected CreateSandbox to be called")
@@ -632,15 +518,7 @@ func TestRunAgentSession_LongRunningNoGitConfirm(t *testing.T) {
 }
 
 func TestRunAgentSessionPropagatesFlagsToCreateSpec(t *testing.T) {
-	eventCh := make(chan *agboxv1.SandboxEvent, 1)
-	mock := newReadyMock(eventCh)
-
-	mock.createExecFn = func(_ context.Context, _ *agboxv1.CreateExecRequest) (*agboxv1.CreateExecResponse, error) {
-		return &agboxv1.CreateExecResponse{ExecId: "exec-1"}, nil
-	}
-	mock.getExecFn = func(_ context.Context, _ string) (*agboxv1.GetExecResponse, error) {
-		return execResponse("exec-1", "sb-001", agboxv1.ExecState_EXEC_STATE_FINISHED, 3, 0), nil
-	}
+	mock := newReadyOnlyMock()
 
 	var stdout, stderr bytes.Buffer
 	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
@@ -673,5 +551,24 @@ func TestRunAgentSessionPropagatesFlagsToCreateSpec(t *testing.T) {
 	envs := spec.GetEnvs()
 	if envs["FOO"] != "bar" || envs["BAZ"] != "qux" {
 		t.Fatalf("expected envs={FOO:bar, BAZ:qux}, got %v", envs)
+	}
+}
+
+func TestNoLegacyHelpers(t *testing.T) {
+	// AT-O4: verify longRunningExecResult no longer exists in the codebase.
+	// Since we removed the function, attempting to reference it would be a
+	// compile error. This test just confirms we're in the new model by
+	// verifying the happy path runs without CreateExec.
+	mock := newReadyOnlyMock()
+	var stdout, stderr bytes.Buffer
+	err := runLongRunningSession(context.Background(), mock, agentSessionArgs{
+		mode:    agentModeLongRunning,
+		command: []string{"echo"},
+	}, "test", &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "sb-001" {
+		t.Fatalf("expected stdout=%q, got %q", "sb-001", got)
 	}
 }

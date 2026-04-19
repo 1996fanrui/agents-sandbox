@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // agentSessionFlagVars holds the raw flag values for an agent session command.
@@ -28,7 +29,7 @@ type agentSessionFlagVars struct {
 
 // registerAgentSessionFlags registers all agent session flags on a cobra command.
 func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
-	cmd.Flags().StringVar(&v.rawCommand, "command", "", "Custom command to run (mutually exclusive with agent type)")
+	cmd.Flags().StringVar(&v.rawCommand, "command", "", "Override the agent's default command.\n  interactive mode: replaces the TTY command launched via docker exec.\n  long-running mode: replaces the container primary command (under tini).\nValue is split by whitespace via strings.Fields (no shell quoting).")
 	cmd.Flags().StringVar(&v.mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
 	cmd.Flags().StringVar(&v.workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
 	cmd.Flags().StringArrayVar(&v.builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
@@ -37,6 +38,14 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
 	cmd.Flags().StringVar(&v.diskLimit, "disk-limit", "", "Disk limit (Docker --storage-opt size= format, e.g. 10g)")
 	cmd.Flags().StringVar(&v.sandboxID, "sandbox-id", "", "Custom sandbox ID (overrides agent type default)")
+}
+
+// newPaseoTopLevelCommand builds the top-level `agbox paseo` command with the
+// `url` subcommand. Unlike other agent types, paseo has a subcommand tree.
+func newPaseoTopLevelCommand() *cobra.Command {
+	cmd := newAgentTypeCommand("paseo")
+	cmd.AddCommand(newPaseoURLCommand())
+	return cmd
 }
 
 // buildAgentSessionRunE creates the RunE function for agent session commands.
@@ -68,7 +77,7 @@ type agentSessionArgs struct {
 	diskLimit    string
 	sandboxID    string                                       // custom sandbox ID (empty = daemon generates)
 	configYaml   string                                       // embedded YAML config
-	phases       []execPhase                                  // multi-phase startup (non-empty replaces command)
+	image        string                                       // container image (empty = daemon uses configYaml image)
 	readyMessage func(sandboxID, containerName string) string // custom ready message
 }
 
@@ -81,7 +90,7 @@ func newAgentCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Launch a custom agent session via --command",
-		Long:  "Launch a sandbox and run a custom agent command specified via --command.\n\nFor pre-registered agents, use the dedicated top-level commands: agbox claude, agbox codex, agbox openclaw.",
+		Long:  "Launch a sandbox and run a custom agent command specified via --command.\n\nFor pre-registered agents, use the dedicated top-level commands: agbox claude, agbox codex, agbox openclaw, agbox paseo.",
 		Args:  cobra.NoArgs,
 		RunE:  buildAgentSessionRunE("", &v),
 	}
@@ -112,11 +121,6 @@ func resolveAgentSessionArgs(
 ) (agentSessionArgs, error) {
 	var parsed agentSessionArgs
 
-	// Validate mutual exclusion: agent type vs --command.
-	if agentType != "" && v.rawCommand != "" {
-		return agentSessionArgs{}, usageErrorf("cannot use --command with agent type %q", agentType)
-	}
-
 	// Resolve the agent type definition when a registered type is used.
 	var typeDef agentTypeDef
 	var isRegistered bool
@@ -135,7 +139,7 @@ func resolveAgentSessionArgs(
 		if v.builtinToolsOverridden {
 			parsed.builtinTools = v.builtinTools
 		} else {
-			parsed.builtinTools = typeDef.builtinTools
+			parsed.builtinTools = append([]string(nil), typeDef.builtinTools...)
 		}
 	} else if v.rawCommand != "" {
 		// Custom command: split the string into argv.
@@ -145,7 +149,7 @@ func resolveAgentSessionArgs(
 		}
 		parsed.builtinTools = v.builtinTools
 	} else {
-		return agentSessionArgs{}, usageErrorf("agbox agent requires --command; for pre-registered agents use agbox claude / agbox codex / agbox openclaw")
+		return agentSessionArgs{}, usageErrorf("agbox agent requires --command; for pre-registered agents use agbox claude / agbox codex / agbox openclaw / agbox paseo")
 	}
 
 	// Mode resolution.
@@ -161,6 +165,14 @@ func resolveAgentSessionArgs(
 	} else {
 		// Custom --command defaults to interactive.
 		parsed.mode = agentModeInteractive
+	}
+
+	// --command override: for registered types with rawCommand, the rawCommand overrides typeDef.command.
+	if isRegistered && v.rawCommand != "" {
+		parsed.command = strings.Fields(v.rawCommand)
+		if len(parsed.command) == 0 {
+			return agentSessionArgs{}, usageErrorf("--command must not be empty")
+		}
 	}
 
 	// Workspace resolution.
@@ -216,8 +228,22 @@ func resolveAgentSessionArgs(
 	// Populate agent-type-specific fields.
 	if isRegistered {
 		parsed.configYaml = typeDef.configYaml
-		parsed.phases = typeDef.phases
 		parsed.readyMessage = typeDef.readyMessage
+	}
+
+	// Image resolution: if configYaml contains a top-level `image:`, the daemon
+	// uses that image and we leave parsed.image empty. Otherwise use defaultImage.
+	if isRegistered && typeDef.configYaml != "" {
+		var yamlConfig struct {
+			Image string `yaml:"image"`
+		}
+		if err := yaml.Unmarshal([]byte(typeDef.configYaml), &yamlConfig); err == nil && yamlConfig.Image != "" {
+			parsed.image = ""
+		} else {
+			parsed.image = defaultImage
+		}
+	} else {
+		parsed.image = defaultImage
 	}
 
 	return parsed, nil

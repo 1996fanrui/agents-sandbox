@@ -19,15 +19,24 @@ func randomHexSuffix(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// openclawSandboxIDGen returns a sandbox ID with prefix "openclaw-" followed by 4 hex characters.
+// openclawSandboxIDGen returns a sandbox ID with prefix "openclaw-" followed by 6 hex characters.
 func openclawSandboxIDGen() string {
-	return "openclaw-" + randomHexSuffix(2)
+	return "openclaw-" + randomHexSuffix(3)
 }
 
 // openclawConfigYaml is the embedded YAML config for the openclaw sandbox.
 // The daemon handles ~ expansion for mounts but NOT for envs, so env values
 // use the absolute /home/agbox path.
-const openclawConfigYaml = `mounts:
+var openclawConfigYaml = `image: ghcr.io/agents-sandbox/openclaw-runtime:latest
+command:
+  - openclaw
+  - gateway
+  - run
+  - "--port"
+  - "18789"
+  - "--bind"
+  - lan
+mounts:
   - source: "~/.openclaw"
     target: "~/.openclaw"
     writable: true
@@ -37,7 +46,6 @@ ports:
 envs:
   OPENCLAW_STATE_DIR: "/home/agbox/.openclaw"
   OPENCLAW_CONFIG_PATH: "/home/agbox/.openclaw/config/openclaw.json"
-  PATH: "/home/agbox/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 `
 
 // openclawAuthGuide is printed to stderr when auth validation fails.
@@ -48,9 +56,9 @@ const openclawAuthGuide = `OpenClaw LLM auth not found. Complete authentication 
 `
 
 // openclawPreFlight verifies that LLM auth profiles exist on the host.
-// Gateway config initialization is handled inside the sandbox via `openclaw onboard`
-// to avoid coupling with OpenClaw's config schema.
-func openclawPreFlight(stderr io.Writer) error {
+// Gateway config initialization is handled inside the sandbox via the
+// openclaw-runtime entrypoint to avoid coupling with OpenClaw's config schema.
+func openclawPreFlight(stderr io.Writer, _ *agentSessionArgs) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
@@ -118,12 +126,14 @@ OpenClaw gateway is running.
   Gateway:    %s
   Sandbox ID: %s
 
+Note: gateway may take a few seconds to accept traffic after sandbox READY.
+curl %s until it responds if you need to block.
+
 Manage:
   agbox sandbox stop %s      # stop gateway
-  agbox sandbox resume %s    # restart container only (gateway process lost)
-  # To redeploy after resume: delete and recreate
+  agbox sandbox resume %s    # restart container (gateway primary command restarts with it)
   agbox sandbox delete %s && agbox openclaw
   agbox sandbox delete %s    # delete sandbox
   agbox exec list %s         # list running execs
-`, gatewayURL, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID)
+`, gatewayURL, sandboxID, gatewayURL, sandboxID, sandboxID, sandboxID, sandboxID, sandboxID)
 }
