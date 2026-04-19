@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -87,7 +88,7 @@ func TestRandomHexSuffix(t *testing.T) {
 }
 
 func TestOpenclawSandboxIDGen(t *testing.T) {
-	re := regexp.MustCompile(`^openclaw-[0-9a-f]{4}$`)
+	re := regexp.MustCompile(`^openclaw-[0-9a-f]{6}$`)
 	id := openclawSandboxIDGen()
 	if !re.MatchString(id) {
 		t.Fatalf("expected sandbox ID matching %s, got %q", re.String(), id)
@@ -114,4 +115,84 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestOpenclawConfigYaml_Content(t *testing.T) {
+	// AT-O1: verify openclawConfigYaml contains expected fields.
+	for _, want := range []string{
+		"image: ghcr.io/agents-sandbox/openclaw-runtime:",
+		"command:",
+		"openclaw",
+		"gateway",
+		"mounts:",
+		"ports:",
+		"OPENCLAW_STATE_DIR",
+		"OPENCLAW_CONFIG_PATH",
+	} {
+		if !strings.Contains(openclawConfigYaml, want) {
+			t.Fatalf("openclawConfigYaml missing %q, got:\n%s", want, openclawConfigYaml)
+		}
+	}
+	// Standalone PATH env key should NOT be present (openclaw is preinstalled in the image).
+	// Use a line-based check to avoid matching OPENCLAW_CONFIG_PATH.
+	if strings.Contains(openclawConfigYaml, "\n  PATH:") || strings.HasPrefix(openclawConfigYaml, "PATH:") {
+		t.Fatal("openclawConfigYaml should not contain standalone PATH env")
+	}
+	if strings.Contains(openclawConfigYaml, "npm install") {
+		t.Fatal("openclawConfigYaml should not contain npm install")
+	}
+	if strings.Contains(openclawConfigYaml, "bash -c") {
+		t.Fatal("openclawConfigYaml should not contain bash -c")
+	}
+}
+
+func TestOpenclawConfigYaml_CommandIsGatewayRun(t *testing.T) {
+	// AT-O2: verify the command contains gateway run.
+	if !strings.Contains(openclawConfigYaml, "gateway") {
+		t.Fatal("openclawConfigYaml command should contain gateway")
+	}
+	if !strings.Contains(openclawConfigYaml, `"18789"`) {
+		t.Fatal("openclawConfigYaml command should contain port 18789")
+	}
+}
+
+func TestOpenclawPreFlight_AcceptsParsedArgs(t *testing.T) {
+	// AT-O5: verify openclawPreFlight accepts *agentSessionArgs parameter.
+	home := t.TempDir()
+	writeValidAuth(t, home)
+
+	// Override the function to use the test home.
+	var stderr bytes.Buffer
+	// Call openclawPreFlightWithHome directly since openclawPreFlight
+	// just resolves home and delegates.
+	err := openclawPreFlightWithHome(&stderr, home)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the function signature matches the new preFlight type.
+	typeDef := agentTypeDefs["openclaw"]
+	if typeDef.preFlight == nil {
+		t.Fatal("openclaw preFlight should not be nil")
+	}
+}
+
+func TestOpenclawReadyMessage_Content(t *testing.T) {
+	// AT-O6: verify readyMessage contains expected content.
+	msg := openclawReadyMessage("sb-test", "container-test")
+	for _, want := range []string{
+		"OpenClaw gateway is running",
+		"Gateway:",
+		"http://localhost:18789",
+		"sb-test",
+		"may take a few seconds",
+		"agbox sandbox stop sb-test",
+		"agbox sandbox resume sb-test",
+		"gateway primary command restarts with it",
+		"agbox sandbox delete sb-test",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("readyMessage missing %q, got:\n%s", want, msg)
+		}
+	}
 }

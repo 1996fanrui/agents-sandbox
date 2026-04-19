@@ -59,9 +59,14 @@ func runAgentSession(
 ) error {
 	// Run pre-flight checks if the agent type defines them.
 	if typeDef, ok := agentTypeDefs[parsed.agentType]; ok && typeDef.preFlight != nil {
-		if err := typeDef.preFlight(stderr); err != nil {
+		if err := typeDef.preFlight(stderr, &parsed); err != nil {
 			return err
 		}
+	}
+
+	// Inject paseo readyMessage factory after preFlight has filtered builtinTools.
+	if parsed.agentType == "paseo" {
+		parsed.readyMessage = paseoReadyMessageFactory(parsed.builtinTools)
 	}
 
 	// Workspace existence check (only when workspace is non-empty).
@@ -150,7 +155,7 @@ func runInteractiveSession(
 		SandboxId:  parsed.sandboxID,
 		ConfigYaml: configYamlBytes(parsed.configYaml),
 		CreateSpec: &agboxv1.CreateSpec{
-			Image:        defaultImage,
+			Image:        parsed.image,
 			BuiltinTools: parsed.builtinTools,
 			Copies:       copies,
 			Envs:         parsed.envs,
@@ -245,9 +250,9 @@ func runInteractiveSession(
 	}
 }
 
-// runLongRunningSession submits the agent command via CreateExec and waits for
-// completion. The CLI can detach (Ctrl+C) without affecting the sandbox. The
-// sandbox must be managed manually via `agbox sandbox stop/delete`.
+// runLongRunningSession creates the sandbox, waits for it to become READY,
+// then detaches. The sandbox must be managed manually via
+// `agbox sandbox stop/delete`.
 func runLongRunningSession(
 	ctx context.Context,
 	client sandboxExecClient,
@@ -275,7 +280,8 @@ func runLongRunningSession(
 		SandboxId:  parsed.sandboxID,
 		ConfigYaml: configYamlBytes(parsed.configYaml),
 		CreateSpec: &agboxv1.CreateSpec{
-			Image:        defaultImage,
+			Image:        parsed.image,
+			Command:      parsed.command,
 			BuiltinTools: parsed.builtinTools,
 			Copies:       copies,
 			Envs:         parsed.envs,
@@ -326,124 +332,11 @@ func runLongRunningSession(
 	_, _ = fmt.Fprintf(stderr, "     [%.1fs]\n", time.Since(waitStart).Seconds())
 	_, _ = fmt.Fprintf(stderr, "  Shell: docker exec -it --user agbox %s bash\n", containerName)
 
-	if len(parsed.phases) > 0 {
-		// Multi-phase execution.
-		for i, phase := range parsed.phases {
-			_, _ = fmt.Fprintf(stderr, "%s", phase.label)
-			phaseStart := time.Now()
+	// After READY, container is running. Set detachSuccess so deferred cleanup
+	// does not delete the sandbox.
+	detachSuccess = true
 
-			createExecResp, err := client.CreateExec(ctx, &agboxv1.CreateExecRequest{
-				SandboxId: sandboxID,
-				Command:   phase.command,
-			})
-			if err != nil {
-				return runtimeErrorf("create exec (phase %d): %v", i+1, err)
-			}
-
-			if i == 0 {
-				detachSuccess = true
-			}
-
-			execID := createExecResp.GetExecId()
-			if err := waitForExecDone(ctx, client, execID, sandboxID); err != nil {
-				_, _ = fmt.Fprintf(stderr, "\n\nPhase %q failed.\n", phase.label)
-				_, _ = fmt.Fprintf(stderr, "  Stderr log: docker exec --user agbox %s cat %s\n", containerName, createExecResp.GetStderrLogPath())
-				_, _ = fmt.Fprintf(stderr, "  Clean up:   agbox sandbox delete %s\n", sandboxID)
-				return err
-			}
-
-			_, _ = fmt.Fprintf(stderr, "     [%.1fs]\n", time.Since(phaseStart).Seconds())
-		}
-	} else {
-		// Single exec (existing behavior for claude/codex).
-		createExecResp, err := client.CreateExec(ctx, &agboxv1.CreateExecRequest{
-			SandboxId: sandboxID,
-			Command:   parsed.command,
-		})
-		if err != nil {
-			return runtimeErrorf("create exec: %v", err)
-		}
-
-		execID := createExecResp.GetExecId()
-
-		// Exec is now running on the daemon side. From this point on, do not
-		// clean up the sandbox — the exec must be allowed to complete even if
-		// subsequent RPC calls (GetExec, Subscribe) fail from the CLI.
-		detachSuccess = true
-
-		// Get baseline exec status to determine the subscription cursor.
-		getExecResp, err := client.GetExec(ctx, execID)
-		if err != nil {
-			return runtimeErrorf("get exec baseline: %v", err)
-		}
-		baseline, err := requireExecStatus(getExecResp, execID)
-		if err != nil {
-			return runtimeErrorf("get exec baseline: %v", err)
-		}
-
-		// Print access info before checking terminal state so the user always
-		// sees sandbox/exec identifiers even if the exec finished immediately.
-		_, _ = fmt.Fprintf(stderr, "\nSandbox ready. Exec submitted.\n")
-		_, _ = fmt.Fprintf(stderr, "  Command:    %s\n", strings.Join(parsed.command, " "))
-		_, _ = fmt.Fprintf(stderr, "  Sandbox ID: %s\n", sandboxID)
-		_, _ = fmt.Fprintf(stderr, "  Exec ID:    %s\n", execID)
-		_, _ = fmt.Fprintf(stderr, "  Container:  %s\n", containerName)
-		_, _ = fmt.Fprintf(stderr, "  Attach:     docker exec -it --user agbox %s bash\n", containerName)
-		_, _ = fmt.Fprintf(stderr, "  Stdout log: %s\n", createExecResp.GetStdoutLogPath())
-		_, _ = fmt.Fprintf(stderr, "  Stderr log: %s\n", createExecResp.GetStderrLogPath())
-
-		// stdout: only sandbox_id for programmatic consumption.
-		_, _ = fmt.Fprintln(stdout, sandboxID)
-
-		// If already terminal (e.g., instant failure), report and exit.
-		if isTerminalExecState(baseline.GetState()) {
-			return longRunningExecResult(stderr, baseline)
-		}
-
-		_, _ = fmt.Fprintf(stderr, "\nWaiting for exec to complete...\n")
-
-		// Subscribe to sandbox events to watch for exec completion.
-		stream, err := client.SubscribeSandboxEvents(ctx, baseline.GetSandboxId(), baseline.GetLastEventSequence(), false)
-		if err != nil {
-			return runtimeErrorf("subscribe sandbox events: %v", err)
-		}
-		defer stream.Close()
-
-		eventCh := make(chan execEventResult, 1)
-		go pumpExecEvents(stream, eventCh)
-
-		for {
-			select {
-			case <-sigintCh:
-				// Detach: leave sandbox and exec running, exit with signal code.
-				return exitCodeError(130)
-			case <-sigtermCh:
-				return exitCodeError(143)
-			case result, ok := <-eventCh:
-				if !ok {
-					return runtimeErrorf("exec event stream closed; check result with: agbox exec get %s", execID)
-				}
-				if result.err != nil {
-					return runtimeErrorf("wait exec events: %v", result.err)
-				}
-				currentResp, err := client.GetExec(ctx, execID)
-				if err != nil {
-					return runtimeErrorf("get exec: %v", err)
-				}
-				current, err := requireExecStatus(currentResp, execID)
-				if err != nil {
-					return runtimeErrorf("get exec: %v", err)
-				}
-				if isTerminalExecState(current.GetState()) {
-					return longRunningExecResult(stderr, current)
-				}
-			case <-ctx.Done():
-				return runtimeErrorf("wait exec: %v", ctx.Err())
-			}
-		}
-	}
-
-	// Print readyMessage if defined (long-running mode only).
+	// Print readyMessage if defined.
 	if parsed.readyMessage != nil {
 		_, _ = fmt.Fprint(stderr, parsed.readyMessage(sandboxID, containerName))
 	}
@@ -451,28 +344,6 @@ func runLongRunningSession(
 	// stdout: sandbox_id for programmatic consumption.
 	_, _ = fmt.Fprintln(stdout, sandboxID)
 	return nil
-}
-
-// longRunningExecResult prints the terminal exec result to stderr and returns
-// an appropriate exit code error.
-func longRunningExecResult(stderr io.Writer, status *agboxv1.ExecStatus) error {
-	code := execExitCode(status.GetState(), status.GetExitCode(), 0)
-	switch status.GetState() {
-	case agboxv1.ExecState_EXEC_STATE_FINISHED:
-		_, _ = fmt.Fprintf(stderr, "Exec finished (exit_code=%d).\n", status.GetExitCode())
-	case agboxv1.ExecState_EXEC_STATE_FAILED:
-		_, _ = fmt.Fprintf(stderr, "Exec failed (exit_code=%d).", status.GetExitCode())
-		if status.GetError() != "" {
-			_, _ = fmt.Fprintf(stderr, " Error: %s", status.GetError())
-		}
-		_, _ = fmt.Fprintln(stderr)
-	case agboxv1.ExecState_EXEC_STATE_CANCELLED:
-		_, _ = fmt.Fprintf(stderr, "Exec cancelled.\n")
-	}
-	if code == 0 {
-		return nil
-	}
-	return exitCodeError(code)
 }
 
 // waitForExecDone blocks until the exec reaches a terminal state.
