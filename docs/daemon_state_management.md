@@ -61,6 +61,7 @@ Recomputed on startup from Category A and B.
 | `companionContainerStarts` channels | Re-inspect companion containers |
 | `SandboxHandle.ErrorCode`, `ErrorMessage`, `StateChangedAt` | Last `SANDBOX_FAILED` event's `SandboxPhaseDetails` (error fields); last state-matching event's `OccurredAt` (timestamp) |
 | `sandboxRuntimeState` | Container names + runtime status from Docker |
+| `MountStagingDir` (per sandbox) | `filepath.Join(SandboxDataRoot, sandbox_id)` — derived from fixed platform path + sandbox ID |
 | `notRunningSince` (per primary / per companion) | Docker inspect observations accumulated since last Running or Paused state; reset on daemon restart (intentional — equivalent to a fresh grace period) |
 | `runningSince` (per primary / per companion) | Docker inspect observations since container last entered Running; reset on daemon restart |
 
@@ -70,8 +71,10 @@ Recomputed on startup from Category A and B.
 |----------|-----------|----------------|
 | Exec stdout log | `{ArtifactOutputRoot}/{sandbox_id}/{exec_id}.stdout.log` | `/var/log/agents-sandbox/{exec_id}.stdout.log` |
 | Exec stderr log | `{ArtifactOutputRoot}/{sandbox_id}/{exec_id}.stderr.log` | `/var/log/agents-sandbox/{exec_id}.stderr.log` |
+| Mount staging directory | `{SandboxDataRoot}/{sandbox_id}/` | — (host-only; per-sandbox staging area for bind-mount sources) |
 
 Default `ArtifactOutputRoot` on Linux: `~/.local/share/agents-sandbox/exec-logs/`
+Default `SandboxDataRoot` on Linux: `~/.local/share/agents-sandbox/mounts/`
 
 ## Restart Recovery Contract
 
