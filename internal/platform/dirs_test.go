@@ -201,3 +201,57 @@ func TestSocketPathRequiresRuntimeDirectoryOnLinux(t *testing.T) {
 		t.Fatal("expected SocketPath to fail when XDG_RUNTIME_DIR is unset")
 	}
 }
+
+func TestSandboxDataRootWithXDGDataHome(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("XDG not applicable on macOS")
+	}
+	root := sandboxDataRootForGOOS("linux", func(key string) (string, bool) {
+		if key == "XDG_DATA_HOME" {
+			return "/custom/data", true
+		}
+		return "", false
+	})
+	want := filepath.Join("/custom/data", "agents-sandbox", "mounts")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
+	}
+}
+
+func TestSandboxDataRootFallsBackToHome(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("XDG not applicable on macOS")
+	}
+	root := SandboxDataRoot(func(string) (string, bool) { return "", false })
+	if root == "" {
+		t.Fatal("expected non-empty sandbox data root from home fallback")
+	}
+	if !strings.HasSuffix(root, filepath.Join("agents-sandbox", "mounts")) {
+		t.Fatalf("expected path ending in agents-sandbox/mounts, got %q", root)
+	}
+}
+
+func TestSandboxDataRootDarwinDefault(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir returned error: %v", err)
+	}
+	root := sandboxDataRootForGOOS("darwin", func(string) (string, bool) { return "", false })
+	want := filepath.Join(homeDir, "Library", "Application Support", "agents-sandbox", "mounts")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
+	}
+}
+
+func TestSandboxDataRootDarwinWithOverride(t *testing.T) {
+	root := sandboxDataRootForGOOS("darwin", func(key string) (string, bool) {
+		if key == "XDG_DATA_HOME" {
+			return "/custom/data", true
+		}
+		return "", false
+	})
+	want := filepath.Join("/custom/data", "agents-sandbox", "mounts")
+	if root != want {
+		t.Fatalf("expected %q, got %q", want, root)
+	}
+}

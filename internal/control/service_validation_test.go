@@ -50,7 +50,7 @@ func TestValidateGenericSourcePath_RejectsRelativePath(t *testing.T) {
 	}
 }
 
-func TestValidateGenericSourcePath_RejectsSymlink(t *testing.T) {
+func TestValidateGenericSourcePath_MountAcceptsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
 	if err := os.WriteFile(target, []byte("data"), 0644); err != nil {
@@ -61,8 +61,24 @@ func TestValidateGenericSourcePath_RejectsSymlink(t *testing.T) {
 		t.Fatalf("failed to create symlink: %v", err)
 	}
 
-	err := validateGenericSourcePath("mount", link)
+	if err := validateGenericSourcePath("mount", link); err != nil {
+		t.Errorf("expected mount to accept symlink source, got error: %v", err)
+	}
+}
+
+func TestValidateGenericSourcePath_CopyRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("data"), 0644); err != nil {
+		t.Fatalf("failed to create target file: %v", err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	err := validateGenericSourcePath("copy", link)
 	if err == nil {
-		t.Error("expected error for symlink, got nil")
+		t.Error("expected error for symlink copy source, got nil")
 	}
 }
