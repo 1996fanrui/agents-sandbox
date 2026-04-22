@@ -19,22 +19,29 @@ fi
 USERNAME="agbox"
 USER_HOME="/home/agbox"
 
-if ! getent group "$HOST_GID" >/dev/null 2>&1; then
-    groupadd -g "$HOST_GID" "$USERNAME"
-fi
-
-if ! getent passwd "$HOST_UID" >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -u "$HOST_UID" -g "$HOST_GID" -d "$USER_HOME" "$USERNAME"
+if [ "$HOST_UID" = "0" ]; then
+    # Host is root: add an agbox alias for uid=0 so "docker exec --user agbox" works.
+    if ! getent passwd agbox >/dev/null 2>&1; then
+        echo "agbox:x:0:0:agbox:${USER_HOME}:/bin/bash" >> /etc/passwd
+    fi
 else
-    EXISTING_USER=$(getent passwd "$HOST_UID" | cut -d: -f1)
-    if [ "$EXISTING_USER" != "$USERNAME" ]; then
-        usermod -l "$USERNAME" "$EXISTING_USER" 2>/dev/null || true
-        EXISTING_USER="$USERNAME"
+    if ! getent group "$HOST_GID" >/dev/null 2>&1; then
+        groupadd -g "$HOST_GID" "$USERNAME"
     fi
-    if [ "$(getent passwd "$HOST_UID" | cut -d: -f6)" != "$USER_HOME" ]; then
-        usermod -d "$USER_HOME" -m "$EXISTING_USER" 2>/dev/null || true
+
+    if ! getent passwd "$HOST_UID" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash -u "$HOST_UID" -g "$HOST_GID" -d "$USER_HOME" "$USERNAME"
+    else
+        EXISTING_USER=$(getent passwd "$HOST_UID" | cut -d: -f1)
+        if [ "$EXISTING_USER" != "$USERNAME" ]; then
+            usermod -l "$USERNAME" "$EXISTING_USER" 2>/dev/null || true
+            EXISTING_USER="$USERNAME"
+        fi
+        if [ "$(getent passwd "$HOST_UID" | cut -d: -f6)" != "$USER_HOME" ]; then
+            usermod -d "$USER_HOME" -m "$EXISTING_USER" 2>/dev/null || true
+        fi
+        USERNAME="$EXISTING_USER"
     fi
-    USERNAME="$EXISTING_USER"
 fi
 
 mkdir -p "$USER_HOME"
