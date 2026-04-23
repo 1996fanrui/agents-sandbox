@@ -137,6 +137,7 @@ setup_agboxd_service() {
 # Pre-flight: check Docker
 # ---------------------------------------------------------------------------
 check_docker() {
+  # 1) Docker not installed.
   if ! command -v docker >/dev/null 2>&1; then
     echo "Error: Docker is not installed." >&2
     echo "" >&2
@@ -147,15 +148,50 @@ check_docker() {
     exit 1
   fi
 
-  if ! docker info >/dev/null 2>&1; then
-    echo "Error: Docker daemon is not running." >&2
-    echo "" >&2
-    case "$(uname -s)" in
-      Darwin) echo "  Please start Docker Desktop and try again." >&2 ;;
-      Linux)  echo "  Try: sudo systemctl start docker" >&2 ;;
-    esac
-    exit 1
+  # Happy path: Docker is reachable.
+  if docker info >/dev/null 2>&1; then
+    return 0
   fi
+
+  # docker info failed. Disambiguate the cause per-platform.
+  case "$(uname -s)" in
+    Linux)
+      # 2) Daemon not running (Linux: check via systemctl when available).
+      if command -v systemctl >/dev/null 2>&1 \
+         && ! systemctl is-active --quiet docker 2>/dev/null; then
+        echo "Error: Docker daemon is not running." >&2
+        echo "" >&2
+        echo "  Try: sudo systemctl start docker" >&2
+        exit 1
+      fi
+
+      # 3) User not in the docker group (daemon is up but socket rejects us).
+      if [ "$(id -u)" != "0" ] && ! id -nG | tr ' ' '\n' | grep -qx docker; then
+        echo "Error: current user is not in the 'docker' group." >&2
+        echo "" >&2
+        echo "  Run the following, then log out and back in (or reboot)," >&2
+        echo "  then re-run this install script:" >&2
+        echo "" >&2
+        echo "    sudo usermod -aG docker \$USER" >&2
+        exit 1
+      fi
+      ;;
+    Darwin)
+      # macOS has no systemctl and no docker group problem. Any docker info
+      # failure means Docker Desktop is not running (or not fully started).
+      echo "Error: Docker daemon is not running." >&2
+      echo "" >&2
+      echo "  Please start Docker Desktop and try again." >&2
+      exit 1
+      ;;
+  esac
+
+  # 4) Fallback: unknown reason. Surface raw diagnostic output.
+  echo "Error: cannot connect to Docker daemon." >&2
+  echo "" >&2
+  echo "  'docker info' output:" >&2
+  docker info >&2 2>&1 || true
+  exit 1
 }
 
 # ---------------------------------------------------------------------------
