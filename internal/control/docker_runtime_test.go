@@ -233,3 +233,37 @@ func TestPrimaryContainerEnvironmentIncludesSshAuthSockWhenMounted(t *testing.T)
 		t.Fatalf("unexpected HOST_GID: got %q want %q", got, want)
 	}
 }
+
+// TestPortBindingsAppendsSharedContainerPort guards against a regression
+// where direct map assignment dropped earlier bindings whenever multiple
+// PortMappings shared the same (container_port, protocol) but differed in
+// host_port. After the fix, both host ports must be present in the
+// resulting nat.PortMap entry.
+func TestPortBindingsAppendsSharedContainerPort(t *testing.T) {
+	exposed, bindings, err := buildPortBindings([]dockerPortMapping{
+		{ContainerPort: 8080, HostPort: 18789, Protocol: "tcp"},
+		{ContainerPort: 8080, HostPort: 9999, Protocol: "tcp"},
+	})
+	if err != nil {
+		t.Fatalf("buildPortBindings: %v", err)
+	}
+	if len(exposed) != 1 {
+		t.Fatalf("expected 1 exposed port (deduped by key), got %d", len(exposed))
+	}
+	var entries []string
+	for natPort, list := range bindings {
+		if natPort.Port() != "8080" || natPort.Proto() != "tcp" {
+			continue
+		}
+		for _, b := range list {
+			entries = append(entries, b.HostPort)
+		}
+	}
+	hostPorts := map[string]bool{}
+	for _, e := range entries {
+		hostPorts[e] = true
+	}
+	if !hostPorts["18789"] || !hostPorts["9999"] {
+		t.Fatalf("expected both 18789 and 9999 host_port bindings preserved, got %v", entries)
+	}
+}

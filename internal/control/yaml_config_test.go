@@ -427,7 +427,7 @@ func TestMergeCreateSpecs(t *testing.T) {
 			},
 		},
 		{
-			name: "repeated_override",
+			name: "repeated_append_base_first",
 			base: &agboxv1.CreateSpec{
 				Mounts: []*agboxv1.MountSpec{{Source: "/base", Target: "/base"}},
 			},
@@ -435,8 +435,11 @@ func TestMergeCreateSpecs(t *testing.T) {
 				Mounts: []*agboxv1.MountSpec{{Source: "/override", Target: "/override"}},
 			},
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
-				if len(result.GetMounts()) != 1 || result.GetMounts()[0].GetSource() != "/override" {
-					t.Fatalf("expected override mounts, got %v", result.GetMounts())
+				if len(result.GetMounts()) != 2 {
+					t.Fatalf("expected 2 mounts after append, got %v", result.GetMounts())
+				}
+				if result.GetMounts()[0].GetSource() != "/base" || result.GetMounts()[1].GetSource() != "/override" {
+					t.Fatalf("expected base then override, got %v", result.GetMounts())
 				}
 			},
 		},
@@ -559,7 +562,7 @@ func TestMergeCreateSpecs(t *testing.T) {
 			},
 		},
 		{
-			name: "ports_override",
+			name: "ports_append",
 			base: &agboxv1.CreateSpec{
 				Ports: []*agboxv1.PortMapping{
 					{ContainerPort: 8080, HostPort: 8080, Protocol: agboxv1.PortProtocol_PORT_PROTOCOL_TCP},
@@ -572,11 +575,14 @@ func TestMergeCreateSpecs(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, result *agboxv1.CreateSpec) {
-				if len(result.GetPorts()) != 2 {
-					t.Fatalf("expected 2 ports, got %d", len(result.GetPorts()))
+				if len(result.GetPorts()) != 3 {
+					t.Fatalf("expected 3 ports after append, got %d", len(result.GetPorts()))
 				}
-				if result.GetPorts()[0].GetContainerPort() != 3000 {
-					t.Fatalf("expected override port 3000, got %d", result.GetPorts()[0].GetContainerPort())
+				if result.GetPorts()[0].GetContainerPort() != 8080 {
+					t.Fatalf("expected base port first, got %d", result.GetPorts()[0].GetContainerPort())
+				}
+				if result.GetPorts()[1].GetContainerPort() != 3000 || result.GetPorts()[2].GetContainerPort() != 53 {
+					t.Fatalf("expected override ports following base, got %v", result.GetPorts())
 				}
 			},
 		},

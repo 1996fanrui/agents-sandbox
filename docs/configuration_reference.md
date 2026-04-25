@@ -47,7 +47,7 @@ The northbound API may override only a narrow subset of behavior:
 | Generic mounts | Yes | Each sandbox may bind explicit host paths to explicit container targets. `source` and `target` support `~` prefix: `source` expands to the host user's home directory; `target` expands to the container user's home directory. `~username` syntax is not supported. |
 | Generic copies | Yes | Each sandbox may copy explicit host files or trees into explicit container targets. `source` and `target` support `~` prefix: `source` expands to the host user's home directory; `target` expands to the container user's home directory. `~username` syntax is not supported. |
 | Built-in resources | Yes | Each sandbox may request daemon-defined resource shortcuts such as `claude`, `codex`, `opencode`, `git`, `uv`, `npm`, or `apt` |
-| Caller-provided `config_yaml` | Yes | Inline YAML configuration; when provided, field-level values from `CreateSpec` override the YAML (RFC 7396 merge semantics) |
+| Caller-provided `config_yaml` | Yes | Inline YAML configuration; when provided, the YAML is the base spec and `CreateSpec` is the override. Per-field merge follows the rules below. |
 | Caller-provided `sandbox_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | Caller-provided `exec_id` | Yes | If omitted, the daemon reserves a UUID v4 before accepting the request |
 | `companion_containers` | Yes | Each sandbox declares companion containers started concurrently with the primary container |
@@ -61,6 +61,17 @@ The northbound API may override only a narrow subset of behavior:
 | `CreateSpec.disk_limit` / `CompanionContainerSpec.disk_limit` | Yes | Docker `--storage-opt size=` style, e.g. `"10g"`. Per-container: the top-level value scopes to the primary container, each companion carries its own `disk_limit`. Wired to `HostConfig.StorageOpt["size"]`. `""` = unlimited. See [Resource Limits Prerequisites](#resource-limits-prerequisites). |
 
 The daemon persists sandbox event history in `ids.db`. For STOPPED sandboxes, once `runtime.cleanup_ttl` elapses since the sandbox entered STOPPED state, the daemon automatically removes Docker resources (containers, network) and deletes the sandbox record from the database. For DELETED sandboxes, once `runtime.cleanup_ttl` elapses since deletion, the daemon purges the retained event history and deletion metadata.
+
+### YAML / CreateSpec Merge Semantics
+
+The daemon merges the parsed YAML (base) with the `CreateSpec` (override) per field type:
+
+- Scalar fields (`image`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`): non-empty / non-nil override replaces base.
+- Map fields (`labels`, `envs`): key-level merge — override key wins, base-only keys preserved.
+- Repeated structured fields (`mounts`, `copies`, `ports`, `builtin_tools`, `companion_containers`): base + override append, base first. `builtin_tools` is deduped after append (preserving first-occurrence order); the other repeated fields keep every entry.
+- `command` (primary container only): override non-empty wins entirely. A command is a single executable invocation, so append has no executable meaning. Companion containers have no per-companion command-merge path: they are appended whole, and `validateCreateSpec` rejects duplicate companion `name`s.
+
+After merge the daemon runs `validateCreateSpec`, which rejects same-`target` collisions across `mounts` and `copies`, duplicate `(host_port, protocol)` ports, and duplicate companion container names.
 
 ## Resource Limits Prerequisites
 

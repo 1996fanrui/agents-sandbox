@@ -77,6 +77,27 @@ type dockerExecSpec struct {
 	ExecID        string // Used to construct log file names when LogDir is set
 }
 
+// buildPortBindings translates dockerPortMapping entries into the Docker API
+// PortSet/PortMap pair. Multiple PortMappings sharing the same
+// (container_port, protocol) but differing host_port are appended into the
+// same PortMap entry; direct assignment would silently drop earlier bindings.
+func buildPortBindings(ports []dockerPortMapping) (nat.PortSet, nat.PortMap, error) {
+	exposedPorts := make(nat.PortSet)
+	portBindings := make(nat.PortMap)
+	for _, p := range ports {
+		natPort, err := nat.NewPort(p.Protocol, fmt.Sprintf("%d", p.ContainerPort))
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid port spec %d/%s: %w", p.ContainerPort, p.Protocol, err)
+		}
+		exposedPorts[natPort] = struct{}{}
+		portBindings[natPort] = append(portBindings[natPort], nat.PortBinding{
+			HostIP:   "127.0.0.1",
+			HostPort: fmt.Sprintf("%d", p.HostPort),
+		})
+	}
+	return exposedPorts, portBindings, nil
+}
+
 func ensureUniqueMountTargets(mounts []dockerMount) error {
 	targets := make(map[string]string, len(mounts))
 	for _, mount := range mounts {
@@ -153,19 +174,9 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 			ReadOnly: item.ReadOnly,
 		})
 	}
-	// Build port bindings and exposed ports from the spec.
-	exposedPorts := make(nat.PortSet)
-	portBindings := make(nat.PortMap)
-	for _, p := range spec.Ports {
-		natPort, err := nat.NewPort(p.Protocol, fmt.Sprintf("%d", p.ContainerPort))
-		if err != nil {
-			return fmt.Errorf("invalid port spec %d/%s: %w", p.ContainerPort, p.Protocol, err)
-		}
-		exposedPorts[natPort] = struct{}{}
-		portBindings[natPort] = []nat.PortBinding{{
-			HostIP:   "127.0.0.1",
-			HostPort: fmt.Sprintf("%d", p.HostPort),
-		}}
+	exposedPorts, portBindings, err := buildPortBindings(spec.Ports)
+	if err != nil {
+		return err
 	}
 	hostConfig := &container.HostConfig{
 		Init:         ptrTo(true),
