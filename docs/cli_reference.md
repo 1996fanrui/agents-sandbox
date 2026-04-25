@@ -96,6 +96,16 @@ agbox claude --mode long-running
 agbox claude --cpu-limit 2 --memory-limit 4g --disk-limit 10g --env MY_API_KEY=secret
 # Override sandbox ID
 agbox codex --sandbox-id my-custom-sandbox
+# Bind-mount a host directory (read-only by default; suffix :writable to enable writes)
+agbox claude --mount /var/data:/data
+agbox openclaw --mount /var/cache:/cache:writable
+# Publish a host:container port (default tcp; append /udp or /sctp to switch protocol)
+agbox paseo --port 6767:6767
+agbox openclaw --port 5353:53/udp
+# Copy extra files alongside the workspace (host:container; appended after the workspace copy)
+agbox claude --copy /etc/myapp/config.yaml:/home/agbox/config.yaml
+# Apply user labels (override built-in created-by / agent-type if needed)
+agbox codex --label team=infra --label created-by=ci-bot
 
 # Custom agent via `agbox agent --command` (the ONLY supported form of `agbox agent`)
 agbox agent --command "claude --dangerously-skip-permissions" --builtin-tool claude --builtin-tool git --builtin-tool uv --builtin-tool npm
@@ -135,6 +145,10 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 | configYaml | Embedded sandbox config | No | No | Yes (image, command, mounts, ports, envs) | Yes (image, command, envs) | No | None |
 | preFlight | Pre-flight validation | No | No | Auth check | Builtin tool host-path filter | No | None |
 | readyMessage | Custom ready output | No | No | Management commands | Management commands + active tools | No | None |
+| mounts | Extra bind mounts (preset entries are kept; user entries appended) | None | None | Preset `~/.openclaw` | None | None | `--mount host:container[:writable]` (repeatable) |
+| ports | Extra port mappings (preset entries are kept; user entries appended) | None | None | Preset `18789:18789/tcp` | None | None | `--port host:container[/proto]` (repeatable; proto = tcp/udp/sctp) |
+| copies | Extra copies (workspace copy is preserved; user entries appended) | None | None | None | None | None | `--copy host:container` (repeatable) |
+| labels | Sandbox labels (built-in `created-by` / `agent-type` written first; user values overlay) | Built-in | Built-in | Built-in | Built-in | Built-in | `--label key=value` (repeatable) |
 
 - `--workspace` is optional at the top level.
   - claude/codex declare workspace copy and default to cwd.
@@ -145,10 +159,14 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 - openclaw auto-generates sandbox IDs matching `openclaw-XXXXXX` (6 hex chars); paseo auto-generates `paseo-XXXXXX`; other types let the daemon generate IDs. `--sandbox-id` overrides any generator; empty or omitted values fall through to the generator or daemon auto-generation.
 - `--env` passes environment variables to `CreateSpec.Envs`. Multiple `--env` flags are merged; duplicate keys use the last value. The daemon performs key-level merge with `configYaml` envs.
 - `--cpu-limit`, `--memory-limit`, and `--disk-limit` pass resource limits directly to `CreateSpec` fields. Values are not validated by the CLI; invalid formats are rejected by the daemon or Docker.
+- `--mount` accepts `host:container` (read-only) or `host:container:writable`. Other Docker-style suffixes (`:ro`, `:rw`, etc.) are rejected — use `:writable` to opt into write access. User mounts are appended to any preset YAML mounts; the daemon rejects duplicate `target` paths between mounts and copies.
+- `--port` accepts `host:container[/proto]`. Both port numbers must be in `1..65535`; `proto` is case-insensitive and must be one of `tcp` (default), `udp`, or `sctp`. The daemon rejects duplicate `(host_port, protocol)` pairs across preset and user entries.
+- `--copy` accepts `host:container` and is appended **after** the workspace copy. The daemon rejects duplicate `target` paths between copies and mounts.
+- `--label` accepts `key=value` (repeatable). User entries are written after the built-in `created-by=agbox-cli` / `agent-type=<type>` labels, so passing `--label created-by=...` overrides the built-in value. Empty keys (`=value`) are rejected.
 
 ### Command Surface
 
-Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--command`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`).
+Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--command`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`, `--mount`, `--port`, `--copy`, `--label`).
 
 `--command` can be used with registered agent types to override the default command. In interactive mode, it replaces the TTY command launched via `docker exec`. In long-running mode, it replaces the container primary command (under tini). The value is split by whitespace via `strings.Fields` (no shell quoting).
 
