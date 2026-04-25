@@ -137,32 +137,13 @@ func runInteractiveSession(
 	defer signal.Stop(sigintCh)
 	defer signal.Stop(sigtermCh)
 
-	// Build copies list conditionally based on workspace.
-	copies := []*agboxv1.CopySpec{}
-	if parsed.workspace != "" {
-		copies = append(copies, &agboxv1.CopySpec{Source: parsed.workspace, Target: "/workspace"})
-	}
-
 	// Use a large idle TTL as a safety net: the CLI always cleans up on exit,
 	// but if the process is killed without cleanup (e.g., SIGKILL), the daemon
 	// will reclaim the sandbox after agentSessionIdleTTL.
 	createResp, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
 		SandboxId:  parsed.sandboxID,
 		ConfigYaml: configYamlBytes(parsed.configYaml),
-		CreateSpec: &agboxv1.CreateSpec{
-			Image:        parsed.image,
-			BuiltinTools: parsed.builtinTools,
-			Copies:       copies,
-			Envs:         parsed.envs,
-			CpuLimit:     parsed.cpuLimit,
-			MemoryLimit:  parsed.memoryLimit,
-			DiskLimit:    parsed.diskLimit,
-			Labels: map[string]string{
-				"created-by": "agbox-cli",
-				"agent-type": agentLabel,
-			},
-			IdleTtl: durationpb.New(agentSessionIdleTTL),
-		},
+		CreateSpec: buildAgentCreateSpec(parsed, agentLabel, durationpb.New(agentSessionIdleTTL), nil),
 	})
 	if err != nil {
 		return runtimeErrorf("create sandbox: %v", err)
@@ -264,31 +245,11 @@ func runLongRunningSession(
 	defer signal.Stop(sigintCh)
 	defer signal.Stop(sigtermCh)
 
-	// Build copies list conditionally based on workspace.
-	copies := []*agboxv1.CopySpec{}
-	if parsed.workspace != "" {
-		copies = append(copies, &agboxv1.CopySpec{Source: parsed.workspace, Target: "/workspace"})
-	}
-
 	// idle_ttl=0 disables idle stop; the sandbox stays alive until explicit stop/delete.
 	createResp, err := client.CreateSandbox(ctx, &agboxv1.CreateSandboxRequest{
 		SandboxId:  parsed.sandboxID,
 		ConfigYaml: configYamlBytes(parsed.configYaml),
-		CreateSpec: &agboxv1.CreateSpec{
-			Image:        parsed.image,
-			Command:      parsed.command,
-			BuiltinTools: parsed.builtinTools,
-			Copies:       copies,
-			Envs:         parsed.envs,
-			CpuLimit:     parsed.cpuLimit,
-			MemoryLimit:  parsed.memoryLimit,
-			DiskLimit:    parsed.diskLimit,
-			Labels: map[string]string{
-				"created-by": "agbox-cli",
-				"agent-type": agentLabel,
-			},
-			IdleTtl: durationpb.New(0),
-		},
+		CreateSpec: buildAgentCreateSpec(parsed, agentLabel, durationpb.New(0), parsed.command),
 	})
 	if err != nil {
 		return runtimeErrorf("create sandbox: %v", err)
@@ -613,6 +574,47 @@ func pumpSandboxEvents(stream rawclient.SandboxEventStream, eventCh chan<- sandb
 			return
 		}
 		eventCh <- sandboxEventResult{event: event}
+	}
+}
+
+// buildAgentCreateSpec assembles the CreateSpec sent to the daemon for an
+// agent session. Layout rules:
+//   - Copies: workspace first (when present), then user --copy entries.
+//   - Mounts/Ports: user --mount/--port entries appended; preset YAML mounts
+//     and ports are merged in by the daemon (base + override append).
+//   - Labels: built-in labels (created-by, agent-type) written first, then
+//     user --label entries overlay (last write wins via Go map semantics).
+//   - command: caller-controlled — interactive sessions pass nil so the
+//     primary command from the preset YAML is used; long-running sessions
+//     pass parsed.command to set the container primary command.
+func buildAgentCreateSpec(parsed agentSessionArgs, agentLabel string, idleTTL *durationpb.Duration, command []string) *agboxv1.CreateSpec {
+	copies := []*agboxv1.CopySpec{}
+	if parsed.workspace != "" {
+		copies = append(copies, &agboxv1.CopySpec{Source: parsed.workspace, Target: "/workspace"})
+	}
+	copies = append(copies, parsed.userCopies...)
+
+	labels := map[string]string{
+		"created-by": "agbox-cli",
+		"agent-type": agentLabel,
+	}
+	for k, v := range parsed.userLabels {
+		labels[k] = v
+	}
+
+	return &agboxv1.CreateSpec{
+		Image:        parsed.image,
+		Command:      command,
+		BuiltinTools: parsed.builtinTools,
+		Mounts:       parsed.userMounts,
+		Copies:       copies,
+		Ports:        parsed.userPorts,
+		Envs:         parsed.envs,
+		CpuLimit:     parsed.cpuLimit,
+		MemoryLimit:  parsed.memoryLimit,
+		DiskLimit:    parsed.diskLimit,
+		Labels:       labels,
+		IdleTtl:      idleTTL,
 	}
 }
 

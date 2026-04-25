@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +23,10 @@ type agentSessionFlagVars struct {
 	memoryLimit  string
 	diskLimit    string
 	sandboxID    string
+	mounts       []string
+	ports        []string
+	copies       []string
+	labels       []string
 	// Track which flags were explicitly set by the user:
 	modeOverridden         bool
 	workspaceOverridden    bool
@@ -38,6 +44,10 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
 	cmd.Flags().StringVar(&v.diskLimit, "disk-limit", "", "Disk limit (Docker --storage-opt size= format, e.g. 10g)")
 	cmd.Flags().StringVar(&v.sandboxID, "sandbox-id", "", "Custom sandbox ID (overrides agent type default)")
+	cmd.Flags().StringArrayVar(&v.mounts, "mount", nil, "Bind mount in host:container[:writable] form (repeatable; default read-only)")
+	cmd.Flags().StringArrayVar(&v.ports, "port", nil, "Port mapping in host:container[/proto] form (repeatable; proto = tcp|udp|sctp, default tcp)")
+	cmd.Flags().StringArrayVar(&v.copies, "copy", nil, "File/directory copy in host:container form (repeatable; appended after the workspace copy)")
+	cmd.Flags().StringArrayVar(&v.labels, "label", nil, "Sandbox label in key=value form (repeatable; user values override built-in created-by/agent-type)")
 }
 
 // newPaseoTopLevelCommand builds the top-level `agbox paseo` command with the
@@ -79,6 +89,14 @@ type agentSessionArgs struct {
 	configYaml   string                                       // embedded YAML config
 	image        string                                       // container image (empty = daemon uses configYaml image)
 	readyMessage func(sandboxID, containerName string) string // custom ready message
+	// Parsed --mount / --port / --copy / --label values, ready to splice into
+	// CreateSpec.Mounts/Ports/Copies/Labels at request build time. Built-in
+	// labels (created-by, agent-type) are written first; userLabels overlay
+	// last so users can override them via --label.
+	userMounts []*agboxv1.MountSpec
+	userPorts  []*agboxv1.PortMapping
+	userCopies []*agboxv1.CopySpec
+	userLabels map[string]string
 }
 
 // newAgentCommand builds `agbox agent --command "..."` for running a custom
@@ -217,6 +235,48 @@ func resolveAgentSessionArgs(
 	parsed.memoryLimit = v.memoryLimit
 	parsed.diskLimit = v.diskLimit
 
+	// Parse repeatable structured flags. Each parser returns a usageError on
+	// invalid input; failures are surfaced verbatim so cobra prints usage.
+	for _, raw := range v.mounts {
+		m, err := parseMountFlag(raw)
+		if err != nil {
+			return agentSessionArgs{}, err
+		}
+		parsed.userMounts = append(parsed.userMounts, m)
+	}
+	for _, raw := range v.ports {
+		p, err := parsePortFlag(raw)
+		if err != nil {
+			return agentSessionArgs{}, err
+		}
+		parsed.userPorts = append(parsed.userPorts, p)
+	}
+	for _, raw := range v.copies {
+		c, err := parseCopyFlag(raw)
+		if err != nil {
+			return agentSessionArgs{}, err
+		}
+		parsed.userCopies = append(parsed.userCopies, c)
+	}
+	if len(v.labels) > 0 {
+		labelMap := make(map[string]string, len(v.labels))
+		for _, raw := range v.labels {
+			key, value, err := parseKeyValueAssignment(raw, "--label")
+			if err != nil {
+				return agentSessionArgs{}, err
+			}
+			// parseKeyValueAssignment only enforces the presence of '='; an
+			// empty key (e.g. "=value") is meaningless for a label and is
+			// rejected here so users see a usageError instead of a silently
+			// dropped/odd map entry.
+			if key == "" {
+				return agentSessionArgs{}, usageErrorf("--label key must not be empty")
+			}
+			labelMap[key] = value // last occurrence wins
+		}
+		parsed.userLabels = labelMap
+	}
+
 	// Sandbox ID resolution: --sandbox-id overrides the type's generator.
 	if v.sandboxID != "" {
 		parsed.sandboxID = v.sandboxID
@@ -278,4 +338,101 @@ func validateWorkspacePath(workspace string) (string, error) {
 	}
 
 	return realWorkspace, nil
+}
+
+// parseMountFlag parses a --mount value of the form "host:container" or
+// "host:container:writable" into a MountSpec. The optional third component
+// must be the literal word "writable"; any other suffix (e.g. ":ro", ":rw")
+// is rejected to keep the surface small and the default (read-only) explicit.
+func parseMountFlag(s string) (*agboxv1.MountSpec, error) {
+	parts := strings.Split(s, ":")
+	switch len(parts) {
+	case 2:
+		if parts[0] == "" || parts[1] == "" {
+			return nil, usageErrorf("--mount %q: source and target must be non-empty", s)
+		}
+		return &agboxv1.MountSpec{Source: parts[0], Target: parts[1]}, nil
+	case 3:
+		if parts[0] == "" || parts[1] == "" {
+			return nil, usageErrorf("--mount %q: source and target must be non-empty", s)
+		}
+		if parts[2] != "writable" {
+			return nil, usageErrorf("--mount %q: only the literal suffix \":writable\" is supported (got %q); omit the suffix for read-only", s, parts[2])
+		}
+		return &agboxv1.MountSpec{Source: parts[0], Target: parts[1], Writable: true}, nil
+	default:
+		return nil, usageErrorf("--mount %q: must be host:container or host:container:writable", s)
+	}
+}
+
+// parsePortFlag parses a --port value of the form "host:container[/proto]"
+// into a PortMapping. host and container must be integers in [1, 65535];
+// proto (case-insensitive) defaults to TCP and accepts tcp/udp/sctp.
+func parsePortFlag(s string) (*agboxv1.PortMapping, error) {
+	if s == "" {
+		return nil, usageErrorf("--port: value must not be empty")
+	}
+	hostContainer := s
+	protoStr := "tcp"
+	if idx := strings.Index(s, "/"); idx >= 0 {
+		hostContainer = s[:idx]
+		protoStr = s[idx+1:]
+		if protoStr == "" {
+			return nil, usageErrorf("--port %q: protocol must not be empty after '/'", s)
+		}
+	}
+	parts := strings.Split(hostContainer, ":")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, usageErrorf("--port %q: must be host:container[/proto]", s)
+	}
+	hostPort, err := parsePortNumber(parts[0], "--port host_port", s)
+	if err != nil {
+		return nil, err
+	}
+	containerPort, err := parsePortNumber(parts[1], "--port container_port", s)
+	if err != nil {
+		return nil, err
+	}
+	var proto agboxv1.PortProtocol
+	switch strings.ToLower(protoStr) {
+	case "tcp":
+		proto = agboxv1.PortProtocol_PORT_PROTOCOL_TCP
+	case "udp":
+		proto = agboxv1.PortProtocol_PORT_PROTOCOL_UDP
+	case "sctp":
+		proto = agboxv1.PortProtocol_PORT_PROTOCOL_SCTP
+	default:
+		return nil, usageErrorf("--port %q: unsupported protocol %q; must be tcp, udp, or sctp", s, protoStr)
+	}
+	return &agboxv1.PortMapping{
+		HostPort:      uint32(hostPort),
+		ContainerPort: uint32(containerPort),
+		Protocol:      proto,
+	}, nil
+}
+
+// parsePortNumber parses a port string and validates the [1, 65535] range.
+func parsePortNumber(raw, role, full string) (int, error) {
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, usageErrorf("%s %q: %q is not an integer", role, full, raw)
+	}
+	if n < 1 || n > 65535 {
+		return 0, usageErrorf("%s %q: %d is out of range (1..65535)", role, full, n)
+	}
+	return n, nil
+}
+
+// parseCopyFlag parses a --copy value of the form "host:container" into a
+// CopySpec. The split is on the first ':' so the container path may itself
+// contain colons; both source and target must be non-empty.
+func parseCopyFlag(s string) (*agboxv1.CopySpec, error) {
+	source, target, found := strings.Cut(s, ":")
+	if !found {
+		return nil, usageErrorf("--copy %q: must be host:container", s)
+	}
+	if source == "" || target == "" {
+		return nil, usageErrorf("--copy %q: source and target must be non-empty", s)
+	}
+	return &agboxv1.CopySpec{Source: source, Target: target}, nil
 }
