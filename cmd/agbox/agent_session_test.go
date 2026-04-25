@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,6 +13,20 @@ import (
 	"github.com/1996fanrui/agents-sandbox/sdk/go/rawclient"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+// TestMain stubs out resolveContainerLoginShell for all unit tests in this
+// package. The real probe runs `docker exec` against the sandbox container,
+// which does not exist in tests that use fake runtime backends. The stub
+// returns a fixed shell so the rendered hint stays deterministic.
+func TestMain(m *testing.M) {
+	original := resolveContainerLoginShell
+	resolveContainerLoginShell = func(_ context.Context, _, _ string) (string, error) {
+		return "/bin/bash", nil
+	}
+	code := m.Run()
+	resolveContainerLoginShell = original
+	os.Exit(code)
+}
 
 // --- Mock types for unit-testing runLongRunningSession and runInteractiveSession ---
 
