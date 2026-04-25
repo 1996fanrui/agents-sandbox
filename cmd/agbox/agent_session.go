@@ -46,6 +46,85 @@ func primaryContainerName(sandboxID string) string {
 	return "agbox-primary-" + sanitizeContainerName(sandboxID)
 }
 
+// loginShellProbeTimeout caps the wait for the entrypoint to finish creating
+// the target user. SANDBOX_READY only means "container is running" — the
+// runtime image's entrypoint may still be executing useradd/usermod/gosu.
+// During that window, `docker exec --user agbox` fails because the user
+// does not exist yet. Three seconds is generous: paseo-runtime entrypoint
+// completes well under 1 s on a warm cache.
+const loginShellProbeTimeout = 3 * time.Second
+
+// resolveContainerLoginShell asks the container what login shell the target
+// user is configured with by reading /etc/passwd. Returns the absolute path
+// (e.g. "/bin/zsh", "/bin/bash"). The probe relies only on POSIX-mandatory
+// components (sh, awk, /etc/passwd colon format).
+//
+// SANDBOX_READY only means the container is running; the runtime image's
+// entrypoint may still be creating the agbox user. We loop on a single
+// shell pipeline that (1) waits until the user exists, (2) reads its login
+// shell. The wait happens inside the container, so we do not get exec 126
+// from a missing user.
+//
+// Indirected through a package-level variable so unit tests that use fake
+// runtimes (no real container) can stub it out.
+var resolveContainerLoginShell = func(ctx context.Context, containerName, user string) (string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, loginShellProbeTimeout)
+	defer cancel()
+
+	// Inner shell, taking $1 as the target username:
+	//   1. Spin until /etc/passwd has an entry for that user (entrypoint's
+	//      useradd may still be running).
+	//   2. Print the 7th colon-separated field (login shell) for that user.
+	probe := `u="$1"; while ! awk -F: -v u="$u" '$1==u {found=1; exit} END {exit !found}' /etc/passwd; do sleep 0.01; done; awk -F: -v u="$u" '$1==u {print $7; exit}' /etc/passwd`
+	out, err := exec.CommandContext(probeCtx,
+		"docker", "exec", containerName, "sh", "-c", probe, "_probe", user,
+	).Output()
+	if err != nil {
+		stderr := ""
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(exitErr.Stderr))
+		}
+		if stderr != "" {
+			return "", fmt.Errorf("probe login shell in %s: %w (%s)", containerName, err, stderr)
+		}
+		return "", fmt.Errorf("probe login shell in %s: %w", containerName, err)
+	}
+	shell := strings.TrimSpace(string(out))
+	if shell == "" {
+		return "", fmt.Errorf("probe login shell in %s: user %q has no shell entry in /etc/passwd", containerName, user)
+	}
+	return shell, nil
+}
+
+// waitReadyAndPrintShellHint waits for the sandbox to enter READY, prints
+// the elapsed wait time, then prints a copy-pasteable docker exec command
+// pointing at the user's actual login shell (resolved from the container's
+// /etc/passwd, not assumed). Returns the resolved container name.
+func waitReadyAndPrintShellHint(
+	ctx context.Context,
+	client sandboxExecClient,
+	stderr io.Writer,
+	sandboxID string,
+	lastEventSeq uint64,
+	sigintCh, sigtermCh <-chan os.Signal,
+) (string, error) {
+	containerName := primaryContainerName(sandboxID)
+	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox to be ready...")
+	waitStart := time.Now()
+	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
+		_, _ = fmt.Fprintln(stderr)
+		return "", err
+	}
+	_, _ = fmt.Fprintf(stderr, "     [%.1fs]\n", time.Since(waitStart).Seconds())
+
+	loginShell, err := resolveContainerLoginShell(ctx, containerName, "agbox")
+	if err != nil {
+		return "", err
+	}
+	_, _ = fmt.Fprintf(stderr, "  Shell: docker exec -it --user agbox %s %s\n", containerName, loginShell)
+	return containerName, nil
+}
+
 // runAgentSession implements the shared flow for top-level per-type agent
 // commands (`agbox claude`, `agbox codex`, `agbox openclaw`) and for
 // `agbox agent --command "..."`. It validates inputs, connects to the
@@ -173,16 +252,10 @@ func runInteractiveSession(
 	default:
 	}
 
-	containerName := primaryContainerName(sandboxID)
-
-	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox to be ready...")
-	waitStart := time.Now()
-	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
-		_, _ = fmt.Fprintln(stderr)
+	containerName, err := waitReadyAndPrintShellHint(ctx, client, stderr, sandboxID, lastEventSeq, sigintCh, sigtermCh)
+	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(stderr, "     [%.1fs]\n", time.Since(waitStart).Seconds())
-	_, _ = fmt.Fprintf(stderr, "  Shell: docker exec -it --user agbox %s bash\n", containerName)
 	dockerArgs := append([]string{"exec", "-it", "--user", "agbox", containerName}, parsed.command...)
 	cmd := exec.Command("docker", dockerArgs...) //nolint:gosec
 	cmd.Stdin = os.Stdin
@@ -277,16 +350,10 @@ func runLongRunningSession(
 	default:
 	}
 
-	containerName := primaryContainerName(sandboxID)
-
-	_, _ = fmt.Fprintf(stderr, "Waiting for sandbox to be ready...")
-	waitStart := time.Now()
-	if err := waitForSandboxReady(ctx, client, sandboxID, lastEventSeq, sigintCh, sigtermCh); err != nil {
-		_, _ = fmt.Fprintln(stderr)
+	containerName, err := waitReadyAndPrintShellHint(ctx, client, stderr, sandboxID, lastEventSeq, sigintCh, sigtermCh)
+	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(stderr, "     [%.1fs]\n", time.Since(waitStart).Seconds())
-	_, _ = fmt.Fprintf(stderr, "  Shell: docker exec -it --user agbox %s bash\n", containerName)
 
 	// After READY, container is running. Set detachSuccess so deferred cleanup
 	// does not delete the sandbox. Any error beyond this point leaves the
