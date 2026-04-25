@@ -103,6 +103,8 @@ func cloneCompanionContainerSpecs(items []*agboxv1.CompanionContainerSpec) []*ag
 			Healthcheck:        cloneHealthcheck(item.GetHealthcheck()),
 			PostStartOnPrimary: slices.Clone(item.GetPostStartOnPrimary()),
 			Command:            slices.Clone(item.GetCommand()),
+			CpuLimit:           item.GetCpuLimit(),
+			MemoryLimit:        item.GetMemoryLimit(),
 			DiskLimit:          item.GetDiskLimit(),
 		})
 	}

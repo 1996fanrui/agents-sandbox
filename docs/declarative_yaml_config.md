@@ -169,15 +169,16 @@ sandbox, err := client.CreateSandbox(ctx,
 
 ## Override Semantics
 
-When both YAML and explicit parameters are provided, explicit parameters override YAML values following [JSON Merge Patch (RFC 7396)](https://www.rfc-editor.org/rfc/rfc7396) semantics:
+When both YAML and explicit `CreateSpec` parameters are provided, the YAML is the base and `CreateSpec` is the override. Merge is per-field-type:
 
-| Field Type | Override Behavior |
+| Field Type | Merge Behavior |
 |---|---|
-| Scalar (`image`) | Non-empty explicit value overwrites YAML |
-| Repeated (`mounts`, `copies`, etc.) | Non-empty explicit value replaces YAML entirely |
-| Map (`labels`, `envs`) | Key-level merge: explicit keys overwrite; YAML-only keys preserved |
+| Scalar (`image`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`) | Non-empty / non-nil override replaces base |
+| Map (`labels`, `envs`) | Key-level merge: override key wins, base-only keys preserved |
+| Repeated structured (`mounts`, `copies`, `ports`, `builtin_tools`, `companion_containers`) | Base + override append, base first |
+| `command` (primary container only) | Override non-empty replaces base entirely (single-command semantics; append has no executable meaning) |
 
-**Known limitation**: callers cannot use explicit parameters to clear a repeated field defined in YAML. Empty values are treated as "not set."
+`builtin_tools` is deduped after append (preserving first-occurrence order) so declaring the same tool in both YAML and `CreateSpec` is accepted. All other repeated fields keep every appended entry; conflict detection (same mount/copy `target`, same `(host_port, protocol)`, same companion `name`) runs after merge in the daemon's `validateCreateSpec`.
 
 ## Environment Variable Inheritance
 

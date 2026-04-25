@@ -294,8 +294,19 @@ func parsePortProtocol(raw string) (agboxv1.PortProtocol, error) {
 }
 
 // mergeCreateSpecs merges two CreateSpecs: base provides defaults, override
-// takes precedence. Scalar strings overwrite when non-empty; repeated fields
-// replace entirely when non-nil (len > 0); map fields merge at key level.
+// takes precedence. Field-type-driven semantics:
+//   - scalar strings: override non-empty overwrites base
+//   - repeated structured fields (mounts / copies / builtin_tools /
+//     companion_containers / ports): base + override append, base first
+//   - command (repeated string with single-command semantics): override
+//     non-empty replaces base entirely; append has no executable meaning
+//   - map fields (labels / envs): key-level merge, override key overwrites
+//   - well-known scalar idle_ttl: non-nil override replaces base
+//
+// builtin_tools is deduped after append (preserving first-occurrence order)
+// because validateCreateSpec rejects duplicates; deduping here means that
+// declaring the same tool in both base and override is accepted, while still
+// letting validateCreateSpec catch genuine duplicates inside a single source.
 func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	if base == nil && override == nil {
 		return &agboxv1.CreateSpec{}
@@ -323,24 +334,19 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		result.DiskLimit = override.GetDiskLimit()
 	}
 
-	// Repeated: override non-nil (len > 0) replaces entirely.
-	if len(override.GetMounts()) > 0 {
-		result.Mounts = cloneMounts(override.GetMounts())
-	}
-	if len(override.GetCopies()) > 0 {
-		result.Copies = cloneCopies(override.GetCopies())
-	}
-	if len(override.GetBuiltinTools()) > 0 {
-		result.BuiltinTools = append([]string(nil), override.GetBuiltinTools()...)
-	}
-	if len(override.GetCompanionContainers()) > 0 {
-		result.CompanionContainers = cloneCompanionContainerSpecs(override.GetCompanionContainers())
-	}
-	if len(override.GetPorts()) > 0 {
-		result.Ports = clonePortMappings(override.GetPorts())
-	}
-	// command: len > 0 override replaces base entirely. Companion container
-	// commands ride along with the whole-spec replacement above.
+	// Repeated structured fields: base + override append (base first).
+	// Duplicate / conflict detection is delegated to validateCreateSpec.
+	result.Mounts = append(result.Mounts, cloneMounts(override.GetMounts())...)
+	result.Copies = append(result.Copies, cloneCopies(override.GetCopies())...)
+	result.CompanionContainers = append(result.CompanionContainers, cloneCompanionContainerSpecs(override.GetCompanionContainers())...)
+	result.Ports = append(result.Ports, clonePortMappings(override.GetPorts())...)
+
+	// builtin_tools: append then dedupe, preserving first-occurrence order.
+	// Dedup must run before validateCreateSpec so that declaring the same
+	// tool in base and override is not flagged as a duplicate.
+	result.BuiltinTools = dedupeStrings(append(result.BuiltinTools, override.GetBuiltinTools()...))
+
+	// command: single-command semantics; override non-empty replaces base.
 	if len(override.GetCommand()) > 0 {
 		result.Command = append([]string(nil), override.GetCommand()...)
 	}
@@ -370,5 +376,24 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		result.IdleTtl = durationpb.New(override.GetIdleTtl().AsDuration())
 	}
 
+	return result
+}
+
+// dedupeStrings returns a slice with duplicate strings removed, preserving
+// the order of first occurrence. Returns nil for empty input to keep the
+// proto field unset rather than an explicit empty slice.
+func dedupeStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
 	return result
 }
