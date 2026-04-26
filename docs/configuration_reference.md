@@ -14,7 +14,7 @@ If a change adds, removes, renames, or changes the default of a config key, upda
 
 Northbound request fields are not part of this configuration surface. Request-time lifecycle inputs such as image selection, filesystem ingress (`mounts`, `copies`, `builtin_tools`), and companion container declarations belong to the RPC contract, not to `config.toml`.
 
-The AgentsSandbox daemon always derives its runtime paths internally and then auto-loads the platform-default `config.toml` if it exists. There is no CLI flag, environment variable, or config key that overrides the socket path, lock path, config path, or ID store path.
+The AgentsSandbox daemon always derives its runtime paths internally and then auto-loads the platform-default `config.toml` if it exists. There is no CLI flag, environment variable, or config key that overrides the socket path, lock path, config path, ID store path, or sandbox data path.
 
 ## Fixed Platform Paths
 
@@ -24,6 +24,7 @@ The AgentsSandbox daemon always derives its runtime paths internally and then au
 | Host lock | `$XDG_RUNTIME_DIR/agbox/agboxd.lock` | `~/Library/Application Support/agbox/agboxd.lock` |
 | Config | `$XDG_CONFIG_HOME/agents-sandbox/config.toml`, or `~/.config/agents-sandbox/config.toml` when `XDG_CONFIG_HOME` is unset | `~/Library/Application Support/agents-sandbox/config.toml` |
 | Historical ID store | `$XDG_DATA_HOME/agents-sandbox/ids.db`, or `~/.local/share/agents-sandbox/ids.db` when `XDG_DATA_HOME` is unset | `~/Library/Application Support/agents-sandbox/ids.db` |
+| Sandbox data (mounts) | `$XDG_DATA_HOME/agents-sandbox/mounts`, or `~/.local/share/agents-sandbox/mounts` when `XDG_DATA_HOME` is unset | `~/Library/Application Support/agents-sandbox/mounts` |
 
 The host lock always lives next to the socket so the lock protects the exact runtime socket path the daemon serves.
 

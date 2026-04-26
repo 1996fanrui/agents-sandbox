@@ -285,6 +285,52 @@ func TestRestoreIdleTTLCleanupLoopScan(t *testing.T) {
 	waitForSandboxState(t, second.client, createResp.GetSandbox().GetSandboxId(), agboxv1.SandboxState_SANDBOX_STATE_STOPPED)
 }
 
+// ---- AT-1CLN: Restart recovery correctly sets MountStagingDir ----
+
+func TestRestorePersistedSandboxesSetsMountStagingDir(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	sandboxDataRoot := filepath.Join(t.TempDir(), "mounts")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Phase 1: Create sandbox to READY.
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		SandboxDataRoot: sandboxDataRoot,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), createSandboxRequest("mount-staging-restore", "ghcr.io/agents-sandbox/coding-runtime:test"))
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	sandboxID := createResp.GetSandbox().GetSandboxId()
+	waitForSandboxState(t, first.client, sandboxID, agboxv1.SandboxState_SANDBOX_STATE_READY)
+	first.close()
+
+	// Phase 2: Restart with scripted backend and verify MountStagingDir is set.
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		SandboxDataRoot: sandboxDataRoot,
+		runtimeBackend: &scriptedRuntimeBackend{
+			inspectResult: ContainerInspectResult{Exists: true, Running: true},
+		},
+	}, dbPath)
+
+	second.service.mu.RLock()
+	rec := second.service.boxes[sandboxID]
+	var mountStagingDir string
+	if rec != nil && rec.runtimeState != nil {
+		mountStagingDir = rec.runtimeState.MountStagingDir
+	}
+	second.service.mu.RUnlock()
+
+	wantMountStagingDir := filepath.Join(sandboxDataRoot, sandboxID)
+	if mountStagingDir != wantMountStagingDir {
+		t.Fatalf("expected MountStagingDir %q, got %q", wantMountStagingDir, mountStagingDir)
+	}
+}
+
 func TestDockerEventPrimaryContainerDie(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "ids.db")
 	ctx, cancel := context.WithCancel(context.Background())

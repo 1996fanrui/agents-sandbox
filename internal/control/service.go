@@ -29,6 +29,7 @@ type ServiceConfig struct {
 	CleanupInterval        time.Duration
 	ArtifactOutputRoot     string
 	ArtifactOutputTemplate string
+	SandboxDataRoot        string
 	Version                string
 	DaemonName             string
 	LogLevel               string

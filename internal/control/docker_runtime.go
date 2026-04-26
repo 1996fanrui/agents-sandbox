@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -100,6 +101,7 @@ type sandboxRuntimeState struct {
 	CompanionContainers      []runtimeCompanionContainer
 	CompanionContainerStarts companionContainerStarts
 	PrimaryCrashloopState    *crashloopState
+	MountStagingDir          string
 }
 
 type runtimeCompanionContainer struct {
@@ -222,6 +224,9 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		NetworkName:          dockerNetworkName(record.handle.GetSandboxId()),
 		PrimaryContainerName: dockerPrimaryContainerName(record.handle.GetSandboxId()),
 	}
+	if backend.config.SandboxDataRoot != "" {
+		state.MountStagingDir = filepath.Join(backend.config.SandboxDataRoot, record.handle.GetSandboxId())
+	}
 	limits, err := buildLimits(record.createSpec)
 	if err != nil {
 		return runtimeCreateResult{}, err
@@ -238,11 +243,18 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
 	}()
 
-	mounts, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state)
+	if state.MountStagingDir != "" {
+		if err := os.MkdirAll(state.MountStagingDir, 0o755); err != nil {
+			return runtimeCreateResult{}, fmt.Errorf("create mount staging directory: %w", err)
+		}
+	}
+	cleanupRequired = true
+
+	mounts, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state.MountStagingDir)
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
-	genericMounts, err := backend.materializeGenericMounts(record.createSpec.GetMounts())
+	genericMounts, err := backend.materializeGenericMounts(record.createSpec.GetMounts(), state.MountStagingDir)
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -265,7 +277,6 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		return runtimeCreateResult{}, err
 	}
 
-	cleanupRequired = true
 	if err := backend.ensureDockerImage(ctx, record.createSpec.GetImage()); err != nil {
 		return runtimeCreateResult{}, err
 	}
@@ -520,6 +531,9 @@ func (backend *dockerRuntimeBackend) deleteRuntimeArtifacts(ctx context.Context,
 	if state.NetworkName != "" {
 		backend.removeNetworkHostIsolation(ctx, state.NetworkName)
 		joined = append(joined, backend.dockerNetworkRemove(ctx, state.NetworkName))
+	}
+	if state.MountStagingDir != "" {
+		joined = append(joined, os.RemoveAll(state.MountStagingDir))
 	}
 	return errors.Join(joined...)
 }

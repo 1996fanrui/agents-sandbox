@@ -155,6 +155,22 @@ func execLogRootForGOOS(goos string, lookupEnv LookupEnv) string {
 	return filepath.Join(dataRoot, AgentsSandboxDirName, "exec-logs")
 }
 
+// SandboxDataRoot returns the platform default root for per-sandbox mount staging directories.
+//
+//   - Linux: $XDG_DATA_HOME/agents-sandbox/mounts, falling back to ~/.local/share/agents-sandbox/mounts
+//   - macOS: ~/Library/Application Support/agents-sandbox/mounts
+func SandboxDataRoot(lookupEnv LookupEnv) string {
+	return sandboxDataRootForGOOS(runtime.GOOS, lookupEnv)
+}
+
+func sandboxDataRootForGOOS(goos string, lookupEnv LookupEnv) string {
+	dataRoot := dataDirForGOOS(goos, lookupEnv)
+	if dataRoot == "" {
+		return ""
+	}
+	return filepath.Join(dataRoot, AgentsSandboxDirName, "mounts")
+}
+
 func runtimeRootPathForGOOS(goos string, lookupEnv LookupEnv) (string, error) {
 	runtimeDir := runtimeDirForGOOS(goos, lookupEnv)
 	if runtimeDir == "" {
