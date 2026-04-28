@@ -42,14 +42,24 @@ func TestResolveAgentSessionArgs_RegisteredType(t *testing.T) {
 	}
 }
 
-func TestResolveAgentSessionArgs_RegisteredTypeOverrideBuiltinTools(t *testing.T) {
+func TestResolveAgentSessionArgs_RegisteredTypeAppendBuiltinTools(t *testing.T) {
+	// --builtin-tool is appended to the agent type's defaults and deduped
+	// (preserving first-occurrence order). claude defaults are
+	// [claude, git, uv, npm, apt]; appending [git, foo] keeps the defaults
+	// in order, drops the duplicate "git", and appends the new "foo".
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{workspace: tmpDir, workspaceOverridden: true, builtinTools: []string{"git"}, builtinToolsOverridden: true}, "claude")
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{workspace: tmpDir, workspaceOverridden: true, builtinTools: []string{"git", "foo"}}, "claude")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(parsed.builtinTools) != 1 || parsed.builtinTools[0] != "git" {
-		t.Fatalf("expected builtinTools=[git], got %v", parsed.builtinTools)
+	expected := []string{"claude", "git", "uv", "npm", "apt", "foo"}
+	if len(parsed.builtinTools) != len(expected) {
+		t.Fatalf("expected builtinTools=%v, got %v", expected, parsed.builtinTools)
+	}
+	for i, tool := range expected {
+		if parsed.builtinTools[i] != tool {
+			t.Fatalf("builtinTools[%d]: expected %q, got %q", i, tool, parsed.builtinTools[i])
+		}
 	}
 }
 
@@ -72,7 +82,7 @@ func TestResolveAgentSessionArgs_CustomCommand(t *testing.T) {
 
 func TestResolveAgentSessionArgs_CustomCommandWithBuiltinTools(t *testing.T) {
 	tmpDir := realTempDir(t)
-	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{rawCommand: "aider", workspace: tmpDir, workspaceOverridden: true, builtinTools: []string{"git", "uv"}, builtinToolsOverridden: true}, "")
+	parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{rawCommand: "aider", workspace: tmpDir, workspaceOverridden: true, builtinTools: []string{"git", "uv"}}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

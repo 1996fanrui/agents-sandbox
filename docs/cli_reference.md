@@ -134,7 +134,7 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 |-----------|-------------|--------|-------|----------|-------|-------------------|-------------------|
 | mode | Default session mode | interactive | interactive | long-running | long-running | interactive | `--mode` |
 | command | Container primary command (under tini in long-running; docker exec in interactive) | Fixed | Fixed | Fixed (gateway run) | Fixed (daemon start) | User-specified | `--command` |
-| builtinTools | Pre-installed tools | Fixed | Fixed | Fixed | Fixed (filtered by preFlight) | User-specified | `--builtin-tool` |
+| builtinTools | Pre-installed tools (preset entries are kept; user entries appended and deduped, preserving first-occurrence order) | Preset `claude, git, uv, npm, apt` | Preset `codex, git, uv, npm, apt` | Preset `git, npm, uv, apt` | Preset `claude, codex, npm, uv, apt, opencode` (filtered by preFlight) | User-specified | `--builtin-tool` |
 | workspace copy | Copy local directory to /workspace | Yes (default: cwd) | Yes (default: cwd) | No | No | No | `--workspace` (explicit to enable) |
 | .git check | Confirm when workspace lacks .git | Yes | Yes | No | No | No | None (automatic) |
 | envs | Environment variables for container | None | None | None | None | None | `--env` (repeatable, `KEY=VAL` form) |
@@ -163,6 +163,7 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 - `--port` accepts `host:container[/proto]`. Both port numbers must be in `1..65535`; `proto` is case-insensitive and must be one of `tcp` (default), `udp`, or `sctp`. The daemon rejects duplicate `(host_port, protocol)` pairs across preset and user entries.
 - `--copy` accepts `host:container` and is appended **after** the workspace copy. The daemon rejects duplicate `target` paths between copies and mounts.
 - `--label` accepts `key=value` (repeatable). User entries are written after the built-in `created-by=agbox-cli` / `agent-type=<type>` labels, so passing `--label created-by=...` overrides the built-in value. Empty keys (`=value`) are rejected.
+- `--builtin-tool` is appended to the agent type's preset `builtinTools` (defaults are kept, not replaced) and deduped, preserving first-occurrence order. Example: `agbox paseo --builtin-tool git` yields `claude, codex, npm, uv, apt, opencode, git`. For custom `agbox agent --command`, only the user-supplied tools are used (no defaults).
 
 ### Command Surface
 
