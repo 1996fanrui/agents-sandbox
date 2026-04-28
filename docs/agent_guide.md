@@ -32,8 +32,8 @@ agbox codex
 # Use a specific project directory
 agbox claude --workspace /path/to/project
 
-# Override builtin tools (each sandbox image defines a default set)
-agbox codex --builtin-tool claude --builtin-tool git
+# Add extra builtin tools (appended to the agent type's defaults, deduped)
+agbox codex --builtin-tool claude --builtin-tool opencode
 ```
 
 ## OpenClaw

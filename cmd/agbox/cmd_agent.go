@@ -28,9 +28,8 @@ type agentSessionFlagVars struct {
 	copies       []string
 	labels       []string
 	// Track which flags were explicitly set by the user:
-	modeOverridden         bool
-	workspaceOverridden    bool
-	builtinToolsOverridden bool
+	modeOverridden      bool
+	workspaceOverridden bool
 }
 
 // registerAgentSessionFlags registers all agent session flags on a cobra command.
@@ -38,7 +37,7 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 	cmd.Flags().StringVar(&v.rawCommand, "command", "", "Override the agent's default command.\n  interactive mode: replaces the TTY command launched via docker exec.\n  long-running mode: replaces the container primary command (under tini).\nValue is split by whitespace via strings.Fields (no shell quoting).")
 	cmd.Flags().StringVar(&v.mode, "mode", "", "Session mode: interactive or long-running (default depends on agent type)")
 	cmd.Flags().StringVar(&v.workspace, "workspace", "", "Directory to copy into the sandbox as workspace")
-	cmd.Flags().StringArrayVar(&v.builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable, overrides defaults)")
+	cmd.Flags().StringArrayVar(&v.builtinTools, "builtin-tool", nil, "Builtin tool to install (repeatable; appended to the agent type's defaults, deduped preserving first-occurrence order)")
 	cmd.Flags().StringArrayVar(&v.envs, "env", nil, "Environment variable in KEY=VAL form (repeatable)")
 	cmd.Flags().StringVar(&v.cpuLimit, "cpu-limit", "", "CPU limit (Docker --cpus format, e.g. 2, 0.5)")
 	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
@@ -65,7 +64,6 @@ func buildAgentSessionRunE(agentType string, v *agentSessionFlagVars) func(*cobr
 	return func(cmd *cobra.Command, _ []string) error {
 		v.modeOverridden = cmd.Flags().Changed("mode")
 		v.workspaceOverridden = cmd.Flags().Changed("workspace")
-		v.builtinToolsOverridden = cmd.Flags().Changed("builtin-tool")
 		parsed, err := resolveAgentSessionArgs(v, agentType)
 		if err != nil {
 			return err
@@ -154,18 +152,19 @@ func resolveAgentSessionArgs(
 		isRegistered = true
 		parsed.agentType = agentType
 		parsed.command = typeDef.command
-		if v.builtinToolsOverridden {
-			parsed.builtinTools = v.builtinTools
-		} else {
-			parsed.builtinTools = append([]string(nil), typeDef.builtinTools...)
-		}
+		// --builtin-tool appends to the agent type's defaults; the daemon
+		// already dedupes in mergeCreateSpecs (see commit 9ceac68), but we
+		// dedupe at the CLI as well so that observable behavior (e.g. logs,
+		// echoed CreateSpec) matches what the daemon will actually act on.
+		parsed.builtinTools = dedupePreserveOrder(append(append([]string(nil), typeDef.builtinTools...), v.builtinTools...))
 	} else if v.rawCommand != "" {
 		// Custom command: split the string into argv.
 		parsed.command = strings.Fields(v.rawCommand)
 		if len(parsed.command) == 0 {
 			return agentSessionArgs{}, usageErrorf("--command must not be empty")
 		}
-		parsed.builtinTools = v.builtinTools
+		// Custom command has no defaults, but still dedupe user input for consistency.
+		parsed.builtinTools = dedupePreserveOrder(v.builtinTools)
 	} else {
 		return agentSessionArgs{}, usageErrorf("agbox agent requires --command; for pre-registered agents use agbox claude / agbox codex / agbox openclaw / agbox paseo")
 	}
@@ -421,6 +420,25 @@ func parsePortNumber(raw, role, full string) (int, error) {
 		return 0, usageErrorf("%s %q: %d is out of range (1..65535)", role, full, n)
 	}
 	return n, nil
+}
+
+// dedupePreserveOrder returns a slice with duplicates removed, preserving the
+// first-occurrence order. Empty input returns nil so the resulting CreateSpec
+// field stays nil (rather than becoming an empty non-nil slice).
+func dedupePreserveOrder(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // parseCopyFlag parses a --copy value of the form "host:container" into a
