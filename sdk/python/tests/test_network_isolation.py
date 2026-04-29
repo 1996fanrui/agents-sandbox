@@ -119,6 +119,52 @@ def _cleanup_companion(sandbox_id: str, companion_name: str) -> None:
     )
 
 
+def _start_port_mapped_container(container_name: str) -> int:
+    """Start an nginx container with a randomly assigned host port mapping.
+
+    Returns the host port that Docker mapped to nginx port 80.  The caller is
+    responsible for removing the container via _stop_port_mapped_container.
+    """
+    subprocess.run(
+        ["docker", "rm", "--force", container_name],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["docker", "run", "-d", "--name", container_name, "-p", "0:80", "nginx:alpine"],
+        check=True, stdout=subprocess.DEVNULL,
+    )
+    result = subprocess.run(
+        ["docker", "port", container_name, "80"],
+        capture_output=True, text=True, check=True,
+    )
+    # Output is like "0.0.0.0:32768\n" or "[::]:32768\n"; take the last token.
+    host_port = int(result.stdout.strip().rsplit(":", 1)[-1])
+    return host_port
+
+
+def _stop_port_mapped_container(container_name: str) -> None:
+    subprocess.run(
+        ["docker", "rm", "--force", container_name],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _get_default_docker_bridge_ip() -> str:
+    """Return the gateway IP of Docker's default bridge network (typically 172.17.0.1)."""
+    result = subprocess.run(
+        [
+            "docker", "network", "inspect", "bridge",
+            "--format", "{{range .IPAM.Config}}{{.Gateway}}{{end}}",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    gw = result.stdout.strip()
+    return gw if gw else "172.17.0.1"
+
+
+DNAT_CONTAINER_NAME = "agbox-nettest-dnat"
+
+
 def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[3]
     if shutil.which("go") is None:
@@ -137,9 +183,12 @@ def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> Non
     _ensure_runtime_image(repo_root)
     _cleanup_runtime_resources(SANDBOX_ID)
     _cleanup_companion(SANDBOX_ID, COMPANION_NAME)
+    _stop_port_mapped_container(DNAT_CONTAINER_NAME)
 
-    # Start a TCP listener on the host
+    # Start a TCP listener on the host (tests INPUT-chain blocking of native host ports).
     srv_socket, listener_port, stop_event = _start_tcp_listener()
+    # Start an nginx container with a Docker port mapping (tests DNAT/FORWARD-chain blocking).
+    dnat_port = _start_port_mapped_container(DNAT_CONTAINER_NAME)
 
     sandbox_id = ""
     try:
@@ -150,6 +199,7 @@ def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> Non
                         socket_path=socket_path,
                         workspace=workspace,
                         listener_port=listener_port,
+                        dnat_port=dnat_port,
                     )
                 )
             finally:
@@ -158,6 +208,7 @@ def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> Non
     finally:
         stop_event.set()
         srv_socket.close()
+        _stop_port_mapped_container(DNAT_CONTAINER_NAME)
         shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
@@ -166,6 +217,7 @@ async def _run_network_isolation_test(
     socket_path: Path,
     workspace: Path,
     listener_port: int,
+    dnat_port: int,
 ) -> str:
     client = await _wait_for_client(socket_path)
     async with client:
@@ -209,6 +261,26 @@ async def _run_network_isolation_test(
             )
             assert exec_handle.exit_code != 0, (
                 f"SECURITY VIOLATION: primary container reached host via interface IP {host_ip}:{listener_port}"
+            )
+
+        # --- Negative tests: primary container must NOT reach Docker port-mapped (DNAT) services ---
+        # Docker port mappings use DNAT in PREROUTING/nat before reaching DOCKER-USER/FORWARD.
+        # Accessing gateway_ip:<dnat_port> hits the INPUT chain (via userland-proxy).
+        # Accessing the default Docker bridge gateway IP:<dnat_port> triggers DNAT in PREROUTING
+        # and then FORWARD through DOCKER-USER.  Both paths must be blocked.
+        default_bridge_ip = _get_default_docker_bridge_ip()
+        for dnat_target_ip in [gateway_ip, default_bridge_ip]:
+            exec_handle = await client.run(
+                sid,
+                (
+                    "curl", "--connect-timeout", "3", "-s", "-o", "/dev/null",
+                    f"http://{dnat_target_ip}:{dnat_port}",
+                ),
+                cwd="/workspace",
+            )
+            assert exec_handle.exit_code != 0, (
+                f"SECURITY VIOLATION: primary container reached Docker-mapped service via "
+                f"{dnat_target_ip}:{dnat_port} (DNAT path not blocked)"
             )
 
         # --- Positive tests: primary container CAN reach internet ---
@@ -257,6 +329,21 @@ async def _run_network_isolation_test(
             )
             assert result.returncode != 0, (
                 f"SECURITY VIOLATION: companion container reached host via interface IP {host_ip}:{listener_port}"
+            )
+
+        # --- Negative tests: companion container must NOT reach Docker port-mapped (DNAT) services ---
+        for dnat_target_ip in [gateway_ip, default_bridge_ip]:
+            result = subprocess.run(
+                [
+                    "docker", "exec", companion_container,
+                    "wget", "-q", "-O", "/dev/null", "--timeout=3",
+                    f"http://{dnat_target_ip}:{dnat_port}",
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            assert result.returncode != 0, (
+                f"SECURITY VIOLATION: companion container reached Docker-mapped service via "
+                f"{dnat_target_ip}:{dnat_port} (DNAT path not blocked)"
             )
 
         # --- Positive test: companion container CAN reach internet ---
