@@ -19,13 +19,12 @@ func TestBuildHostIsolationExprs(t *testing.T) {
 	}
 	exprs := buildHostIsolationExprs("br-abc123def456", subnet)
 
-	// Expected structure: Meta, Cmp, Payload, Bitwise, Cmp, Fib, Cmp, Verdict = 8 expressions.
-	if len(exprs) != 8 {
-		t.Fatalf("expected 8 expressions, got %d", len(exprs))
+	// Expected structure: common bridge/subnet prefix, ct state NEW, Fib, Cmp, Verdict.
+	if len(exprs) != 11 {
+		t.Fatalf("expected 11 expressions, got %d", len(exprs))
 	}
 
-	// Verify expression types in order.
-	typeChecks := []string{"Meta", "Cmp", "Payload", "Bitwise", "Cmp", "Fib", "Cmp", "Verdict"}
+	typeChecks := []string{"Meta", "Cmp", "Payload", "Bitwise", "Cmp", "Ct", "Bitwise", "Cmp", "Fib", "Cmp", "Verdict"}
 	for i, name := range typeChecks {
 		var ok bool
 		switch name {
@@ -39,6 +38,8 @@ func TestBuildHostIsolationExprs(t *testing.T) {
 			_, ok = exprs[i].(*expr.Bitwise)
 		case "Fib":
 			_, ok = exprs[i].(*expr.Fib)
+		case "Ct":
+			_, ok = exprs[i].(*expr.Ct)
 		case "Verdict":
 			_, ok = exprs[i].(*expr.Verdict)
 		}
@@ -66,15 +67,17 @@ func TestBuildHostIsolationExprs(t *testing.T) {
 		t.Fatalf("network address mismatch: got %v, want [172 18 0 0]", cmpNet.Data)
 	}
 
+	assertConntrackNewMatch(t, exprs[5:8])
+
 	// Verify fib RTN_LOCAL comparison uses native endian.
-	cmpFib := exprs[6].(*expr.Cmp)
+	cmpFib := exprs[9].(*expr.Cmp)
 	expectedRTNLocal := binaryutil.NativeEndian.PutUint32(rtnLocal)
 	if !bytes.Equal(cmpFib.Data, expectedRTNLocal) {
 		t.Fatalf("RTN_LOCAL mismatch: got %v, want %v", cmpFib.Data, expectedRTNLocal)
 	}
 
 	// Verify DROP verdict.
-	verdict := exprs[7].(*expr.Verdict)
+	verdict := exprs[10].(*expr.Verdict)
 	if verdict.Kind != expr.VerdictDrop {
 		t.Fatalf("expected VerdictDrop, got %v", verdict.Kind)
 	}
@@ -87,39 +90,41 @@ func TestBuildDNATIsolationExprs(t *testing.T) {
 	}
 	exprs := buildDNATIsolationExprs("br-abc123def456", subnet)
 
-	// Expected structure: common bridge/subnet prefix, Ct, Bitwise, Cmp, Verdict.
-	if len(exprs) != 9 {
-		t.Fatalf("expected 9 expressions, got %d", len(exprs))
+	// Expected structure: common bridge/subnet prefix, ct state NEW, Ct status DNAT, Verdict.
+	if len(exprs) != 12 {
+		t.Fatalf("expected 12 expressions, got %d", len(exprs))
 	}
 
-	ct, ok := exprs[5].(*expr.Ct)
+	assertConntrackNewMatch(t, exprs[5:8])
+
+	ct, ok := exprs[8].(*expr.Ct)
 	if !ok {
-		t.Fatalf("exprs[5]: expected Ct, got %T", exprs[5])
+		t.Fatalf("exprs[8]: expected Ct, got %T", exprs[8])
 	}
 	if ct.Key != expr.CtKeySTATUS || ct.Register != 1 {
 		t.Fatalf("unexpected Ct expression: key=%v register=%d", ct.Key, ct.Register)
 	}
 
-	bitwise, ok := exprs[6].(*expr.Bitwise)
+	bitwise, ok := exprs[9].(*expr.Bitwise)
 	if !ok {
-		t.Fatalf("exprs[6]: expected Bitwise, got %T", exprs[6])
+		t.Fatalf("exprs[9]: expected Bitwise, got %T", exprs[9])
 	}
 	expectedDNATMask := binaryutil.NativeEndian.PutUint32(ipsDstNAT)
 	if !bytes.Equal(bitwise.Mask, expectedDNATMask) {
 		t.Fatalf("DNAT mask mismatch: got %v, want %v", bitwise.Mask, expectedDNATMask)
 	}
 
-	cmpDNAT, ok := exprs[7].(*expr.Cmp)
+	cmpDNAT, ok := exprs[10].(*expr.Cmp)
 	if !ok {
-		t.Fatalf("exprs[7]: expected Cmp, got %T", exprs[7])
+		t.Fatalf("exprs[10]: expected Cmp, got %T", exprs[10])
 	}
 	if cmpDNAT.Op != expr.CmpOpNeq || !bytes.Equal(cmpDNAT.Data, binaryutil.NativeEndian.PutUint32(0)) {
 		t.Fatalf("unexpected DNAT comparison: op=%v data=%v", cmpDNAT.Op, cmpDNAT.Data)
 	}
 
-	verdict, ok := exprs[8].(*expr.Verdict)
+	verdict, ok := exprs[11].(*expr.Verdict)
 	if !ok {
-		t.Fatalf("exprs[8]: expected Verdict, got %T", exprs[8])
+		t.Fatalf("exprs[11]: expected Verdict, got %T", exprs[11])
 	}
 	if verdict.Kind != expr.VerdictDrop {
 		t.Fatalf("expected VerdictDrop, got %v", verdict.Kind)
@@ -133,8 +138,8 @@ func TestBuildHostInputIsolationExprs(t *testing.T) {
 	}
 	exprs := buildHostInputIsolationExprs("br-abc123def456", subnet)
 
-	if len(exprs) != 6 {
-		t.Fatalf("expected 6 expressions, got %d", len(exprs))
+	if len(exprs) != 9 {
+		t.Fatalf("expected 9 expressions, got %d", len(exprs))
 	}
 
 	cmpIface := exprs[1].(*expr.Cmp)
@@ -148,12 +153,49 @@ func TestBuildHostInputIsolationExprs(t *testing.T) {
 		t.Fatalf("network address mismatch: got %v, want [172 18 0 0]", cmpNet.Data)
 	}
 
-	verdict, ok := exprs[5].(*expr.Verdict)
+	assertConntrackNewMatch(t, exprs[5:8])
+
+	verdict, ok := exprs[8].(*expr.Verdict)
 	if !ok {
-		t.Fatalf("exprs[5]: expected Verdict, got %T", exprs[5])
+		t.Fatalf("exprs[8]: expected Verdict, got %T", exprs[8])
 	}
 	if verdict.Kind != expr.VerdictDrop {
 		t.Fatalf("expected VerdictDrop, got %v", verdict.Kind)
+	}
+}
+
+func assertConntrackNewMatch(t *testing.T, exprs []expr.Any) {
+	t.Helper()
+	if len(exprs) != 3 {
+		t.Fatalf("expected 3 conntrack NEW expressions, got %d", len(exprs))
+	}
+	ct, ok := exprs[0].(*expr.Ct)
+	if !ok {
+		t.Fatalf("conntrack expr[0]: expected Ct, got %T", exprs[0])
+	}
+	if ct.Key != expr.CtKeySTATE || ct.Register != 1 {
+		t.Fatalf("unexpected conntrack state expression: key=%v register=%d", ct.Key, ct.Register)
+	}
+	bitwise, ok := exprs[1].(*expr.Bitwise)
+	if !ok {
+		t.Fatalf("conntrack expr[1]: expected Bitwise, got %T", exprs[1])
+	}
+	expectedNewMask := binaryutil.NativeEndian.PutUint32(expr.CtStateBitNEW)
+	if bitwise.SourceRegister != 1 ||
+		bitwise.DestRegister != 1 ||
+		bitwise.Len != 4 ||
+		!bytes.Equal(bitwise.Mask, expectedNewMask) ||
+		!bytes.Equal(bitwise.Xor, []byte{0, 0, 0, 0}) {
+		t.Fatalf("unexpected conntrack NEW bitwise expression: %#v", bitwise)
+	}
+	cmp, ok := exprs[2].(*expr.Cmp)
+	if !ok {
+		t.Fatalf("conntrack expr[2]: expected Cmp, got %T", exprs[2])
+	}
+	if cmp.Op != expr.CmpOpNeq ||
+		cmp.Register != 1 ||
+		!bytes.Equal(cmp.Data, binaryutil.NativeEndian.PutUint32(0)) {
+		t.Fatalf("unexpected conntrack NEW comparison: %#v", cmp)
 	}
 }
 
@@ -208,6 +250,99 @@ func TestMatchesHostIsolationRule(t *testing.T) {
 	}
 	if matchesHostIsolationRule(wrongTailRule, bridge, subnet) {
 		t.Fatal("rule with wrong tail expression should not match")
+	}
+}
+
+func TestHostIsolationCurrentRulesMatchConntrackNew(t *testing.T) {
+	_, subnet, _ := net.ParseCIDR("172.18.0.0/16")
+	_, otherSubnet, _ := net.ParseCIDR("172.19.0.0/16")
+	bridge := "br-abc123def456"
+
+	for _, exprs := range expectedHostIsolationRules(bridge, subnet) {
+		assertConntrackNewMatch(t, exprs[5:8])
+		rule := &nftables.Rule{Exprs: exprs}
+		if !matchesCurrentHostIsolationRule(rule, bridge, subnet) {
+			t.Fatalf("current rule did not match its bridge/subnet: %#v", exprs)
+		}
+		if !matchesHostIsolationRule(rule, bridge, subnet) {
+			t.Fatalf("current rule did not match host isolation matcher: %#v", exprs)
+		}
+		if matchesCurrentHostIsolationRule(rule, "br-other", subnet) {
+			t.Fatalf("current rule matched a different bridge: %#v", exprs)
+		}
+		if matchesCurrentHostIsolationRule(rule, bridge, otherSubnet) {
+			t.Fatalf("current rule matched a different subnet: %#v", exprs)
+		}
+	}
+}
+
+func TestHostIsolationApplyAndReapplyAreIdempotent(t *testing.T) {
+	_, subnet, _ := net.ParseCIDR("172.18.0.0/16")
+	_, otherSubnet, _ := net.ParseCIDR("172.19.0.0/16")
+	bridge := "br-abc123def456"
+
+	current := expectedHostIsolationRules(bridge, subnet)
+	unrelatedCurrent := &nftables.Rule{Exprs: buildDNATIsolationExprs(bridge, otherSubnet)}
+	existing := []*nftables.Rule{
+		{Exprs: current[0]},
+		unrelatedCurrent,
+	}
+
+	missing := selectMissingIsolationRules(existing, current)
+	if got, want := len(missing), len(current)-1; got != want {
+		t.Fatalf("expected %d current inserts, got %d", want, got)
+	}
+	for _, inserted := range missing {
+		if !matchesCurrentHostIsolationRule(&nftables.Rule{Exprs: inserted}, bridge, subnet) {
+			t.Fatalf("inserted non-current rule: %#v", inserted)
+		}
+	}
+
+	reapplied := selectMissingIsolationRules([]*nftables.Rule{
+		{Exprs: current[0]},
+		{Exprs: current[1]},
+		{Exprs: current[2]},
+		unrelatedCurrent,
+	}, current)
+	if len(reapplied) != 0 {
+		t.Fatalf("reapply should be idempotent, got inserts=%d", len(reapplied))
+	}
+}
+
+func TestHostIsolationRemoveDeletesCurrentRules(t *testing.T) {
+	_, subnet, _ := net.ParseCIDR("172.18.0.0/16")
+	_, otherSubnet, _ := net.ParseCIDR("172.19.0.0/16")
+	bridge := "br-abc123def456"
+
+	current := expectedHostIsolationRules(bridge, subnet)
+	sameBridgeRules := []*nftables.Rule{
+		{Exprs: current[0]},
+		{Exprs: current[1]},
+		{Exprs: current[2]},
+	}
+	unrelatedRules := []*nftables.Rule{
+		{Exprs: buildHostIsolationExprs("br-other", subnet)},
+		{Exprs: buildDNATIsolationExprs("br-other", subnet)},
+		{Exprs: buildHostInputIsolationExprs(bridge, otherSubnet)},
+	}
+
+	selected := selectIsolationRulesToRemove(append(sameBridgeRules, unrelatedRules...), current)
+	if got, want := len(selected), len(sameBridgeRules); got != want {
+		t.Fatalf("expected %d selected rules, got %d", want, got)
+	}
+	selectedSet := map[*nftables.Rule]bool{}
+	for _, rule := range selected {
+		selectedSet[rule] = true
+	}
+	for _, rule := range sameBridgeRules {
+		if !selectedSet[rule] {
+			t.Fatalf("same bridge/subnet rule was not selected: %#v", rule.Exprs)
+		}
+	}
+	for _, rule := range unrelatedRules {
+		if selectedSet[rule] {
+			t.Fatalf("unrelated bridge/subnet rule was selected: %#v", rule.Exprs)
+		}
 	}
 }
 

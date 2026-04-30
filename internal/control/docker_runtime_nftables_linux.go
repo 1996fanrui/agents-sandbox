@@ -35,12 +35,12 @@ const rtnLocal = 2
 const ipsDstNAT = 1 << 5 // 32
 
 // buildHostIsolationExprs constructs the nftables expression list that drops
-// all traffic entering via `bridge` from `subnet` destined for any host-local
+// new traffic entering via `bridge` from `subnet` destined for any host-local
 // address. This is equivalent to:
 //
-//	iptables -I DOCKER-USER -i <bridge> -s <subnet> -m addrtype --dst-type LOCAL -j DROP
+//	iptables -I DOCKER-USER -i <bridge> -s <subnet> -m conntrack --ctstate NEW -m addrtype --dst-type LOCAL -j DROP
 func buildHostIsolationExprs(bridge string, subnet *net.IPNet) []expr.Any {
-	return buildBridgeSubnetMatchExprs(bridge, subnet, []expr.Any{
+	return buildBridgeSubnetMatchExprs(bridge, subnet, append(buildConntrackNewMatchExprs(), []expr.Any{
 		// Check if destination address type is LOCAL (fib lookup).
 		&expr.Fib{
 			Register:       1,
@@ -54,19 +54,19 @@ func buildHostIsolationExprs(bridge string, subnet *net.IPNet) []expr.Any {
 		},
 		// DROP verdict.
 		&expr.Verdict{Kind: expr.VerdictDrop},
-	}...)
+	}...)...)
 }
 
 // buildDNATIsolationExprs constructs the nftables expression list that drops
-// all DNAT'd traffic entering via `bridge` from `subnet`. Docker port mappings
+// new DNAT'd traffic entering via `bridge` from `subnet`. Docker port mappings
 // (-p host:container) rewrite the destination in PREROUTING/nat before packets
 // reach DOCKER-USER in filter/FORWARD, so the dst-type LOCAL check in
 // buildHostIsolationExprs never matches them. This rule catches that case by
 // matching conntrack status IPS_DST_NAT. Equivalent to:
 //
-//	iptables -I DOCKER-USER -i <bridge> -s <subnet> -m conntrack --ctstate DNAT -j DROP
+//	iptables -I DOCKER-USER -i <bridge> -s <subnet> -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j DROP
 func buildDNATIsolationExprs(bridge string, subnet *net.IPNet) []expr.Any {
-	return buildBridgeSubnetMatchExprs(bridge, subnet, []expr.Any{
+	return buildBridgeSubnetMatchExprs(bridge, subnet, append(buildConntrackNewMatchExprs(), []expr.Any{
 		// Load conntrack status into register 1.
 		&expr.Ct{
 			Register: 1,
@@ -88,15 +88,36 @@ func buildDNATIsolationExprs(bridge string, subnet *net.IPNet) []expr.Any {
 		},
 		// DROP verdict.
 		&expr.Verdict{Kind: expr.VerdictDrop},
-	}...)
+	}...)...)
 }
 
 // buildHostInputIsolationExprs constructs the nftables expression list that
-// drops packets from the sandbox subnet entering the host INPUT path via the
-// sandbox bridge. This blocks direct access to the bridge gateway address and
-// Docker userland-proxy listeners bound on host addresses.
+// drops new packets from the sandbox subnet entering the host INPUT path via
+// the sandbox bridge. This blocks direct access to the bridge gateway address
+// and Docker userland-proxy listeners bound on host addresses.
 func buildHostInputIsolationExprs(bridge string, subnet *net.IPNet) []expr.Any {
-	return buildBridgeSubnetMatchExprs(bridge, subnet, &expr.Verdict{Kind: expr.VerdictDrop})
+	return buildBridgeSubnetMatchExprs(bridge, subnet, append(buildConntrackNewMatchExprs(), &expr.Verdict{Kind: expr.VerdictDrop})...)
+}
+
+func buildConntrackNewMatchExprs() []expr.Any {
+	return []expr.Any{
+		&expr.Ct{
+			Register: 1,
+			Key:      expr.CtKeySTATE,
+		},
+		&expr.Bitwise{
+			SourceRegister: 1,
+			DestRegister:   1,
+			Len:            4,
+			Mask:           binaryutil.NativeEndian.PutUint32(expr.CtStateBitNEW),
+			Xor:            []byte{0, 0, 0, 0},
+		},
+		&expr.Cmp{
+			Op:       expr.CmpOpNeq,
+			Register: 1,
+			Data:     binaryutil.NativeEndian.PutUint32(0),
+		},
+	}
 }
 
 // buildBridgeSubnetMatchExprs constructs the common prefix expressions that
@@ -186,15 +207,19 @@ func expectedHostIsolationRules(bridge string, subnet *net.IPNet) [][]expr.Any {
 	)
 }
 
-// matchesHostIsolationRule checks whether an existing nftables rule matches
-// any host isolation rule (host-local or DNAT) for the given bridge and subnet.
-func matchesHostIsolationRule(rule *nftables.Rule, bridge string, subnet *net.IPNet) bool {
+func matchesCurrentHostIsolationRule(rule *nftables.Rule, bridge string, subnet *net.IPNet) bool {
 	for _, expected := range expectedHostIsolationRules(bridge, subnet) {
 		if matchesIsolationRule(rule, expected) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesHostIsolationRule checks whether an existing nftables rule matches
+// any host isolation rule for the given bridge and subnet.
+func matchesHostIsolationRule(rule *nftables.Rule, bridge string, subnet *net.IPNet) bool {
+	return matchesCurrentHostIsolationRule(rule, bridge, subnet)
 }
 
 // matchesIsolationRule checks whether a rule matches the expression shape used
@@ -307,7 +332,12 @@ func (r *realNftablesConnector) applyHostIsolation(bridge string, subnet *net.IP
 
 	inserted := 0
 
-	n, err := insertMissingIsolationRules(conn, dockerUserTable, dockerUserChain, expectedDockerUserIsolationRules(bridge, subnet))
+	n, err := insertMissingIsolationRules(
+		conn,
+		dockerUserTable,
+		dockerUserChain,
+		expectedDockerUserIsolationRules(bridge, subnet),
+	)
 	if err != nil {
 		return err
 	}
@@ -353,13 +383,23 @@ func (r *realNftablesConnector) applyInputIsolation(
 ) (int, error) {
 	inputChain, inputTable, err := findInputChain(conn)
 	if err == nil {
-		return insertMissingIsolationRules(conn, inputTable, inputChain, expectedInputIsolationRules(bridge, subnet))
+		return insertMissingIsolationRules(
+			conn,
+			inputTable,
+			inputChain,
+			expectedInputIsolationRules(bridge, subnet),
+		)
 	}
 
 	// Standard INPUT chain absent (native nftables mode). Find or create AGBOX-INPUT.
 	agboxChain, agboxTable, err := findFilterChain(conn, agboxInputChainName)
 	if err == nil {
-		return insertMissingIsolationRules(conn, agboxTable, agboxChain, expectedInputIsolationRules(bridge, subnet))
+		return insertMissingIsolationRules(
+			conn,
+			agboxTable,
+			agboxChain,
+			expectedInputIsolationRules(bridge, subnet),
+		)
 	}
 
 	// AGBOX-INPUT doesn't exist yet. Create it and add rules in the same
@@ -382,38 +422,46 @@ func (r *realNftablesConnector) applyInputIsolation(
 	return len(expected), nil
 }
 
+func selectMissingIsolationRules(
+	existingRules []*nftables.Rule,
+	currentRules [][]expr.Any,
+) [][]expr.Any {
+	var missing [][]expr.Any
+	for _, current := range currentRules {
+		exists := false
+		for _, rule := range existingRules {
+			if matchesIsolationRule(rule, current) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			missing = append(missing, current)
+		}
+	}
+	return missing
+}
+
 func insertMissingIsolationRules(
 	conn *nftables.Conn,
 	table *nftables.Table,
 	chain *nftables.Chain,
-	expectedRules [][]expr.Any,
+	currentRules [][]expr.Any,
 ) (int, error) {
 	rules, err := conn.GetRules(table, chain)
 	if err != nil {
 		return 0, fmt.Errorf("get nftables rules from %s: %w", chain.Name, err)
 	}
 
-	inserted := 0
-	for _, expected := range expectedRules {
-		exists := false
-		for _, rule := range rules {
-			if matchesIsolationRule(rule, expected) {
-				exists = true
-				break
-			}
-		}
-		if exists {
-			continue
-		}
-
+	missing := selectMissingIsolationRules(rules, currentRules)
+	for _, exprs := range missing {
 		conn.InsertRule(&nftables.Rule{
 			Table: table,
 			Chain: chain,
-			Exprs: expected,
+			Exprs: exprs,
 		})
-		inserted++
 	}
-	return inserted, nil
+	return len(missing), nil
 }
 
 func (r *realNftablesConnector) removeHostIsolation(bridge string, subnet *net.IPNet) {
@@ -428,7 +476,12 @@ func (r *realNftablesConnector) removeHostIsolation(bridge string, subnet *net.I
 	removed := 0
 	dockerUserChain, dockerUserTable, err := findDockerUserChain(conn)
 	if err == nil {
-		n, err := removeIsolationRulesFromChain(conn, dockerUserTable, dockerUserChain, expectedDockerUserIsolationRules(bridge, subnet))
+		n, err := removeIsolationRulesFromChain(
+			conn,
+			dockerUserTable,
+			dockerUserChain,
+			expectedDockerUserIsolationRules(bridge, subnet),
+		)
 		if err != nil {
 			r.logger.Warn("failed to delete nftables host isolation rule",
 				slog.String("bridge", bridge),
@@ -451,7 +504,12 @@ func (r *realNftablesConnector) removeHostIsolation(bridge string, subnet *net.I
 		if lookupErr != nil {
 			continue
 		}
-		n, removeErr := removeIsolationRulesFromChain(conn, table, chain, expectedInputIsolationRules(bridge, subnet))
+		n, removeErr := removeIsolationRulesFromChain(
+			conn,
+			table,
+			chain,
+			expectedInputIsolationRules(bridge, subnet),
+		)
 		if removeErr != nil {
 			r.logger.Warn("failed to delete nftables host input isolation rule",
 				slog.String("bridge", bridge),
@@ -496,19 +554,26 @@ func removeIsolationRulesFromChain(
 	}
 
 	removed := 0
-	for _, rule := range rules {
-		for _, expected := range expectedRules {
-			if !matchesIsolationRule(rule, expected) {
-				continue
-			}
-			if err := conn.DelRule(rule); err != nil {
-				return removed, err
-			}
-			removed++
-			break
+	for _, rule := range selectIsolationRulesToRemove(rules, expectedRules) {
+		if err := conn.DelRule(rule); err != nil {
+			return removed, err
 		}
+		removed++
 	}
 	return removed, nil
+}
+
+func selectIsolationRulesToRemove(rules []*nftables.Rule, expectedRules [][]expr.Any) []*nftables.Rule {
+	var selected []*nftables.Rule
+	for _, rule := range rules {
+		for _, expected := range expectedRules {
+			if matchesIsolationRule(rule, expected) {
+				selected = append(selected, rule)
+				break
+			}
+		}
+	}
+	return selected
 }
 
 // newNftablesConnector creates a real nftables connector for Linux.

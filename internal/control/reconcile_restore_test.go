@@ -107,6 +107,49 @@ func TestRestoreRecovery_DoesNotFailOnExitedPrimary(t *testing.T) {
 	}
 }
 
+func TestRestorePersistedSandboxesReappliesNetworkIsolation(t *testing.T) {
+	dbPath := t.TempDir() + "/ids.db"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+	}, dbPath)
+	_, err := first.client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId:  "ready-reapply",
+		CreateSpec: &agboxv1.CreateSpec{Image: "test:latest"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	waitForSandboxState(t, first.client, "ready-reapply", agboxv1.SandboxState_SANDBOX_STATE_READY)
+	first.close()
+
+	backend := &fakeRuntimeBackend{
+		inspectResults: map[string]ContainerInspectResult{
+			dockerPrimaryContainerName("ready-reapply"): {Exists: true, Running: true},
+		},
+	}
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  backend,
+	}, dbPath)
+	defer second.close()
+
+	resp, err := second.client.GetSandbox(context.Background(), &agboxv1.GetSandboxRequest{SandboxId: "ready-reapply"})
+	if err != nil {
+		t.Fatalf("GetSandbox failed: %v", err)
+	}
+	if resp.GetSandbox().GetState() != agboxv1.SandboxState_SANDBOX_STATE_READY {
+		t.Fatalf("expected READY after restore, got %s", resp.GetSandbox().GetState())
+	}
+	if got, want := backend.reapplyNetworkCalls, []string{"ready-reapply"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected ReapplyNetworkIsolation calls %v, got %v", want, got)
+	}
+}
+
 // ---- AT-MQ1S: FAILED sandbox keeps runtimeState for DeleteSandbox ----
 
 func TestRestoreRecovery_FailedSandboxKeepsRuntimeStateForDelete(t *testing.T) {
