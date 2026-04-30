@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
 import tempfile
 import threading
+import time
+import urllib.request
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -16,6 +20,7 @@ from agents_sandbox import (
     AgentsSandboxClient,
     CompanionContainerSpec,
     MountSpec,
+    PortMapping,
 )
 
 from tests.test_real_runtime import (
@@ -33,7 +38,7 @@ from tests.smoke_support import daemon_socket_path
 
 COMPANION_NAME = "netcheck"
 COMPANION_IMAGE = "nginx:alpine"
-SANDBOX_ID = "net-isolation"
+PUBLISHED_PORT_RESPONSE = "agents-sandbox-published-port-ok"
 
 
 def _companion_container_name(sandbox_id: str, companion_name: str) -> str:
@@ -98,7 +103,6 @@ def _get_host_interface_ips() -> list[str]:
 
 def _wait_for_companion_running(container_name: str, timeout: float = 60.0) -> None:
     """Wait until a companion container is running."""
-    import time
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = subprocess.run(
@@ -108,7 +112,9 @@ def _wait_for_companion_running(container_name: str, timeout: float = 60.0) -> N
         if result.returncode == 0 and result.stdout.strip() == "true":
             return
         time.sleep(0.5)
-    raise AssertionError(f"companion container {container_name} did not become running within {timeout}s")
+    raise AssertionError(
+        f"companion container {container_name} did not become running within {timeout}s"
+    )
 
 
 def _cleanup_companion(sandbox_id: str, companion_name: str) -> None:
@@ -162,11 +168,17 @@ def _get_default_docker_bridge_ip() -> str:
     return gw if gw else "172.17.0.1"
 
 
-DNAT_CONTAINER_NAME = "agbox-nettest-dnat"
+def _reserve_unused_host_port() -> tuple[socket.socket, int]:
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        srv.bind(("127.0.0.1", 0))
+        return srv, srv.getsockname()[1]
+    except Exception:
+        srv.close()
+        raise
 
 
-def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[3]
+def _require_network_integration(repo_root: Path) -> None:
     if shutil.which("go") is None:
         pytest.skip("go is required")
     if shutil.which("docker") is None:
@@ -175,185 +187,287 @@ def test_sandbox_cannot_reach_host_but_can_reach_internet(tmp_path: Path) -> Non
         if os.environ.get("AGBOX_REQUIRE_INTEGRATION"):
             pytest.fail("CAP_NET_ADMIN is required for integration tests but sudo -n setcap is not available")
         pytest.skip("CAP_NET_ADMIN required; grant passwordless sudo or run as root")
+    _ensure_runtime_image(repo_root)
+
+
+NetworkScenario = Callable[[Path, Path, str], Awaitable[str]]
+
+
+def _run_network_scenario(tmp_path: Path, sandbox_id: str, scenario: NetworkScenario) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    _require_network_integration(repo_root)
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     runtime_dir = Path(tempfile.mkdtemp(prefix="agbox-"))
     socket_path = daemon_socket_path(runtime_dir)
-    _ensure_runtime_image(repo_root)
-    _cleanup_runtime_resources(SANDBOX_ID)
-    _cleanup_companion(SANDBOX_ID, COMPANION_NAME)
-    _stop_port_mapped_container(DNAT_CONTAINER_NAME)
+    _cleanup_runtime_resources(sandbox_id)
+    _cleanup_companion(sandbox_id, COMPANION_NAME)
 
-    # Start a TCP listener on the host (tests INPUT-chain blocking of native host ports).
-    srv_socket, listener_port, stop_event = _start_tcp_listener()
-    # Start an nginx container with a Docker port mapping (tests DNAT/FORWARD-chain blocking).
-    dnat_port = _start_port_mapped_container(DNAT_CONTAINER_NAME)
-
-    sandbox_id = ""
+    created_sandbox_id = ""
     try:
         with _running_test_daemon(repo_root, runtime_dir):
             try:
-                sandbox_id = asyncio.run(
-                    _run_network_isolation_test(
-                        socket_path=socket_path,
-                        workspace=workspace,
-                        listener_port=listener_port,
-                        dnat_port=dnat_port,
-                    )
-                )
+                created_sandbox_id = asyncio.run(scenario(socket_path, workspace, sandbox_id))
             finally:
-                _cleanup_companion(sandbox_id or SANDBOX_ID, COMPANION_NAME)
-                _cleanup_runtime_resources(sandbox_id or SANDBOX_ID)
+                _cleanup_companion(created_sandbox_id or sandbox_id, COMPANION_NAME)
+                _cleanup_runtime_resources(created_sandbox_id or sandbox_id)
     finally:
-        stop_event.set()
-        srv_socket.close()
-        _stop_port_mapped_container(DNAT_CONTAINER_NAME)
         shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
-async def _run_network_isolation_test(
+async def _create_network_sandbox(
     *,
-    socket_path: Path,
+    client: AgentsSandboxClient,
     workspace: Path,
-    listener_port: int,
-    dnat_port: int,
-) -> str:
-    client = await _wait_for_client(socket_path)
-    async with client:
-        sandbox = await client.create_sandbox(
-            image=RUNTIME_IMAGE,
-            sandbox_id=SANDBOX_ID,
-            mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
-            companion_containers=(
-                CompanionContainerSpec(
-                    name=COMPANION_NAME,
-                    image=COMPANION_IMAGE,
-                ),
+    sandbox_id: str,
+    ports: tuple[PortMapping, ...] = (),
+) -> tuple[str, str, str]:
+    sandbox = await client.create_sandbox(
+        image=RUNTIME_IMAGE,
+        sandbox_id=sandbox_id,
+        mounts=(MountSpec(source=str(workspace), target="/workspace", writable=True),),
+        ports=ports,
+        companion_containers=(
+            CompanionContainerSpec(
+                name=COMPANION_NAME,
+                image=COMPANION_IMAGE,
             ),
-        )
-        sid = sandbox.sandbox_id
+        ),
+    )
+    sid = sandbox.sandbox_id
 
-        # Wait for companion container to be running
-        companion_container = _companion_container_name(sid, COMPANION_NAME)
-        _wait_for_companion_running(companion_container)
+    companion_container = _companion_container_name(sid, COMPANION_NAME)
+    _wait_for_companion_running(companion_container)
+    gateway_ip = _get_gateway_ip(sid)
+    return sid, companion_container, gateway_ip
 
-        gateway_ip = _get_gateway_ip(sid)
-        host_ips = _get_host_interface_ips()
 
-        # --- Negative tests: primary container must NOT reach host ---
-        # Use curl --connect-timeout: exit 7 = connection refused, 28 = timeout (both = blocked = GOOD)
-        # exit 0 = connected = SECURITY VIOLATION
+async def _assert_primary_cannot_reach(
+    client: AgentsSandboxClient,
+    sandbox_id: str,
+    url: str,
+    label: str,
+) -> None:
+    exec_handle = await client.run(
+        sandbox_id,
+        ("curl", "--connect-timeout", "3", "-s", "-o", "/dev/null", url),
+        cwd="/workspace",
+    )
+    assert exec_handle.exit_code != 0, f"SECURITY VIOLATION: primary container reached {label} at {url}"
+
+
+def _assert_companion_cannot_reach(container_name: str, url: str, label: str) -> None:
+    result = subprocess.run(
+        [
+            "docker", "exec", container_name,
+            "wget", "-q", "-O", "/dev/null", "--timeout=3", url,
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0, f"SECURITY VIOLATION: companion container reached {label} at {url}"
+
+
+async def _start_primary_http_server(client: AgentsSandboxClient, sandbox_id: str) -> None:
+    expected_response = shlex.quote(PUBLISHED_PORT_RESPONSE)
+    exec_handle = await client.run(
+        sandbox_id,
+        (
+            "sh",
+            "-lc",
+            "set -eu\n"
+            "server_dir=/tmp/agbox-port-test\n"
+            'mkdir -p "$server_dir"\n'
+            'cat > "$server_dir/server.js" <<\'JS\'\n'
+            "const http = require('http');\n"
+            "const response = process.env.PUBLISHED_PORT_RESPONSE;\n"
+            "const server = http.createServer((req, res) => {\n"
+            "  res.writeHead(200, {'content-type': 'text/plain'});\n"
+            "  res.end(`${response}\\n`);\n"
+            "});\n"
+            "server.listen(8443, '0.0.0.0');\n"
+            "JS\n"
+            f"PUBLISHED_PORT_RESPONSE={expected_response} "
+            'nohup node "$server_dir/server.js" >"$server_dir/server.log" 2>&1 &\n'
+            "server_pid=$!\n"
+            "attempt=0\n"
+            'while [ "$attempt" -lt 30 ]; do\n'
+            "  attempt=$((attempt + 1))\n"
+            f"  if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8443/ | grep -Fx {expected_response}; then\n"
+            "    exit 0\n"
+            "  fi\n"
+            '  if ! kill -0 "$server_pid" 2>/dev/null; then\n'
+            '    cat "$server_dir/server.log" >&2 || true\n'
+            "    exit 1\n"
+            "  fi\n"
+            "  sleep 0.2\n"
+            "done\n"
+            'cat "$server_dir/server.log" >&2 || true\n'
+            "exit 1",
+        ),
+        cwd="/workspace",
+    )
+    assert exec_handle.exit_code == 0, (
+        "failed to start primary HTTP server\n"
+        f"{_primary_http_server_diagnostics(sandbox_id)}"
+    )
+
+
+def _primary_http_server_diagnostics(sandbox_id: str) -> str:
+    container_name = _primary_container_name(sandbox_id)
+    result = subprocess.run(
+        [
+            "docker", "exec", container_name,
+            "sh", "-lc",
+            "set +e\n"
+            "echo '--- /tmp/agbox-port-test ---'\n"
+            "ls -la /tmp/agbox-port-test 2>&1\n"
+            "echo '--- server.log ---'\n"
+            "cat /tmp/agbox-port-test/server.log 2>&1\n"
+            "echo '--- container curl ---'\n"
+            "curl --verbose --max-time 2 http://127.0.0.1:8443/ 2>&1",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    return (
+        f"docker exec diagnostics for {container_name} exited {result.returncode}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+
+
+def _wait_for_host_http_response(url: str, expected: str, timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as response:
+                body = response.read().decode("utf-8").strip()
+            if body == expected:
+                return
+            raise AssertionError(f"unexpected response body {body!r}")
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(0.5)
+    raise AssertionError(f"host did not receive expected response from {url}: {last_error}") from last_error
+
+
+async def _assert_primary_can_reach_companion(client: AgentsSandboxClient, sandbox_id: str) -> None:
+    for _ in range(10):
         exec_handle = await client.run(
-            sid,
-            ("curl", "--connect-timeout", "3", "-s", "-o", "/dev/null", f"http://{gateway_ip}:{listener_port}"),
+            sandbox_id,
+            ("curl", "--connect-timeout", "3", "-s", "-o", "/dev/null", f"http://{COMPANION_NAME}:80"),
             cwd="/workspace",
         )
-        assert exec_handle.exit_code != 0, (
-            f"SECURITY VIOLATION: primary container reached host via gateway IP {gateway_ip}:{listener_port}"
-        )
+        if exec_handle.exit_code == 0:
+            return
+        await asyncio.sleep(3)
+    raise AssertionError(f"primary container cannot reach companion '{COMPANION_NAME}' on port 80")
 
-        for host_ip in host_ips:
-            exec_handle = await client.run(
-                sid,
-                ("curl", "--connect-timeout", "3", "-s", "-o", "/dev/null", f"http://{host_ip}:{listener_port}"),
-                cwd="/workspace",
-            )
-            assert exec_handle.exit_code != 0, (
-                f"SECURITY VIOLATION: primary container reached host via interface IP {host_ip}:{listener_port}"
-            )
 
-        # --- Negative tests: primary container must NOT reach Docker port-mapped (DNAT) services ---
-        # Docker port mappings use DNAT in PREROUTING/nat before reaching DOCKER-USER/FORWARD.
-        # Accessing gateway_ip:<dnat_port> hits the INPUT chain (via userland-proxy).
-        # Accessing the default Docker bridge gateway IP:<dnat_port> triggers DNAT in PREROUTING
-        # and then FORWARD through DOCKER-USER.  Both paths must be blocked.
-        default_bridge_ip = _get_default_docker_bridge_ip()
-        for dnat_target_ip in [gateway_ip, default_bridge_ip]:
-            exec_handle = await client.run(
-                sid,
-                (
-                    "curl", "--connect-timeout", "3", "-s", "-o", "/dev/null",
-                    f"http://{dnat_target_ip}:{dnat_port}",
+def test_sandbox_published_port_allows_host_ingress_without_sandbox_egress(tmp_path: Path) -> None:
+    sandbox_id = "net-published-port"
+    port_reservation: socket.socket | None
+    port_reservation, published_host_port = _reserve_unused_host_port()
+
+    async def scenario(socket_path: Path, workspace: Path, sandbox_id: str) -> str:
+        nonlocal port_reservation
+        client = await _wait_for_client(socket_path)
+        async with client:
+            if port_reservation is None:
+                raise AssertionError("host port reservation was already released")
+            port_reservation.close()
+            port_reservation = None
+            sid, companion_container, gateway_ip = await _create_network_sandbox(
+                client=client,
+                workspace=workspace,
+                sandbox_id=sandbox_id,
+                ports=(
+                    PortMapping(container_port=8443, host_port=published_host_port, protocol="tcp"),
                 ),
-                cwd="/workspace",
             )
-            assert exec_handle.exit_code != 0, (
-                f"SECURITY VIOLATION: primary container reached Docker-mapped service via "
-                f"{dnat_target_ip}:{dnat_port} (DNAT path not blocked)"
+            await _start_primary_http_server(client, sid)
+
+            host_url = f"http://127.0.0.1:{published_host_port}"
+            try:
+                _wait_for_host_http_response(host_url, PUBLISHED_PORT_RESPONSE)
+            except AssertionError as exc:
+                raise AssertionError(
+                    f"{exc}\n{_primary_http_server_diagnostics(sid)}"
+                ) from exc
+
+            egress_url = f"http://{gateway_ip}:{published_host_port}"
+            await _assert_primary_cannot_reach(client, sid, egress_url, "sandbox published host port")
+            _assert_companion_cannot_reach(companion_container, egress_url, "sandbox published host port")
+            return sid
+
+    try:
+        _run_network_scenario(tmp_path, sandbox_id, scenario)
+    finally:
+        if port_reservation is not None:
+            port_reservation.close()
+
+
+def test_sandbox_host_isolation_blocks_primary_and_companion_egress(tmp_path: Path) -> None:
+    sandbox_id = "net-host-isolation"
+    dnat_container = "agbox-nettest-dnat"
+    _stop_port_mapped_container(dnat_container)
+
+    srv_socket, listener_port, stop_event = _start_tcp_listener()
+    dnat_port = _start_port_mapped_container(dnat_container)
+    try:
+        async def scenario(socket_path: Path, workspace: Path, sandbox_id: str) -> str:
+            client = await _wait_for_client(socket_path)
+            async with client:
+                sid, companion_container, gateway_ip = await _create_network_sandbox(
+                    client=client,
+                    workspace=workspace,
+                    sandbox_id=sandbox_id,
+                )
+                host_ips = _get_host_interface_ips()
+                default_bridge_ip = _get_default_docker_bridge_ip()
+
+                blocked_urls = [(f"http://{gateway_ip}:{listener_port}", "sandbox gateway host listener")]
+                blocked_urls.extend(
+                    (f"http://{host_ip}:{listener_port}", "host physical interface listener")
+                    for host_ip in host_ips
+                )
+                blocked_urls.extend(
+                    [
+                        (f"http://{gateway_ip}:{dnat_port}", "unrelated published port via sandbox gateway"),
+                        (
+                            f"http://{default_bridge_ip}:{dnat_port}",
+                            "unrelated published port via default Docker bridge",
+                        ),
+                    ]
+                )
+
+                for url, label in blocked_urls:
+                    await _assert_primary_cannot_reach(client, sid, url, label)
+                    _assert_companion_cannot_reach(companion_container, url, label)
+                return sid
+
+        _run_network_scenario(tmp_path, sandbox_id, scenario)
+    finally:
+        stop_event.set()
+        srv_socket.close()
+        _stop_port_mapped_container(dnat_container)
+
+
+def test_sandbox_primary_can_reach_companion_under_host_isolation(
+    tmp_path: Path,
+) -> None:
+    sandbox_id = "net-companion-access"
+
+    async def scenario(socket_path: Path, workspace: Path, sandbox_id: str) -> str:
+        client = await _wait_for_client(socket_path)
+        async with client:
+            sid, _, _ = await _create_network_sandbox(
+                client=client,
+                workspace=workspace,
+                sandbox_id=sandbox_id,
             )
+            await _assert_primary_can_reach_companion(client, sid)
+            return sid
 
-        # --- Positive tests: primary container CAN reach internet ---
-        exec_handle = await client.run(
-            sid,
-            ("curl", "--connect-timeout", "5", "-s", "-o", "/dev/null", "http://1.1.1.1"),
-            cwd="/workspace",
-        )
-        assert exec_handle.exit_code == 0, "primary container cannot reach internet (1.1.1.1)"
-
-        # --- Positive test: primary container CAN reach companion by DNS alias ---
-        # Companion runs nginx on port 80. Retry to handle Docker DNS registration delay.
-        for attempt in range(10):
-            exec_handle = await client.run(
-                sid,
-                ("curl", "--connect-timeout", "3", "-s", "-o", "/dev/null", f"http://{COMPANION_NAME}:80"),
-                cwd="/workspace",
-            )
-            if exec_handle.exit_code == 0:
-                break
-            await asyncio.sleep(3)
-        assert exec_handle.exit_code == 0, (
-            f"primary container cannot reach companion '{COMPANION_NAME}' on port 80 (exit {exec_handle.exit_code})"
-        )
-
-        # --- Negative tests: companion container must NOT reach host ---
-        # Companion image (nginx:alpine) has wget (busybox applet) but not curl.
-        result = subprocess.run(
-            [
-                "docker", "exec", companion_container,
-                "wget", "-q", "-O", "/dev/null", "--timeout=3", f"http://{gateway_ip}:{listener_port}",
-            ],
-            capture_output=True, text=True, check=False,
-        )
-        assert result.returncode != 0, (
-            f"SECURITY VIOLATION: companion container reached host via gateway IP {gateway_ip}:{listener_port}"
-        )
-
-        for host_ip in host_ips:
-            result = subprocess.run(
-                [
-                    "docker", "exec", companion_container,
-                    "wget", "-q", "-O", "/dev/null", "--timeout=3", f"http://{host_ip}:{listener_port}",
-                ],
-                capture_output=True, text=True, check=False,
-            )
-            assert result.returncode != 0, (
-                f"SECURITY VIOLATION: companion container reached host via interface IP {host_ip}:{listener_port}"
-            )
-
-        # --- Negative tests: companion container must NOT reach Docker port-mapped (DNAT) services ---
-        for dnat_target_ip in [gateway_ip, default_bridge_ip]:
-            result = subprocess.run(
-                [
-                    "docker", "exec", companion_container,
-                    "wget", "-q", "-O", "/dev/null", "--timeout=3",
-                    f"http://{dnat_target_ip}:{dnat_port}",
-                ],
-                capture_output=True, text=True, check=False,
-            )
-            assert result.returncode != 0, (
-                f"SECURITY VIOLATION: companion container reached Docker-mapped service via "
-                f"{dnat_target_ip}:{dnat_port} (DNAT path not blocked)"
-            )
-
-        # --- Positive test: companion container CAN reach internet ---
-        result = subprocess.run(
-            [
-                "docker", "exec", companion_container,
-                "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://1.1.1.1",
-            ],
-            capture_output=True, text=True, check=False,
-        )
-        assert result.returncode == 0, "companion container cannot reach internet (1.1.1.1)"
-
-        return sid
+    _run_network_scenario(tmp_path, sandbox_id, scenario)
