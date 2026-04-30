@@ -1,9 +1,9 @@
 # Isolation and Security
 
 Each sandbox is a Docker container isolated from the host in both **network** and **filesystem**.
-- No host network access
-- No host filesystem access
-- No exceptions.
+- Sandbox-originated host network access is blocked.
+- Explicit localhost port mappings are host-initiated ingress into declared container ports.
+- Host filesystem access is explicit-only.
 
 This document is the security posture reference for `agents-sandbox`.
 
@@ -34,11 +34,12 @@ flowchart TB
     NetA -.-|no connectivity| NetB
     NetA -->|NAT via Docker bridge| Internet
     NetB -->|NAT via Docker bridge| Internet
-    HostNet -.-|blocked permanently| NetA
+    HostNet -.->|declared localhost port mapping| NetA
+    NetA -.-|sandbox-originated host access blocked| HostNet
     HostFS -.-|explicit mount only| NetA
 ```
 
-- **Host network restricted.** Sandboxes are isolated from the host and from each other. If the agent needs databases, caches, or other dependencies, declare them as [companion containers](companion_container_guide.md) — they run on the same sandbox network and are reachable by DNS alias.
+- **Host network restricted.** Sandbox-originated connections to host-local addresses are blocked. Declared localhost port mappings are allowed because the host initiates ingress into an explicitly published sandbox port. If the agent needs databases, caches, or other dependencies, declare them as [companion containers](companion_container_guide.md) — they run on the same sandbox network and are reachable by DNS alias.
 - **Host filesystem invisible by default.** Only explicitly declared `mounts`, `copies`, and `builtin_tools` may enter the sandbox. Everything else is rejected.
 - **Internet fully available.** Outbound traffic is NAT'd via Docker bridge — agents can download packages, call APIs, and clone repos freely.
 - **Cross-sandbox isolated.** Each sandbox gets its own dedicated Docker network. Sandboxes cannot reach each other.
@@ -47,7 +48,7 @@ flowchart TB
 
 | Boundary | Mechanism | Detail |
 |----------|-----------|--------|
-| **Network** | Dedicated network + host isolation | Outbound internet via NAT; no shared bridge, no host network, no Docker socket exposure. Sandboxes are isolated from each other, and companion containers join the same sandbox network. Platform-specific enforcement is described below. |
+| **Network** | Dedicated network + host isolation | Outbound internet via NAT; no shared bridge, no host network, no Docker socket exposure. Sandbox-originated host access is blocked, while declared localhost port mappings allow host-initiated ingress. Sandboxes are isolated from each other, and companion containers join the same sandbox network. Platform-specific enforcement is described below. |
 | **Filesystem** | Explicit-only ingress | Only declared `mounts`, `copies`, and `builtin_tools` (host credential and cache mounts like `claude`, `git`, `uv`) enter the sandbox. Symlink sources and path traversal are rejected. See [Container Dependency Strategy](container_dependency_strategy.md). |
 | **Process** | Non-root user + init process | `HOST_UID`/`HOST_GID` align container user with host identity. `Init: true` handles signal forwarding and zombie reaping. |
 | **Docker access** | Daemon-mediated only | Sandboxes have no Docker socket. All Docker operations go through the daemon's structured API client. |
@@ -56,5 +57,5 @@ flowchart TB
 
 ## Platform-Specific Network Strategy
 
-- **Linux:** an nftables rule in the `DOCKER-USER` chain drops traffic from each sandbox subnet to host-local addresses, blocking access to host services at the network layer. The daemon requires `CAP_NET_ADMIN`.
+- **Linux:** nftables rules drop new sandbox-originated traffic from each sandbox subnet to host-local addresses and Docker-published host ports. Established replies for declared localhost port mappings are allowed. The daemon requires `CAP_NET_ADMIN`.
 - **macOS:** `host.docker.internal` and `gateway.docker.internal` are overridden to `0.0.0.0` via `--add-host`, reducing access to the macOS host through Docker Desktop's stable host-discovery aliases. This is a DNS-layer best-effort control, not Linux-equivalent network-layer isolation.

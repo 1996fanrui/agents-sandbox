@@ -7,7 +7,7 @@ This document describes the runtime lifecycle contract owned by `agents-sandbox`
 | Resource | Notes |
 |----------|-------|
 | Primary container | Runs the service process as its primary command (under tini) |
-| Dedicated network | One per sandbox; shared bridge and host network are not supported. On Linux, an nftables DOCKER-USER rule blocks container→host traffic (applied on create, re-applied on daemon restart recovery, removed on delete). On macOS, `host.docker.internal` is overridden to `0.0.0.0` via `--add-host`. |
+| Dedicated network | One per sandbox; shared bridge and host network are not supported. On Linux, nftables rules block new sandbox-originated host traffic (applied on create, re-applied on daemon restart recovery, removed on delete) without blocking established replies for declared host-initiated localhost port mappings. On macOS, `host.docker.internal` is overridden to `0.0.0.0` via `--add-host`. |
 | Companion containers | Declared via `CompanionContainerSpec`, on the same network |
 | Persistent event history | Stored in bbolt; lifecycle and exec events survive daemon restart until retention cleanup |
 | Exec output artifacts | Files under the configured artifact root |
