@@ -427,6 +427,7 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 		s.mu.RUnlock()
 		return err
 	}
+	subscribedRecord := record
 	initialEvents := eventsAfter(record, nextSequence)
 	s.mu.RUnlock()
 
@@ -448,8 +449,17 @@ func (s *Service) SubscribeSandboxEvents(req *agboxv1.SubscribeSandboxEventsRequ
 			s.mu.RLock()
 			record, ok := s.boxes[req.GetSandboxId()]
 			if !ok {
+				// The sandbox can be purged while an existing subscriber has not
+				// yet observed the terminal events; drain the subscribed record.
+				pendingEvents := eventsAfter(subscribedRecord, nextSequence)
 				s.mu.RUnlock()
-				return newStatusError(codes.NotFound, ReasonSandboxNotFound, map[string]string{"sandbox_id": req.GetSandboxId()}, "sandbox %s was not found", req.GetSandboxId())
+				for _, event := range pendingEvents {
+					if err := stream.Send(event); err != nil {
+						return err
+					}
+					nextSequence = event.GetSequence()
+				}
+				return nil
 			}
 			if err := validateSequenceNotExpired(record, nextSequence); err != nil {
 				s.mu.RUnlock()
