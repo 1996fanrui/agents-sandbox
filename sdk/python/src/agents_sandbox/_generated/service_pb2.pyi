@@ -171,7 +171,7 @@ class CompanionContainerSpec(_message.Message):
     def __init__(self, name: _Optional[str] = ..., image: _Optional[str] = ..., envs: _Optional[_Mapping[str, str]] = ..., healthcheck: _Optional[_Union[HealthcheckConfig, _Mapping]] = ..., post_start_on_primary: _Optional[_Iterable[str]] = ..., command: _Optional[_Iterable[str]] = ..., cpu_limit: _Optional[str] = ..., memory_limit: _Optional[str] = ..., disk_limit: _Optional[str] = ...) -> None: ...
 
 class CreateSpec(_message.Message):
-    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports", "command", "cpu_limit", "memory_limit", "disk_limit")
+    __slots__ = ("image", "mounts", "copies", "builtin_tools", "companion_containers", "labels", "envs", "idle_ttl", "ports", "command", "cpu_limit", "memory_limit", "disk_limit", "gpus")
     class LabelsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -199,6 +199,7 @@ class CreateSpec(_message.Message):
     CPU_LIMIT_FIELD_NUMBER: _ClassVar[int]
     MEMORY_LIMIT_FIELD_NUMBER: _ClassVar[int]
     DISK_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    GPUS_FIELD_NUMBER: _ClassVar[int]
     image: str
     mounts: _containers.RepeatedCompositeFieldContainer[MountSpec]
     copies: _containers.RepeatedCompositeFieldContainer[CopySpec]
@@ -212,7 +213,8 @@ class CreateSpec(_message.Message):
     cpu_limit: str
     memory_limit: str
     disk_limit: str
-    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., ports: _Optional[_Iterable[_Union[PortMapping, _Mapping]]] = ..., command: _Optional[_Iterable[str]] = ..., cpu_limit: _Optional[str] = ..., memory_limit: _Optional[str] = ..., disk_limit: _Optional[str] = ...) -> None: ...
+    gpus: str
+    def __init__(self, image: _Optional[str] = ..., mounts: _Optional[_Iterable[_Union[MountSpec, _Mapping]]] = ..., copies: _Optional[_Iterable[_Union[CopySpec, _Mapping]]] = ..., builtin_tools: _Optional[_Iterable[str]] = ..., companion_containers: _Optional[_Iterable[_Union[CompanionContainerSpec, _Mapping]]] = ..., labels: _Optional[_Mapping[str, str]] = ..., envs: _Optional[_Mapping[str, str]] = ..., idle_ttl: _Optional[_Union[datetime.timedelta, _duration_pb2.Duration, _Mapping]] = ..., ports: _Optional[_Iterable[_Union[PortMapping, _Mapping]]] = ..., command: _Optional[_Iterable[str]] = ..., cpu_limit: _Optional[str] = ..., memory_limit: _Optional[str] = ..., disk_limit: _Optional[str] = ..., gpus: _Optional[str] = ...) -> None: ...
 
 class SandboxHandle(_message.Message):
     __slots__ = ("sandbox_id", "state", "last_event_sequence", "companion_containers", "labels", "created_at", "image", "error_code", "error_message", "state_changed_at")

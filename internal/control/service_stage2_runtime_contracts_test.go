@@ -467,6 +467,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"cpu_limit",
 				"memory_limit",
 				"disk_limit",
+				"gpus",
 			},
 			fieldNums: map[string]protoreflect.FieldNumber{
 				"image":                1,
@@ -482,6 +483,7 @@ func TestProtoMessageFieldContracts(t *testing.T) {
 				"cpu_limit":            11,
 				"memory_limit":         12,
 				"disk_limit":           13,
+				"gpus":                 14,
 			},
 		},
 		{

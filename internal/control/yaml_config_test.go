@@ -50,6 +50,7 @@ labels:
 envs:
   APP_ENV: production
   DB_HOST: localhost
+gpus: all
 `)
 
 	cfg, err := parseYAMLConfig(raw)
@@ -95,6 +96,9 @@ envs:
 	if len(cfg.Envs) != 2 || cfg.Envs["APP_ENV"] != "production" || cfg.Envs["DB_HOST"] != "localhost" {
 		t.Fatalf("unexpected envs: %v", cfg.Envs)
 	}
+	if cfg.GPUs != "all" {
+		t.Fatalf("unexpected gpus: %q", cfg.GPUs)
+	}
 }
 
 func TestYAMLConfigUnknownFields(t *testing.T) {
@@ -105,6 +109,20 @@ env: prod
 	_, err := parseYAMLConfig(raw)
 	if err == nil {
 		t.Fatal("expected error for unknown field, got nil")
+	}
+}
+
+func TestYAMLGPUDeviceRequestPassthrough(t *testing.T) {
+	cfg, err := parseYAMLConfig([]byte("image: img:test\ngpus: all\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLConfig failed: %v", err)
+	}
+	spec, err := yamlConfigToCreateSpec(cfg)
+	if err != nil {
+		t.Fatalf("yamlConfigToCreateSpec failed: %v", err)
+	}
+	if spec.GetGpus() != "all" {
+		t.Fatalf("expected gpus to pass through, got %q", spec.GetGpus())
 	}
 }
 

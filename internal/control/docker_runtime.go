@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,9 +306,20 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 			Protocol:      portProtocolToString(p.GetProtocol()),
 		})
 	}
+	var gpuGroupAdd []string
+	if record.createSpec.GetGpus() == "all" {
+		gpuGroupAdd, err = discoverGPUDeviceGroups()
+		if err != nil {
+			return runtimeCreateResult{}, err
+		}
+	}
 	primaryEnv := primaryContainerEnvironment(mounts)
 	for k, v := range record.createSpec.GetEnvs() {
 		primaryEnv[k] = v
+	}
+	delete(primaryEnv, supplementalGroupsEnv)
+	if len(gpuGroupAdd) > 0 {
+		primaryEnv[supplementalGroupsEnv] = strings.Join(gpuGroupAdd, ",")
 	}
 	primaryCommand := primaryContainerCommand(record.createSpec.GetCommand())
 	if err := backend.dockerContainerCreate(ctx, dockerContainerSpec{
@@ -323,6 +335,8 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		CPUMillicores: limits.CPUMillicores,
 		MemoryBytes:   limits.MemoryBytes,
 		DiskSizeBytes: limits.PrimaryDiskBytes,
+		GPUs:          record.createSpec.GetGpus(),
+		GroupAdd:      gpuGroupAdd,
 	}); err != nil {
 		return runtimeCreateResult{}, err
 	}

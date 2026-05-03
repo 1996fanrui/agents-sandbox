@@ -769,7 +769,11 @@ type CreateSpec struct {
 	MemoryLimit string `protobuf:"bytes,12,opt,name=memory_limit,json=memoryLimit,proto3" json:"memory_limit,omitempty"`
 	// Docker --storage-opt size= style, e.g. "10g". "" = unlimited.
 	// Applies to the primary container.
-	DiskLimit     string `protobuf:"bytes,13,opt,name=disk_limit,json=diskLimit,proto3" json:"disk_limit,omitempty"`
+	DiskLimit string `protobuf:"bytes,13,opt,name=disk_limit,json=diskLimit,proto3" json:"disk_limit,omitempty"`
+	// Docker --gpus style device request. "" = no GPU access; "all" = request
+	// all NVIDIA GPUs for the primary container. This is device access, not a
+	// VRAM or compute quota.
+	Gpus          string `protobuf:"bytes,14,opt,name=gpus,proto3" json:"gpus,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -891,6 +895,13 @@ func (x *CreateSpec) GetMemoryLimit() string {
 func (x *CreateSpec) GetDiskLimit() string {
 	if x != nil {
 		return x.DiskLimit
+	}
+	return ""
+}
+
+func (x *CreateSpec) GetGpus() string {
+	if x != nil {
+		return x.Gpus
 	}
 	return ""
 }
@@ -2502,7 +2513,7 @@ const file_service_proto_rawDesc = "" +
 	"disk_limit\x18\t \x01(\tR\tdiskLimit\x1a7\n" +
 	"\tEnvsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb3\x05\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc7\x05\n" +
 	"\n" +
 	"CreateSpec\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12+\n" +
@@ -2519,7 +2530,8 @@ const file_service_proto_rawDesc = "" +
 	"\tcpu_limit\x18\v \x01(\tR\bcpuLimit\x12!\n" +
 	"\fmemory_limit\x18\f \x01(\tR\vmemoryLimit\x12\x1d\n" +
 	"\n" +
-	"disk_limit\x18\r \x01(\tR\tdiskLimit\x1a9\n" +
+	"disk_limit\x18\r \x01(\tR\tdiskLimit\x12\x12\n" +
+	"\x04gpus\x18\x0e \x01(\tR\x04gpus\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a7\n" +

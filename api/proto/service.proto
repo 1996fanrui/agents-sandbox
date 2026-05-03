@@ -147,6 +147,10 @@ message CreateSpec {
   // Docker --storage-opt size= style, e.g. "10g". "" = unlimited.
   // Applies to the primary container.
   string disk_limit = 13;
+  // Docker --gpus style device request. "" = no GPU access; "all" = request
+  // all NVIDIA GPUs for the primary container. This is device access, not a
+  // VRAM or compute quota.
+  string gpus = 14;
 }
 
 message SandboxHandle {

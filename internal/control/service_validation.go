@@ -18,6 +18,12 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 	if spec.GetIdleTtl() != nil && spec.GetIdleTtl().AsDuration() < 0 {
 		return errors.New("idle_ttl must not be negative")
 	}
+	if err := validateGPUs(spec.GetGpus()); err != nil {
+		return err
+	}
+	if err := validatePrimaryEnvs(spec.GetEnvs()); err != nil {
+		return err
+	}
 	targets := make(map[string]string)
 	seenNames := make(map[string]struct{}, len(spec.GetCompanionContainers()))
 	registerTarget := func(kind string, target string) error {
@@ -136,6 +142,22 @@ func validateCreateSpec(spec *agboxv1.CreateSpec) error {
 			return fmt.Errorf("unknown builtin resource %q", builtin)
 		}
 		seenBuiltin[builtin] = struct{}{}
+	}
+	return nil
+}
+
+func validateGPUs(value string) error {
+	switch value {
+	case "", "all":
+		return nil
+	default:
+		return status.Errorf(codes.InvalidArgument, "gpus: unsupported value %q; currently only empty or \"all\" are supported", value)
+	}
+}
+
+func validatePrimaryEnvs(envs map[string]string) error {
+	if _, exists := envs[supplementalGroupsEnv]; exists {
+		return status.Errorf(codes.InvalidArgument, "envs.%s is reserved for internal runtime setup and must not be set by CreateSpec.Envs", supplementalGroupsEnv)
 	}
 	return nil
 }
