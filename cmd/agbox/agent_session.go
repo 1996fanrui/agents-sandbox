@@ -680,6 +680,7 @@ func buildAgentCreateSpec(parsed agentSessionArgs, agentLabel string, idleTTL *d
 		CpuLimit:     parsed.cpuLimit,
 		MemoryLimit:  parsed.memoryLimit,
 		DiskLimit:    parsed.diskLimit,
+		Gpus:         parsed.gpus,
 		Labels:       labels,
 		IdleTtl:      idleTTL,
 	}

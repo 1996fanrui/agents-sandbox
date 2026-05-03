@@ -22,6 +22,7 @@ type agentSessionFlagVars struct {
 	cpuLimit     string
 	memoryLimit  string
 	diskLimit    string
+	gpus         string
 	sandboxID    string
 	mounts       []string
 	ports        []string
@@ -42,6 +43,7 @@ func registerAgentSessionFlags(cmd *cobra.Command, v *agentSessionFlagVars) {
 	cmd.Flags().StringVar(&v.cpuLimit, "cpu-limit", "", "CPU limit (Docker --cpus format, e.g. 2, 0.5)")
 	cmd.Flags().StringVar(&v.memoryLimit, "memory-limit", "", "Memory limit (Docker --memory format, e.g. 4g, 512m)")
 	cmd.Flags().StringVar(&v.diskLimit, "disk-limit", "", "Disk limit (Docker --storage-opt size= format, e.g. 10g)")
+	cmd.Flags().StringVar(&v.gpus, "gpus", "", "GPU device request; only \"all\" is supported")
 	cmd.Flags().StringVar(&v.sandboxID, "sandbox-id", "", "Custom sandbox ID (overrides agent type default)")
 	cmd.Flags().StringArrayVar(&v.mounts, "mount", nil, "Bind mount in host:container[:writable] form (repeatable; default read-only)")
 	cmd.Flags().StringArrayVar(&v.ports, "port", nil, "Port mapping in host:container[/proto] form (repeatable; proto = tcp|udp|sctp, default tcp)")
@@ -83,6 +85,7 @@ type agentSessionArgs struct {
 	cpuLimit     string
 	memoryLimit  string
 	diskLimit    string
+	gpus         string
 	sandboxID    string                                       // custom sandbox ID (empty = daemon generates)
 	configYaml   string                                       // embedded YAML config
 	image        string                                       // container image (empty = daemon uses configYaml image)
@@ -233,6 +236,10 @@ func resolveAgentSessionArgs(
 	parsed.cpuLimit = v.cpuLimit
 	parsed.memoryLimit = v.memoryLimit
 	parsed.diskLimit = v.diskLimit
+	if v.gpus != "" && v.gpus != "all" {
+		return agentSessionArgs{}, usageErrorf("--gpus: unsupported value %q; currently only empty or \"all\" are supported", v.gpus)
+	}
+	parsed.gpus = v.gpus
 
 	// Parse repeatable structured flags. Each parser returns a usageError on
 	// invalid input; failures are surfaced verbatim so cobra prints usage.

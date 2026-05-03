@@ -543,6 +543,7 @@ func TestRunAgentSessionPropagatesFlagsToCreateSpec(t *testing.T) {
 		cpuLimit:    "2",
 		memoryLimit: "4g",
 		diskLimit:   "10g",
+		gpus:        "all",
 	}, "test", &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -562,6 +563,9 @@ func TestRunAgentSessionPropagatesFlagsToCreateSpec(t *testing.T) {
 	}
 	if spec.GetDiskLimit() != "10g" {
 		t.Fatalf("expected disk_limit=10g, got %q", spec.GetDiskLimit())
+	}
+	if spec.GetGpus() != "all" {
+		t.Fatalf("expected gpus=all, got %q", spec.GetGpus())
 	}
 	envs := spec.GetEnvs()
 	if envs["FOO"] != "bar" || envs["BAZ"] != "qux" {
