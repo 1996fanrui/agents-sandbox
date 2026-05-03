@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -243,9 +244,9 @@ func captureHelp(t *testing.T, name string) string {
 }
 
 // TestAgentCommandHelp_IncludesNewFlags asserts every agent subcommand's
-// --help output advertises the four new flags.
+// --help output advertises the shared agent-session flags added after launch.
 func TestAgentCommandHelp_IncludesNewFlags(t *testing.T) {
-	wantFlags := []string{"--mount", "--port", "--copy", "--label"}
+	wantFlags := []string{"--mount", "--port", "--copy", "--label", "--gpus"}
 	for _, name := range agentCommandsForHelpTest() {
 		t.Run(name, func(t *testing.T) {
 			out := captureHelp(t, name)
@@ -253,6 +254,51 @@ func TestAgentCommandHelp_IncludesNewFlags(t *testing.T) {
 				if !strings.Contains(out, flag) {
 					t.Fatalf("agbox %s --help missing %q\n%s", name, flag, out)
 				}
+			}
+		})
+	}
+}
+
+func TestAgentSessionGPUsFlagAvailableOnAllSharedCommands(t *testing.T) {
+	for _, name := range agentCommandsForHelpTest() {
+		t.Run(name, func(t *testing.T) {
+			out := captureHelp(t, name)
+			if !strings.Contains(out, "--gpus") {
+				t.Fatalf("agbox %s --help missing --gpus\n%s", name, out)
+			}
+		})
+	}
+}
+
+func TestAgentSessionGPUsValidation(t *testing.T) {
+	t.Run("all", func(t *testing.T) {
+		parsed, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+			rawCommand: "sleep infinity",
+			gpus:       "all",
+		}, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if parsed.gpus != "all" {
+			t.Fatalf("expected gpus=all, got %q", parsed.gpus)
+		}
+	})
+
+	for _, value := range []string{"1", "device=0"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := resolveAgentSessionArgs(&agentSessionFlagVars{
+				rawCommand: "sleep infinity",
+				gpus:       value,
+			}, "")
+			if err == nil {
+				t.Fatalf("expected error for --gpus %q", value)
+			}
+			var cliErr *cliError
+			if !errors.As(err, &cliErr) || cliErr.exitCode != exitCodeUsageError {
+				t.Fatalf("expected usage error for --gpus %q, got %#v", value, err)
+			}
+			if !strings.Contains(err.Error(), "--gpus") || !strings.Contains(err.Error(), "empty") || !strings.Contains(err.Error(), "all") {
+				t.Fatalf("unexpected error for --gpus %q: %v", value, err)
 			}
 		})
 	}

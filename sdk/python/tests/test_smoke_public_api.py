@@ -235,7 +235,7 @@ def test_default_socket_path_resolution_matches_daemon_rules(monkeypatch: pytest
         )
 
 
-def test_agents_sandbox_client_signatures_match_public_contract() -> None:
+def test_public_api_surface() -> None:
     expected = {
         "ping",
         "create_sandbox",
@@ -291,6 +291,7 @@ def test_agents_sandbox_client_signatures_match_public_contract() -> None:
         "cpu_limit",
         "memory_limit",
         "disk_limit",
+        "gpus",
         "wait",
     ]
     assert "request" not in create_signature.parameters

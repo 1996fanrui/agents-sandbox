@@ -156,6 +156,7 @@ class AgentsSandboxClient:
         cpu_limit: str = "",
         memory_limit: str = "",
         disk_limit: str = "",
+        gpus: str = "",
         wait: bool = True,
     ) -> SandboxHandle:
         """Create a sandbox and optionally wait until it becomes ready.
@@ -188,6 +189,7 @@ class AgentsSandboxClient:
                 cpu_limit=cpu_limit,
                 memory_limit=memory_limit,
                 disk_limit=disk_limit,
+                gpus=gpus,
             ),
             config_yaml=resolved_config_yaml,
         )

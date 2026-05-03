@@ -158,6 +158,9 @@ func (c *Client) CreateSandbox(ctx context.Context, opts ...CreateSandboxOption)
 	if options.primaryDiskLimit != nil {
 		createSpec.DiskLimit = *options.primaryDiskLimit
 	}
+	if options.gpus != nil {
+		createSpec.Gpus = *options.gpus
+	}
 	request := &agboxv1.CreateSandboxRequest{
 		SandboxId:  valueOrEmpty(options.sandboxID),
 		ConfigYaml: append([]byte(nil), options.configYAML...),

@@ -103,6 +103,7 @@ def to_proto_create_sandbox_request(request: CreateSandboxRequest) -> service_pb
     create_spec.cpu_limit = request.create_spec.cpu_limit
     create_spec.memory_limit = request.create_spec.memory_limit
     create_spec.disk_limit = request.create_spec.disk_limit
+    create_spec.gpus = request.create_spec.gpus
     return service_pb2.CreateSandboxRequest(
         sandbox_id="" if request.sandbox_id is None else request.sandbox_id,
         create_spec=create_spec,

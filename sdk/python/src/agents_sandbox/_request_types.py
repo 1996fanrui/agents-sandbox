@@ -24,6 +24,7 @@ class CreateSandboxSpec:
     cpu_limit: str = ""
     memory_limit: str = ""
     disk_limit: str = ""
+    gpus: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labels", dict(self.labels))

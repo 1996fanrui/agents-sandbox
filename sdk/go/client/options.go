@@ -78,6 +78,7 @@ type createSandboxOptions struct {
 	cpuLimit            *string
 	memoryLimit         *string
 	primaryDiskLimit    *string
+	gpus                *string
 	wait                bool
 }
 
@@ -435,6 +436,20 @@ func WithPrimaryDiskLimit(limit string) primaryDiskLimitOption {
 func (o primaryDiskLimitOption) applyCreateSandbox(opts *createSandboxOptions) error {
 	value := string(o)
 	opts.primaryDiskLimit = &value
+	return nil
+}
+
+type gpusOption string
+
+// WithGPUs sets the primary container GPU device request expression.
+// The SDK forwards the raw string to the daemon without parsing.
+func WithGPUs(gpus string) gpusOption {
+	return gpusOption(gpus)
+}
+
+func (o gpusOption) applyCreateSandbox(opts *createSandboxOptions) error {
+	value := string(o)
+	opts.gpus = &value
 	return nil
 }
 
