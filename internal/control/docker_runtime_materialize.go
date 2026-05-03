@@ -102,9 +102,9 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	sandboxID string,
 	resources []string,
 	state *sandboxRuntimeState,
-) ([]dockerMount, error) {
+) (builtinToolMaterialization, error) {
 	if len(resources) == 0 {
-		return nil, nil
+		return builtinToolMaterialization{}, nil
 	}
 
 	// Resolve each tool into its mount IDs, tracking which mounts belong to optional tools.
@@ -117,7 +117,7 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	for _, resource := range resources {
 		capability, ok := profile.CapabilityByID(resource)
 		if !ok {
-			return nil, fmt.Errorf("unknown builtin resource %q", resource)
+			return builtinToolMaterialization{}, fmt.Errorf("unknown builtin resource %q", resource)
 		}
 		for _, mountID := range capability.MountIDs {
 			if _, exists := seen[mountID]; !exists {
@@ -134,10 +134,11 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	}
 
 	mounts := make([]dockerMount, 0, len(entries))
+	environment := make(map[string]string)
 	for _, entry := range entries {
 		mount, ok := profile.MountByID(entry.mountID)
 		if !ok {
-			return nil, fmt.Errorf("unknown capability mount %q", entry.mountID)
+			return builtinToolMaterialization{}, fmt.Errorf("unknown capability mount %q", entry.mountID)
 		}
 		sourcePath, err := resolveCapabilityMountSource(mount)
 		if err != nil {
@@ -147,7 +148,7 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 					slog.String("error", err.Error()))
 				continue
 			}
-			return nil, err
+			return builtinToolMaterialization{}, err
 		}
 
 		// Project credentials from macOS Keychain into the host mount directory
@@ -173,14 +174,16 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 							slog.String("error", err.Error()))
 						continue
 					}
-					return nil, err
+					return builtinToolMaterialization{}, err
 				}
 			}
+			target := capabilityMountTarget(mount, sourcePath)
 			mounts = append(mounts, dockerMount{
 				Source:   sourcePath,
-				Target:   mount.ContainerTarget,
+				Target:   target,
 				ReadOnly: false,
 			})
+			addBuiltinMountEnvironment(mount, target, environment)
 		default:
 			writable := mount.Mode == profile.CapabilityModeReadWrite
 			actualSource, readOnly, err := backend.materializeBuiltinToolPath(sourcePath, writable, state)
@@ -191,16 +194,18 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 						slog.String("error", err.Error()))
 					continue
 				}
-				return nil, err
+				return builtinToolMaterialization{}, err
 			}
+			target := capabilityMountTarget(mount, actualSource)
 			mounts = append(mounts, dockerMount{
 				Source:   actualSource,
-				Target:   mount.ContainerTarget,
+				Target:   target,
 				ReadOnly: readOnly,
 			})
+			addBuiltinMountEnvironment(mount, target, environment)
 		}
 	}
-	return mounts, nil
+	return builtinToolMaterialization{Mounts: mounts, Environment: environment}, nil
 }
 
 func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
@@ -208,7 +213,6 @@ func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 	writable bool,
 	state *sandboxRuntimeState,
 ) (string, bool, error) {
-	// Builtin tools are always bind-mounted as-is, including any symlinks.
 	// Builtin tools are always bind-mounted as-is, including any symlinks. These are trusted host directories
 	// (tool configs, caches) that may contain symlinks to arbitrary host paths,
 	// and the container is expected to see them exactly as they appear on the host.
@@ -216,6 +220,19 @@ func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 		return "", false, err
 	}
 	return sourcePath, !writable, nil
+}
+
+func capabilityMountTarget(mount profile.CapabilityMount, sourcePath string) string {
+	if mount.ContainerTargetMode == profile.CapabilityContainerTargetHostPath {
+		return sourcePath
+	}
+	return mount.ContainerTarget
+}
+
+func addBuiltinMountEnvironment(mount profile.CapabilityMount, target string, environment map[string]string) {
+	if mount.ContainerTargetEnvKey != "" {
+		environment[mount.ContainerTargetEnvKey] = target
+	}
 }
 
 func resolveCapabilityMountSource(mount profile.CapabilityMount) (string, error) {

@@ -44,7 +44,7 @@ func TestCodexMountsBothDirs(t *testing.T) {
 	}
 }
 
-func TestUVMountsBothDirs(t *testing.T) {
+func TestUVMountsCacheAndPythonInstallDir(t *testing.T) {
 	capability, ok := CapabilityByID(string(ToolIDUV))
 	if !ok {
 		t.Fatal("missing tool capability uv")
@@ -52,8 +52,33 @@ func TestUVMountsBothDirs(t *testing.T) {
 	if len(capability.MountIDs) != 2 {
 		t.Fatalf("expected uv to have 2 mount IDs, got %d", len(capability.MountIDs))
 	}
-	if capability.MountIDs[0] != MountIDUVCache || capability.MountIDs[1] != MountIDUVData {
+	if capability.MountIDs[0] != MountIDUVCache || capability.MountIDs[1] != MountIDUVPython {
 		t.Fatalf("unexpected uv mount IDs: %v", capability.MountIDs)
+	}
+}
+
+func TestUVPythonMountUsesHostIdenticalTarget(t *testing.T) {
+	mount, ok := MountByID(MountIDUVPython)
+	if !ok {
+		t.Fatal("missing mount uv-python")
+	}
+	if mount.DefaultHostPath != "~/.local/share/uv/python" {
+		t.Fatalf("unexpected DefaultHostPath: got %q want %q", mount.DefaultHostPath, "~/.local/share/uv/python")
+	}
+	if mount.ContainerTarget != "" {
+		t.Fatalf("uv-python must not use a fixed container-home target, got %q", mount.ContainerTarget)
+	}
+	if mount.ContainerTargetMode != CapabilityContainerTargetHostPath {
+		t.Fatalf("unexpected ContainerTargetMode: got %q want %q", mount.ContainerTargetMode, CapabilityContainerTargetHostPath)
+	}
+	if mount.ContainerTargetEnvKey != "UV_PYTHON_INSTALL_DIR" {
+		t.Fatalf("unexpected ContainerTargetEnvKey: got %q want %q", mount.ContainerTargetEnvKey, "UV_PYTHON_INSTALL_DIR")
+	}
+	if mount.Mode != CapabilityModeReadWrite {
+		t.Fatalf("unexpected Mode: got %q want %q", mount.Mode, CapabilityModeReadWrite)
+	}
+	if !mount.Optional {
+		t.Fatal("expected Optional to be true")
 	}
 }
 

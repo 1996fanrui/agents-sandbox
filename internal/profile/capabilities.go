@@ -13,6 +13,19 @@ const (
 	CapabilityModeSocket    CapabilityMode = "socket"
 )
 
+// CapabilityContainerTargetMode controls how a capability mount chooses the
+// Docker mount target inside the container.
+type CapabilityContainerTargetMode string
+
+const (
+	// CapabilityContainerTargetDeclared uses CapabilityMount.ContainerTarget as
+	// the container path. This is the normal host-path -> container-home-path mode.
+	CapabilityContainerTargetDeclared CapabilityContainerTargetMode = "declared_container_path"
+	// CapabilityContainerTargetHostPath uses the resolved host source path as
+	// the container path too. Host and container see the same absolute path.
+	CapabilityContainerTargetHostPath CapabilityContainerTargetMode = "host_path"
+)
+
 // ContainerUserHome is the home directory of the default user inside
 // AgentsSandbox runtime containers. This constant is the single source
 // of truth; all container-side home-relative paths must derive from it.
@@ -30,7 +43,7 @@ const (
 	MountIDSSHAgent       MountID = "ssh-agent"
 	MountIDSSHKnownHosts  MountID = "ssh-known-hosts"
 	MountIDUVCache        MountID = "uv-cache"
-	MountIDUVData         MountID = "uv-data"
+	MountIDUVPython       MountID = "uv-python"
 	MountIDNPM            MountID = "npm"
 	MountIDApt            MountID = "apt"
 	MountIDPulseAudio     MountID = "pulse-audio"
@@ -68,14 +81,18 @@ type MacOSKeychainCredential struct {
 // CapabilityMount is a named host-to-container mount unit.
 // Multiple tools may reference the same mount; the daemon deduplicates by ID.
 type CapabilityMount struct {
-	ID              MountID
-	DefaultHostPath string
-	ContainerTarget string
-	Mode            CapabilityMode
+	ID                  MountID
+	DefaultHostPath     string
+	ContainerTarget     string
+	ContainerTargetMode CapabilityContainerTargetMode
+	Mode                CapabilityMode
 	// Optional marks this mount as individually skippable when the host resource
 	// is unavailable, even if the parent tool is required. This allows a required
 	// tool (e.g. claude) to include mounts that may not exist on all hosts.
 	Optional bool
+	// ContainerTargetEnvKey injects an environment variable whose value is the
+	// resolved container target when this mount is materialized.
+	ContainerTargetEnvKey string
 	// MacOSKeychain, when non-nil, triggers credential projection from macOS
 	// Keychain before bind-mounting. See MacOSKeychainCredential for the full contract.
 	MacOSKeychain *MacOSKeychainCredential
@@ -140,7 +157,7 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		Mode:            CapabilityModeReadWrite,
 		Optional:        true,
 	},
-	// uv-cache holds downloaded packages; uv-data holds uv-managed Python interpreters and global tools.
+	// uv-cache holds downloaded packages; uv-python holds uv-managed Python installations.
 	{
 		ID:              MountIDUVCache,
 		DefaultHostPath: "~/.cache/uv",
@@ -149,11 +166,12 @@ var capabilityMounts = buildMountIndex([]CapabilityMount{
 		Optional:        true,
 	},
 	{
-		ID:              MountIDUVData,
-		DefaultHostPath: "~/.local/share/uv",
-		ContainerTarget: path.Join(ContainerUserHome, ".local/share/uv"),
-		Mode:            CapabilityModeReadWrite,
-		Optional:        true,
+		ID:                    MountIDUVPython,
+		DefaultHostPath:       "~/.local/share/uv/python",
+		ContainerTargetMode:   CapabilityContainerTargetHostPath,
+		Mode:                  CapabilityModeReadWrite,
+		Optional:              true,
+		ContainerTargetEnvKey: "UV_PYTHON_INSTALL_DIR",
 	},
 	{
 		ID:              MountIDNPM,
@@ -204,7 +222,7 @@ var builtInToolingCapabilities = map[ToolID]ToolingCapability{
 	ToolIDClaude:   {MountIDs: []MountID{MountIDClaude, MountIDClaudeJSON, MountIDPulseAudio}},
 	ToolIDCodex:    {MountIDs: []MountID{MountIDCodex, MountIDAgents}},
 	ToolIDGit:      {MountIDs: []MountID{MountIDSSHAgent, MountIDGHAuth, MountIDSSHKnownHosts}},
-	ToolIDUV:       {MountIDs: []MountID{MountIDUVCache, MountIDUVData}},
+	ToolIDUV:       {MountIDs: []MountID{MountIDUVCache, MountIDUVPython}},
 	ToolIDNPM:      {MountIDs: []MountID{MountIDNPM}},
 	ToolIDApt:      {MountIDs: []MountID{MountIDApt}},
 	ToolIDOpenCode: {MountIDs: []MountID{MountIDOpenCodeConfig, MountIDOpenCodeData}},

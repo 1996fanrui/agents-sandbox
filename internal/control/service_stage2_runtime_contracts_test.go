@@ -642,10 +642,11 @@ func TestBuiltinToolMountsPreserveSymlinks(t *testing.T) {
 	// Builtin resources are mounted directly from the host path; symlinks are preserved as-is.
 	runtimeState := &sandboxRuntimeState{}
 	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
-	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, runtimeState)
+	builtinTools, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, runtimeState)
 	if err != nil {
 		t.Fatalf("materializeBuiltinTools failed: %v", err)
 	}
+	mounts := builtinTools.Mounts
 	if len(mounts) != 2 {
 		t.Fatalf("expected two builtin mounts, got %d", len(mounts))
 	}
@@ -680,20 +681,62 @@ func TestMaterializeBuiltinToolsSkipsOptionalWhenHostPathMissing(t *testing.T) {
 		config: ServiceConfig{},
 	}
 
-	// Request an optional tool (uv) whose host paths do not exist.
+	// Request an optional tool (npm) whose host path does not exist.
 	// materializeBuiltinTools should skip them silently instead of failing.
-	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-optional-skip", []string{"uv"}, &sandboxRuntimeState{})
+	builtinTools, err := backendWithoutState.materializeBuiltinTools("sandbox-optional-skip", []string{"npm"}, &sandboxRuntimeState{})
 	if err != nil {
 		t.Fatalf("expected optional tool mounts to be skipped, got error: %v", err)
 	}
+	mounts := builtinTools.Mounts
 	if len(mounts) != 0 {
 		t.Fatalf("expected zero mounts when optional host paths are missing, got %d", len(mounts))
 	}
 
 	// When mixing required and optional tools, the required tool must still fail
 	// if its path is missing.
-	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-mixed", []string{"uv", "claude"}, &sandboxRuntimeState{}); err == nil {
+	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-mixed", []string{"npm", "claude"}, &sandboxRuntimeState{}); err == nil {
 		t.Fatal("expected error for required tool (claude) with missing host path, got nil")
+	}
+}
+
+func TestMaterializeUVBuiltinMountsPythonInstallDirAtHostPath(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	cacheSource := filepath.Join(homeDir, ".cache", "uv")
+	if err := os.MkdirAll(cacheSource, 0o755); err != nil {
+		t.Fatalf("MkdirAll uv cache failed: %v", err)
+	}
+	pythonInstallDir := filepath.Join(homeDir, ".local", "share", "uv", "python")
+	if err := os.MkdirAll(pythonInstallDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll uv python install dir failed: %v", err)
+	}
+
+	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
+	builtinTools, err := backendWithoutState.materializeBuiltinTools("sandbox-uv", []string{"uv"}, &sandboxRuntimeState{})
+	if err != nil {
+		t.Fatalf("materializeBuiltinTools failed: %v", err)
+	}
+
+	mounts := builtinTools.Mounts
+	if len(mounts) != 2 {
+		t.Fatalf("expected uv cache and python mounts, got %d: %#v", len(mounts), mounts)
+	}
+	if mounts[0].Source != cacheSource || mounts[0].Target != "/home/agbox/.cache/uv" {
+		t.Fatalf("unexpected uv cache mount: %#v", mounts[0])
+	}
+	if mounts[1].Source != pythonInstallDir || mounts[1].Target != pythonInstallDir {
+		t.Fatalf("unexpected uv python mount: %#v want source=target=%q", mounts[1], pythonInstallDir)
+	}
+	if mounts[1].ReadOnly {
+		t.Fatal("expected uv python mount to be writable")
+	}
+	if got := builtinTools.Environment["UV_PYTHON_INSTALL_DIR"]; got != pythonInstallDir {
+		t.Fatalf("unexpected UV_PYTHON_INSTALL_DIR: got %q want %q", got, pythonInstallDir)
+	}
+	for _, mount := range mounts {
+		if mount.Target == "/home/agbox/.local/share/uv" {
+			t.Fatalf("uv builtin must not mount the whole data directory into sandbox home: %#v", mount)
+		}
 	}
 }
 
