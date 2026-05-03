@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -25,6 +27,9 @@ import (
 
 // execLogContainerDir is the container-side directory for exec log files when output redirection is enabled.
 const execLogContainerDir = "/var/log/agents-sandbox/"
+
+// supplementalGroupsEnv is reserved for daemon-to-entrypoint communication.
+const supplementalGroupsEnv = "AGENTS_SANDBOX_SUPPLEMENTAL_GROUPS"
 
 var macOSBlockedHostAliases = []string{
 	"host.docker.internal:0.0.0.0",
@@ -65,6 +70,8 @@ type dockerContainerSpec struct {
 	// DiskSizeBytes drives HostConfig.StorageOpt["size"] in plain decimal
 	// bytes. Zero means no per-container disk quota.
 	DiskSizeBytes int64
+	GPUs          string
+	GroupAdd      []string
 }
 
 type dockerExecSpec struct {
@@ -75,6 +82,52 @@ type dockerExecSpec struct {
 	User          string // Override exec user; empty = container default
 	LogDir        string // Container-side log directory; non-empty enables output redirection
 	ExecID        string // Used to construct log file names when LogDir is set
+	Stdout        io.Writer
+	Stderr        io.Writer
+}
+
+var gpuDeviceGroupGlobPatterns = []string{
+	"/dev/nvidia*",
+	"/dev/dri/renderD*",
+}
+
+var gpuDeviceStat = os.Stat
+
+func discoverGPUDeviceGroups() ([]string, error) {
+	groupIDs := make(map[uint32]struct{})
+	for _, pattern := range gpuDeviceGroupGlobPatterns {
+		paths, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("scan GPU device groups with pattern %q: %w", pattern, err)
+		}
+		for _, path := range paths {
+			info, err := gpuDeviceStat(path)
+			if err != nil {
+				return nil, fmt.Errorf("stat GPU device %s: %w", path, err)
+			}
+			if info.Mode()&os.ModeDevice == 0 {
+				continue
+			}
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok {
+				return nil, fmt.Errorf("stat GPU device %s: unsupported stat type %T", path, info.Sys())
+			}
+			groupIDs[stat.Gid] = struct{}{}
+		}
+	}
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
+	sorted := make([]int, 0, len(groupIDs))
+	for gid := range groupIDs {
+		sorted = append(sorted, int(gid))
+	}
+	sort.Ints(sorted)
+	groups := make([]string, 0, len(sorted))
+	for _, gid := range sorted {
+		groups = append(groups, strconv.Itoa(gid))
+	}
+	return groups, nil
 }
 
 // buildPortBindings translates dockerPortMapping entries into the Docker API
@@ -182,6 +235,7 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		Init:         ptrTo(true),
 		Mounts:       hostMounts,
 		PortBindings: portBindings,
+		GroupAdd:     append([]string(nil), spec.GroupAdd...),
 		// Black-hole Docker Desktop's stable host-discovery aliases on macOS.
 		// This is a DNS-layer best-effort control; Linux host isolation is
 		// enforced separately via nftables on the sandbox network.
@@ -204,6 +258,15 @@ func (backend *dockerRuntimeBackend) dockerContainerCreate(ctx context.Context, 
 		// Docker's storage-opt size= key takes the byte count as a plain
 		// decimal string (no "g"/"m" suffix through the HTTP API).
 		hostConfig.StorageOpt = map[string]string{"size": strconv.FormatInt(spec.DiskSizeBytes, 10)}
+	}
+	if spec.GPUs == "all" {
+		hostConfig.Resources.DeviceRequests = []container.DeviceRequest{
+			{
+				Driver:       "nvidia",
+				Count:        -1,
+				Capabilities: [][]string{{"gpu"}},
+			},
+		}
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.NetworkName != "" {
@@ -444,14 +507,22 @@ func (backend *dockerRuntimeBackend) dockerExec(ctx context.Context, spec docker
 		return backend.pollExecCompletion(ctx, createResponse.ID)
 	}
 
-	// Attached mode (post-start hooks): drain output to io.Discard.
+	// Attached mode drains output so completion is observed through stream closure.
+	stdout := io.Discard
+	if spec.Stdout != nil {
+		stdout = spec.Stdout
+	}
+	stderr := io.Discard
+	if spec.Stderr != nil {
+		stderr = spec.Stderr
+	}
 	attachResponse, err := backend.dockerClient.ContainerExecAttach(ctx, createResponse.ID, container.ExecAttachOptions{Tty: false})
 	if err != nil {
 		return 0, err
 	}
 	defer attachResponse.Close()
 
-	if _, err := stdcopy.StdCopy(io.Discard, io.Discard, attachResponse.Reader); err != nil {
+	if _, err := stdcopy.StdCopy(stdout, stderr, attachResponse.Reader); err != nil {
 		if ctx.Err() != nil {
 			return -1, ctx.Err()
 		}

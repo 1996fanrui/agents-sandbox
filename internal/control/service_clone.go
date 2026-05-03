@@ -67,6 +67,7 @@ func cloneCreateSpec(spec *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 		CpuLimit:            spec.GetCpuLimit(),
 		MemoryLimit:         spec.GetMemoryLimit(),
 		DiskLimit:           spec.GetDiskLimit(),
+		Gpus:                spec.GetGpus(),
 	}
 	if spec.GetIdleTtl() != nil {
 		cloned.IdleTtl = durationpb.New(spec.GetIdleTtl().AsDuration())

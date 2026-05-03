@@ -7,6 +7,10 @@
 #   HOST_UID
 #   HOST_GID
 #
+# Optional env vars:
+#   AGENTS_SANDBOX_SUPPLEMENTAL_GROUPS comma-separated numeric group IDs to
+#   register on the runtime user.
+#
 # This entrypoint creates a non-root runtime user whose home directory stays
 # aligned with the built-in resource targets under /home/agbox.
 set -e
@@ -42,6 +46,25 @@ else
         fi
         USERNAME="$EXISTING_USER"
     fi
+fi
+
+if [ "$HOST_UID" != "0" ] && [ -n "${AGENTS_SANDBOX_SUPPLEMENTAL_GROUPS:-}" ]; then
+    IFS=',' read -ra SUPPLEMENTAL_GROUP_IDS <<< "$AGENTS_SANDBOX_SUPPLEMENTAL_GROUPS"
+    for GROUP_ID in "${SUPPLEMENTAL_GROUP_IDS[@]}"; do
+        if [ -z "$GROUP_ID" ]; then
+            continue
+        fi
+        if ! [[ "$GROUP_ID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: AGENTS_SANDBOX_SUPPLEMENTAL_GROUPS contains non-numeric group ID: $GROUP_ID" >&2
+            exit 1
+        fi
+        GROUP_NAME=$(getent group "$GROUP_ID" | cut -d: -f1 || true)
+        if [ -z "$GROUP_NAME" ]; then
+            GROUP_NAME="agbox-supplemental-${GROUP_ID}"
+            groupadd -g "$GROUP_ID" "$GROUP_NAME"
+        fi
+        usermod -aG "$GROUP_NAME" "$USERNAME"
+    done
 fi
 
 mkdir -p "$USER_HOME"

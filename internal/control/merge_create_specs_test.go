@@ -126,6 +126,18 @@ func TestMergeCreateSpecs_MapKeyMerge(t *testing.T) {
 	}
 }
 
+func TestMergeCreateSpecsGPUsScalarOverride(t *testing.T) {
+	base := &agboxv1.CreateSpec{Gpus: "all"}
+
+	if got := mergeCreateSpecs(base, &agboxv1.CreateSpec{}).GetGpus(); got != "all" {
+		t.Fatalf("empty override should preserve base gpus, got %q", got)
+	}
+
+	if got := mergeCreateSpecs(&agboxv1.CreateSpec{}, &agboxv1.CreateSpec{Gpus: "all"}).GetGpus(); got != "all" {
+		t.Fatalf("non-empty override should set gpus, got %q", got)
+	}
+}
+
 // TestMergeCreateSpecs_BuiltinToolsDedup covers AT-OJB2: builtin_tools is
 // deduped after append, preserving first-occurrence order, so that declaring
 // the same tool in both base and override is accepted (does not trigger the

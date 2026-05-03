@@ -37,6 +37,9 @@ type YAMLConfig struct {
 	CPULimit    string `yaml:"cpu_limit"`
 	MemoryLimit string `yaml:"memory_limit"`
 	DiskLimit   string `yaml:"disk_limit"`
+	// GPUs follows Docker --gpus device-request syntax for the primary
+	// container. MVP accepts only empty and "all".
+	GPUs string `yaml:"gpus"`
 }
 
 // YAMLMountSpec describes a bind-mount from host to container.
@@ -134,6 +137,7 @@ func yamlConfigToCreateSpec(cfg *YAMLConfig) (*agboxv1.CreateSpec, error) {
 		CpuLimit:     cfg.CPULimit,
 		MemoryLimit:  cfg.MemoryLimit,
 		DiskLimit:    cfg.DiskLimit,
+		Gpus:         cfg.GPUs,
 	}
 	if cfg.Command != nil {
 		spec.Command = append([]string(nil), (*cfg.Command)...)
@@ -332,6 +336,9 @@ func mergeCreateSpecs(base, override *agboxv1.CreateSpec) *agboxv1.CreateSpec {
 	}
 	if override.GetDiskLimit() != "" {
 		result.DiskLimit = override.GetDiskLimit()
+	}
+	if override.GetGpus() != "" {
+		result.Gpus = override.GetGpus()
 	}
 
 	// Repeated structured fields: base + override append (base first).

@@ -419,6 +419,65 @@ func TestSandboxConfigPersistence(t *testing.T) {
 	}
 }
 
+func TestGPUCreateSandboxRecordAndRestorePreserveCreateSpec(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "ids.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	firstRuntime := &capturingRuntimeBackend{}
+	first := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		TransitionDelay: 5 * time.Millisecond,
+		PollInterval:    2 * time.Millisecond,
+		runtimeBackend:  firstRuntime,
+	}, dbPath)
+	createResp, err := first.client.CreateSandbox(context.Background(), &agboxv1.CreateSandboxRequest{
+		SandboxId: "gpu-config-persist",
+		CreateSpec: &agboxv1.CreateSpec{
+			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
+			Gpus:  "all",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+	sandboxID := createResp.GetSandbox().GetSandboxId()
+	waitForSandboxState(t, first.client, sandboxID, agboxv1.SandboxState_SANDBOX_STATE_READY)
+
+	if got := firstRuntime.lastCreateSpec.GetGpus(); got != "all" {
+		t.Fatalf("runtime create spec lost gpus: got %q want all", got)
+	}
+	loaded, err := first.service.config.eventStore.LoadSandboxConfig(sandboxID)
+	if err != nil {
+		t.Fatalf("LoadSandboxConfig failed: %v", err)
+	}
+	if got := loaded.GetGpus(); got != "all" {
+		t.Fatalf("persisted create spec lost gpus: got %q want all", got)
+	}
+	first.close()
+
+	second := newPersistentBufconnHarness(t, ctx, ServiceConfig{
+		PollInterval: 2 * time.Millisecond,
+		runtimeBackend: &capturingRuntimeBackend{
+			inspectResults: map[string]ContainerInspectResult{
+				dockerPrimaryContainerName(sandboxID): {Exists: true, Running: true},
+			},
+		},
+	}, dbPath)
+	second.service.mu.RLock()
+	record := second.service.boxes[sandboxID]
+	var restoredGPUs string
+	if record != nil {
+		restoredGPUs = record.createSpec.GetGpus()
+	}
+	second.service.mu.RUnlock()
+	if record == nil {
+		t.Fatalf("expected restored sandbox record for %s", sandboxID)
+	}
+	if restoredGPUs != "all" {
+		t.Fatalf("restored create spec lost gpus: got %q want all", restoredGPUs)
+	}
+}
+
 func TestExecConfigPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "ids.db")
 	ctx, cancel := context.WithCancel(context.Background())
