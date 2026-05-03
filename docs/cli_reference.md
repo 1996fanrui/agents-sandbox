@@ -94,6 +94,8 @@ agbox codex --workspace /path/to/project
 agbox claude --mode long-running
 # Resource limits and environment variables
 agbox claude --cpu-limit 2 --memory-limit 4g --disk-limit 10g --env MY_API_KEY=secret
+# GPU device access for the primary container
+agbox claude --gpus all
 # Override sandbox ID
 agbox codex --sandbox-id my-custom-sandbox
 # Bind-mount a host directory (read-only by default; suffix :writable to enable writes)
@@ -141,6 +143,7 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 | cpuLimit | CPU limit | None | None | None | None | None | `--cpu-limit` (Docker `--cpus` format) |
 | memoryLimit | Memory limit | None | None | None | None | None | `--memory-limit` (Docker `--memory` format) |
 | diskLimit | Disk limit | None | None | None | None | None | `--disk-limit` (Docker `--storage-opt size=` format) |
+| gpus | Primary container GPU device access | None | None | None | None | None | `--gpus` (`all` requests Docker GPU device access) |
 | sandboxIDGen | Custom ID generator | No | No | openclaw-XXXXXX | paseo-XXXXXX | No | `--sandbox-id` |
 | configYaml | Embedded sandbox config | No | No | Yes (image, command, mounts, ports, envs) | Yes (image, command, envs) | No | None |
 | preFlight | Pre-flight validation | No | No | Auth check | Builtin tool host-path filter | No | None |
@@ -159,6 +162,7 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 - openclaw auto-generates sandbox IDs matching `openclaw-XXXXXX` (6 hex chars); paseo auto-generates `paseo-XXXXXX`; other types let the daemon generate IDs. `--sandbox-id` overrides any generator; empty or omitted values fall through to the generator or daemon auto-generation.
 - `--env` passes environment variables to `CreateSpec.Envs`. Multiple `--env` flags are merged; duplicate keys use the last value. The daemon performs key-level merge with `configYaml` envs.
 - `--cpu-limit`, `--memory-limit`, and `--disk-limit` pass resource limits directly to `CreateSpec` fields. Values are not validated by the CLI; invalid formats are rejected by the daemon or Docker.
+- `--gpus all` passes a primary-container Docker GPU device request to `CreateSpec.gpus`. The empty default requests no GPU access. This flag is only device access; it is not a VRAM quota, compute quota, or resource limit.
 - `--mount` accepts `host:container` (read-only) or `host:container:writable`. Other Docker-style suffixes (`:ro`, `:rw`, etc.) are rejected — use `:writable` to opt into write access. User mounts are appended to any preset YAML mounts; the daemon rejects duplicate `target` paths between mounts and copies.
 - `--port` accepts `host:container[/proto]`. Both port numbers must be in `1..65535`; `proto` is case-insensitive and must be one of `tcp` (default), `udp`, or `sctp`. The daemon rejects duplicate `(host_port, protocol)` pairs across preset and user entries.
 - `--copy` accepts `host:container` and is appended **after** the workspace copy. The daemon rejects duplicate `target` paths between copies and mounts.
@@ -167,7 +171,7 @@ Agent types declare their own capabilities, orthogonal to session mode. Each cap
 
 ### Command Surface
 
-Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--command`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--sandbox-id`, `--mount`, `--port`, `--copy`, `--label`).
+Each registered agent type has its own dedicated top-level command: `agbox claude`, `agbox codex`, `agbox openclaw`, `agbox paseo`. They do not accept positional arguments — the agent type is implicit in the command name. All of them reuse the same underlying session flags (`--mode`, `--workspace`, `--builtin-tool`, `--command`, `--env`, `--cpu-limit`, `--memory-limit`, `--disk-limit`, `--gpus`, `--sandbox-id`, `--mount`, `--port`, `--copy`, `--label`).
 
 `--command` can be used with registered agent types to override the default command. In interactive mode, it replaces the TTY command launched via `docker exec`. In long-running mode, it replaces the container primary command (under tini). The value is split by whitespace via `strings.Fields` (no shell quoting).
 

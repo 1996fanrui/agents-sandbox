@@ -8,6 +8,7 @@ The YAML schema is a 1:1 mapping of the proto `CreateSpec` message. Every field 
 
 ```yaml
 image: coding-runtime:latest
+gpus: all
 
 copies:
   - source: /absolute/path/to/project
@@ -79,11 +80,14 @@ companion_containers:
 
 All three limits (`cpu_limit`, `memory_limit`, `disk_limit`) are per-container and use Docker-native HostConfig keys directly: `HostConfig.NanoCPUs`, `HostConfig.Memory`, and `HostConfig.StorageOpt["size"]`. The top-level values constrain the primary container only; each companion carries its own independent set under `companion_containers.<name>`. There is no shared sandbox-level cgroup. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for host requirements.
 
+GPU requests are separate from CPU, memory, and disk enforcement. `gpus: all` is a Docker `--gpus all` style device access request for the primary container only. It is only device access; it is not a VRAM quota, compute quota, or resource limit.
+
 ## Field Reference
 
 | YAML Key | Proto Field | Type | Description |
 |---|---|---|---|
 | `image` | `CreateSpec.image` | string | Container image for the primary sandbox |
+| `gpus` | `CreateSpec.gpus` | string | GPU device request for the primary container. Omit or set `""` for no GPU access; `all` requests all NVIDIA GPUs through Docker device access. It is not a VRAM quota, compute quota, or resource limit. |
 | `copies` | `CreateSpec.copies` | list of CopySpec | Files to copy into the container |
 | `mounts` | `CreateSpec.mounts` | list of MountSpec | Bind mounts from host to container |
 | `builtin_tools` | `CreateSpec.builtin_tools` | list of string | Built-in resources to provision |
@@ -173,7 +177,7 @@ When both YAML and explicit `CreateSpec` parameters are provided, the YAML is th
 
 | Field Type | Merge Behavior |
 |---|---|
-| Scalar (`image`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`) | Non-empty / non-nil override replaces base |
+| Scalar (`image`, `gpus`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`) | Non-empty / non-nil override replaces base |
 | Map (`labels`, `envs`) | Key-level merge: override key wins, base-only keys preserved |
 | Repeated structured (`mounts`, `copies`, `ports`, `builtin_tools`, `companion_containers`) | Base + override append, base first |
 | `command` (primary container only) | Override non-empty replaces base entirely (single-command semantics; append has no executable meaning) |

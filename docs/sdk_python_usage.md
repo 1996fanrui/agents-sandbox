@@ -79,6 +79,7 @@ Slow operations use an explicit `wait` parameter. For the full accepted-vs-compl
 sandbox = await client.create_sandbox(
     image="ghcr.io/agents-sandbox/coding-runtime:latest",
     sandbox_id="demo-sandbox",
+    gpus="all",
     mounts=(MountSpec(source="/path/to/workspace", target="/workspace", writable=True),),
     companion_containers=(
         CompanionContainerSpec(
@@ -96,6 +97,8 @@ sandbox = await client.create_sandbox(
     wait=False,
 )
 ```
+
+`gpus="all"` requests Docker GPU device access for the primary container. Omit it or pass an empty string for no GPU access. This parameter is only device access; it is not a VRAM quota, compute quota, or resource limit.
 
 `wait=True`: the SDK subscribes to the event stream and waits using protocol ordering. For exec waits, the `ExecHandle.last_event_sequence` is the only supported handoff to `subscribe_sandbox_events`.
 
