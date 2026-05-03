@@ -38,7 +38,7 @@ const (
 // Keeping this in sync with dockerPrimaryContainerName in internal/control is a known
 // coupling point: if the daemon changes its naming scheme, this function must be updated.
 func sanitizeContainerName(value string) string {
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-", ".", "-", "_", "-")
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-", ".", "-")
 	return replacer.Replace(value)
 }
 

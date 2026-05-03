@@ -12,6 +12,20 @@ import (
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
 )
 
+func TestDockerRuntimeNamesPreserveSandboxIDUnderscores(t *testing.T) {
+	sandboxID := "paseo-ai_tools-1234"
+
+	if got, want := dockerNetworkName(sandboxID), "agbox-net-paseo-ai_tools-1234"; got != want {
+		t.Fatalf("network name mismatch: got %q want %q", got, want)
+	}
+	if got, want := dockerPrimaryContainerName(sandboxID), "agbox-primary-paseo-ai_tools-1234"; got != want {
+		t.Fatalf("primary container name mismatch: got %q want %q", got, want)
+	}
+	if got, want := dockerCompanionContainerName(sandboxID, "side_car"), "agbox-cc-paseo-ai_tools-1234-side_car"; got != want {
+		t.Fatalf("companion container name mismatch: got %q want %q", got, want)
+	}
+}
+
 func TestPrimaryContainerEnvironmentIncludesHostIdentity(t *testing.T) {
 	environment := primaryContainerEnvironment(nil)
 
