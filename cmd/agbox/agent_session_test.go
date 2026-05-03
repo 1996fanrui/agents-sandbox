@@ -170,6 +170,14 @@ func newReadyMock(eventCh chan *agboxv1.SandboxEvent) *mockAgentClient {
 
 // --- Tests ---
 
+func TestPrimaryContainerNamePreservesSandboxIDUnderscores(t *testing.T) {
+	got := primaryContainerName("paseo-ai_tools-1234")
+	want := "agbox-primary-paseo-ai_tools-1234"
+	if got != want {
+		t.Fatalf("primary container name mismatch: got %q want %q", got, want)
+	}
+}
+
 func TestRunAgentSession_InteractiveTTYCheck(t *testing.T) {
 	// In test environment, stdin is not a TTY, so interactive mode should fail
 	// before using the client at all.

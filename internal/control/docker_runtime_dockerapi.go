@@ -363,7 +363,7 @@ func dockerCompanionContainerName(sandboxID string, name string) string {
 }
 
 func sanitizeRuntimeName(value string) string {
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-", ".", "-", "_", "-")
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-", ".", "-")
 	return replacer.Replace(value)
 }
 
