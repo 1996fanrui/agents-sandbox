@@ -42,6 +42,11 @@ type dockerMount struct {
 	ReadOnly bool
 }
 
+type builtinToolMaterialization struct {
+	Mounts      []dockerMount
+	Environment map[string]string
+}
+
 type dockerPortMapping struct {
 	ContainerPort uint32
 	HostPort      uint32

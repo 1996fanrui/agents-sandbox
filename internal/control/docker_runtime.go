@@ -239,10 +239,11 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		_ = backend.deleteRuntimeArtifacts(cleanupCtx, state)
 	}()
 
-	mounts, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state)
+	builtinTools, err := backend.materializeBuiltinTools(record.handle.GetSandboxId(), record.createSpec.GetBuiltinTools(), state)
 	if err != nil {
 		return runtimeCreateResult{}, err
 	}
+	mounts := builtinTools.Mounts
 	genericMounts, err := backend.materializeGenericMounts(record.createSpec.GetMounts())
 	if err != nil {
 		return runtimeCreateResult{}, err
@@ -314,6 +315,9 @@ func (backend *dockerRuntimeBackend) CreateSandbox(ctx context.Context, record *
 		}
 	}
 	primaryEnv := primaryContainerEnvironment(mounts)
+	for k, v := range builtinTools.Environment {
+		primaryEnv[k] = v
+	}
 	for k, v := range record.createSpec.GetEnvs() {
 		primaryEnv[k] = v
 	}

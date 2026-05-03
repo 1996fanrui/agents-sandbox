@@ -31,7 +31,7 @@ Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to
 | `claude` | `~/.claude` → `/home/agbox/.claude` (rw), `~/.claude.json` → `/home/agbox/.claude.json` (rw), `$XDG_RUNTIME_DIR/pulse/native` → `/pulse-audio` (socket forwarding, when host socket exists) |
 | `codex` | `~/.codex` → `/home/agbox/.codex` (rw), `~/.agents` → `/home/agbox/.agents` (rw) |
 | `git` | `SSH_AUTH_SOCK` → `/ssh-agent` (socket forwarding), `~/.config/gh` → `/home/agbox/.config/gh` (read-only), `~/.ssh/known_hosts` → `/home/agbox/.ssh/known_hosts` (read-write) |
-| `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (rw), `~/.local/share/uv` → `/home/agbox/.local/share/uv` (rw) |
+| `uv` | `~/.cache/uv` → `/home/agbox/.cache/uv` (rw), `~/.local/share/uv/python` → the same resolved host path inside the container (rw), plus `UV_PYTHON_INSTALL_DIR` set to that path |
 | `npm` | `~/.npm` → `/home/agbox/.npm` (read-write) |
 | `apt` | `~/.cache/agents-sandbox-apt` → `/var/cache/apt/archives` (read-write) |
 | `opencode` | `~/.config/opencode` → `/home/agbox/.config/opencode` (rw), `~/.local/share/opencode` → `/home/agbox/.local/share/opencode` (rw) |
@@ -39,7 +39,7 @@ Tools are the user-facing names passed in `builtin_tools`. Each tool resolves to
 Notes:
 - `codex` mounts both `~/.codex` and `~/.agents`; `~/.agents` is the shared agents state directory.
 - `git` bundles SSH agent forwarding, GitHub CLI auth, and SSH known-hosts; requesting `git` is equivalent to requesting all three.
-- `uv` mounts both the package cache and the data directory holding Python interpreters and globally installed tools.
+- `uv` mounts the package cache under the sandbox home, but mounts uv-managed Python installations at the host-identical absolute path and sets `UV_PYTHON_INSTALL_DIR` accordingly. The daemon does not mount the whole uv data directory into `/home/agbox`.
 - `claude` includes optional PulseAudio socket forwarding for voice support; the mount is silently skipped when the host socket does not exist.
 
 These are daemon-defined capabilities. Callers may select from this set but may not replace them with arbitrary host paths. The minimal base runtime image asset is under `images/base-runtime/`; the HOME-aligned coding runtime image is under `images/coding-runtime/`.
