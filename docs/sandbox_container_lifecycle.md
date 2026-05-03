@@ -96,7 +96,8 @@ flowchart TB
     A[CreateSandbox accepted] --> B[Allocate sandbox_id and persist SANDBOX_ACCEPTED]
     B --> C[Validate create spec]
     C --> D[Create dedicated network]
-    D --> E[Materialize filesystem inputs and built-in resources]
+    D --> E0[Create per-sandbox mount staging directory]
+    E0 --> E[Materialize filesystem inputs and built-in resources]
     E --> E1[Create exec log directory and bind-mount into primary container]
     E1 --> F[Create companion containers]
     F --> G[Start primary and all companion containers in parallel]
@@ -110,7 +111,7 @@ Create-path rules:
 - `CreateSandbox` returns immediately after acceptance; the caller must not infer readiness from the response alone.
 - The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid companion container declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
 - If materialization fails after resources exist, cleanup continues on a daemon-owned background context with bounded timeout.
-- Create-failure cleanup removes the dedicated network and any partially created containers.
+- Create-failure cleanup removes the dedicated network, any partially created containers, and the per-sandbox mount staging directory.
 
 ## Resume Path
 

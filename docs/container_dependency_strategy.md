@@ -50,7 +50,9 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 
 ### Generic mounts
 
-- The mount source must be a real file, directory, or Unix socket, not a symlink.
+- Mount sources may be files, directories, Unix sockets, or symlinks. The daemon follows symlinks to verify the target type.
+- All mount sources (builtin tools and generic mounts) are staged through a per-sandbox directory under `{SandboxDataRoot}/{sandbox_id}/`. The daemon registers each mount source in this directory and uses the registered path as the bind-mount source. The sole exception is the Docker Desktop SSH agent magic path (`/run/host-services/ssh-auth.sock`), which exists only inside the Docker VM and is passed through directly.
+- Staging entry naming: `{md5(abs_path)}_{basename}` — flat structure, no subdirectories.
 - If the mount cannot be provided safely, the daemon fails fast.
 - The daemon does not silently rewrite a mount into a copy.
 
@@ -64,9 +66,9 @@ When an imported runtime image needs host-backed authentication material, `HOST_
 
 ### Built-in resources
 
-- Regular directories use bind mounts when safe.
-- Directory trees with escaping symlinks are bind-mounted directly from the host path.
+- All builtin resource mounts (directories, files, sockets) are staged through the per-sandbox directory, the same as generic mounts.
 - Socket resources such as `ssh-agent` and `pulse-audio` are forwarded only when the host path is a real Unix socket.
+- The Docker Desktop SSH agent magic path is passed through directly without staging (see Generic mounts above).
 
 ## Companion Container Model
 

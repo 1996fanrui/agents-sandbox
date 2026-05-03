@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	agboxv1 "github.com/1996fanrui/agents-sandbox/api/generated/agboxv1"
@@ -474,6 +475,9 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 				CompanionContainers:   companionContainers,
 				PrimaryCrashloopState: &crashloopState{},
 			}
+			if s.config.SandboxDataRoot != "" {
+				record.runtimeState.MountStagingDir = filepath.Join(s.config.SandboxDataRoot, sandboxID)
+			}
 		}
 
 		// State reconciliation based on Docker inspect.
@@ -525,7 +529,7 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 				}); err != nil {
 					return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
 				}
-				record.runtimeState = nil
+				// runtimeState preserved for DeleteSandbox cleanup (mount staging dir, network).
 			}
 			// Container exited but exists is expected for STOPPED.
 		case agboxv1.SandboxState_SANDBOX_STATE_PENDING:
@@ -537,7 +541,7 @@ func (s *Service) restorePersistedSandboxes(ctx context.Context) error {
 			}); err != nil {
 				return fmt.Errorf("append SANDBOX_FAILED for sandbox %s: %w", sandboxID, err)
 			}
-			record.runtimeState = nil
+			// runtimeState preserved for DeleteSandbox cleanup (symlink dir, network).
 		case agboxv1.SandboxState_SANDBOX_STATE_DELETING:
 			reconciledState = agboxv1.SandboxState_SANDBOX_STATE_DELETED
 			if err := s.appendEventLocked(record, agboxv1.EventType_SANDBOX_DELETED, eventMutation{

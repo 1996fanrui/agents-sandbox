@@ -63,6 +63,9 @@ func resolveStartupConfig(args []string, lookupEnv func(string) (string, bool)) 
 	if serviceConfig.ArtifactOutputRoot == "" {
 		serviceConfig.ArtifactOutputRoot = platform.ExecLogRoot(lookupEnv)
 	}
+	if serviceConfig.SandboxDataRoot == "" {
+		serviceConfig.SandboxDataRoot = platform.SandboxDataRoot(lookupEnv)
+	}
 	return startupConfig{
 		socketPath:    socketPath,
 		lockPath:      lockPath,

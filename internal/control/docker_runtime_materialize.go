@@ -1,6 +1,8 @@
 package control
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,8 +22,47 @@ import (
 // by Docker Desktop's LinuxKit VM, so this synthetic socket must be used instead.
 const dockerDesktopSSHAgentSocket = "/run/host-services/ssh-auth.sock"
 
+// createMountSymlink creates a symlink in symlinkDir that points to sourcePath.
+// The symlink name is "{md5hex}_{basename}" where md5hex is the MD5 hash of
+// the absolute source path (32 hex chars) and basename is filepath.Base of the
+// source. This flat naming avoids collisions between different parents with the
+// same basename while keeping names human-readable.
+//
+// Idempotent: if the symlink already exists and points to the same target, it
+// is left untouched. If it exists but points elsewhere, it is replaced.
+func createMountSymlink(symlinkDir string, sourcePath string) (string, error) {
+	cleanPath := filepath.Clean(sourcePath)
+	hash := md5.Sum([]byte(cleanPath))
+	hashHex := hex.EncodeToString(hash[:])
+
+	basename := filepath.Base(cleanPath)
+	if basename == "/" || basename == "." {
+		basename = "_root"
+	}
+
+	symlinkName := hashHex + "_" + basename
+	symlinkPath := filepath.Join(symlinkDir, symlinkName)
+
+	existing, err := os.Readlink(symlinkPath)
+	if err == nil {
+		if existing == cleanPath {
+			return symlinkPath, nil
+		}
+		// Symlink exists but points to a different target; replace it.
+		if err := os.Remove(symlinkPath); err != nil {
+			return "", fmt.Errorf("remove stale symlink %s: %w", symlinkPath, err)
+		}
+	}
+
+	if err := os.Symlink(cleanPath, symlinkPath); err != nil {
+		return "", fmt.Errorf("create symlink %s -> %s: %w", symlinkPath, cleanPath, err)
+	}
+	return symlinkPath, nil
+}
+
 func (backend *dockerRuntimeBackend) materializeGenericMounts(
 	requests []*agboxv1.MountSpec,
+	symlinkDir string,
 ) ([]dockerMount, error) {
 	mounts := make([]dockerMount, 0, len(requests))
 	for _, request := range requests {
@@ -35,19 +76,24 @@ func (backend *dockerRuntimeBackend) materializeGenericMounts(
 			return nil, fmt.Errorf("mount target must be absolute: %s", request.GetTarget())
 		}
 		sourcePath := request.GetSource()
-		info, err := os.Lstat(sourcePath)
+		info, err := os.Stat(sourcePath)
 		if err != nil {
 			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("mount source must not be a symlink: %s", sourcePath)
 		}
 		isSocket := info.Mode()&os.ModeSocket != 0
 		if !info.Mode().IsRegular() && !info.IsDir() && !isSocket {
 			return nil, fmt.Errorf("mount source must be a file, directory, or unix socket: %s", sourcePath)
 		}
+		mountSource := sourcePath
+		if symlinkDir != "" {
+			symlinkPath, err := createMountSymlink(symlinkDir, sourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("create symlink for mount source %s: %w", sourcePath, err)
+			}
+			mountSource = symlinkPath
+		}
 		mounts = append(mounts, dockerMount{
-			Source:   sourcePath,
+			Source:   mountSource,
 			Target:   request.GetTarget(),
 			ReadOnly: !request.GetWritable(),
 		})
@@ -101,7 +147,7 @@ func validateGenericCopies(requests []*agboxv1.CopySpec) ([]deferredCopy, error)
 func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 	sandboxID string,
 	resources []string,
-	state *sandboxRuntimeState,
+	symlinkDir string,
 ) ([]dockerMount, error) {
 	if len(resources) == 0 {
 		return nil, nil
@@ -165,6 +211,7 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 			// Docker Desktop magic paths (e.g. /run/host-services/ssh-auth.sock)
 			// exist only inside the Docker VM, not on the host filesystem.
 			// Skip the host-side stat check for these paths.
+			socketSource := sourcePath
 			if sourcePath != dockerDesktopSSHAgentSocket {
 				if err := requireSocketPath(sourcePath); err != nil {
 					if entry.optional {
@@ -175,15 +222,22 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 					}
 					return nil, err
 				}
+				if symlinkDir != "" {
+					symlinkPath, err := createMountSymlink(symlinkDir, sourcePath)
+					if err != nil {
+						return nil, fmt.Errorf("create symlink for socket mount %s: %w", sourcePath, err)
+					}
+					socketSource = symlinkPath
+				}
 			}
 			mounts = append(mounts, dockerMount{
-				Source:   sourcePath,
+				Source:   socketSource,
 				Target:   mount.ContainerTarget,
 				ReadOnly: false,
 			})
 		default:
 			writable := mount.Mode == profile.CapabilityModeReadWrite
-			actualSource, readOnly, err := backend.materializeBuiltinToolPath(sourcePath, writable, state)
+			actualSource, readOnly, err := backend.materializeBuiltinToolPath(sourcePath, writable, symlinkDir)
 			if err != nil {
 				if entry.optional {
 					logger.Info("skipping optional builtin mount: host path not available",
@@ -206,14 +260,17 @@ func (backend *dockerRuntimeBackend) materializeBuiltinTools(
 func (backend *dockerRuntimeBackend) materializeBuiltinToolPath(
 	sourcePath string,
 	writable bool,
-	state *sandboxRuntimeState,
+	symlinkDir string,
 ) (string, bool, error) {
-	// Builtin tools are always bind-mounted as-is, including any symlinks.
-	// Builtin tools are always bind-mounted as-is, including any symlinks. These are trusted host directories
-	// (tool configs, caches) that may contain symlinks to arbitrary host paths,
-	// and the container is expected to see them exactly as they appear on the host.
 	if _, err := os.Stat(sourcePath); err != nil {
 		return "", false, err
+	}
+	if symlinkDir != "" {
+		symlinkPath, err := createMountSymlink(symlinkDir, sourcePath)
+		if err != nil {
+			return "", false, err
+		}
+		return symlinkPath, !writable, nil
 	}
 	return sourcePath, !writable, nil
 }

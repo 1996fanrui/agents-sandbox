@@ -239,12 +239,26 @@ func validateGenericSourcePath(kind string, source string) error {
 	if !filepath.IsAbs(source) {
 		return fmt.Errorf("%s source must be absolute: %s", kind, source)
 	}
-	info, err := os.Lstat(source)
+	// Mount sources may be symlinks (the daemon stages each mount source in a
+	// per-sandbox directory, and users may provide symlink paths). Copy sources
+	// must not be symlinks because the tar stream construction requires
+	// different handling.
+	if kind == "copy" {
+		info, err := os.Lstat(source)
+		if err != nil {
+			return fmt.Errorf("%s source path is invalid: %w", kind, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s source must not be a symlink: %s", kind, source)
+		}
+		if !info.Mode().IsRegular() && !info.IsDir() {
+			return fmt.Errorf("%s source must be a file or directory: %s", kind, source)
+		}
+		return nil
+	}
+	info, err := os.Stat(source)
 	if err != nil {
 		return fmt.Errorf("%s source path is invalid: %w", kind, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s source must not be a symlink: %s", kind, source)
 	}
 	isSocket := info.Mode()&os.ModeSocket != 0
 	if !info.Mode().IsRegular() && !info.IsDir() && !isSocket {

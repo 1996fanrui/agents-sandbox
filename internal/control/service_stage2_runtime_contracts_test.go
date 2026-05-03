@@ -219,6 +219,70 @@ func newDockerRuntimeBackendForTest(t *testing.T, handler func(http.ResponseWrit
 	}
 }
 
+// ---- AT-COC6: CreateSandbox creates the per-sandbox mount staging directory ----
+
+func TestCreateSandboxCreatesMountStagingDir(t *testing.T) {
+	sandboxDataRoot := filepath.Join(t.TempDir(), "mounts")
+	sandboxID := "mount-staging-dir-create"
+	networkName := dockerNetworkName(sandboxID)
+	primaryContainerName := dockerPrimaryContainerName(sandboxID)
+
+	backend := newDockerRuntimeBackendForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
+			writeDockerJSON(t, w, map[string]string{"Id": "sha256:test"})
+		case r.Method == http.MethodPost && path == "/networks/create":
+			writeDockerJSON(t, w, map[string]string{"Id": "network-1"})
+		case r.Method == http.MethodGet && path == "/networks/"+networkName:
+			writeDockerJSON(t, w, network.Inspect{
+				ID: "abc123",
+				IPAM: network.IPAM{
+					Config: []network.IPAMConfig{
+						{Subnet: "172.18.0.0/16", Gateway: "172.18.0.1"},
+					},
+				},
+				Options: map[string]string{
+					"com.docker.network.bridge.name": "br-abc123",
+				},
+			})
+		case r.Method == http.MethodPost && path == "/containers/create":
+			name := r.URL.Query().Get("name")
+			writeDockerJSON(t, w, map[string]string{"Id": name})
+		case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/start"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && path == "/containers/"+primaryContainerName+"/json":
+			writeDockerJSON(t, w, container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					State: &container.State{Running: true, Status: "running"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	backend.config.SandboxDataRoot = sandboxDataRoot
+
+	_, err := backend.CreateSandbox(context.Background(), &sandboxRecord{
+		handle: &agboxv1.SandboxHandle{SandboxId: sandboxID},
+		createSpec: &agboxv1.CreateSpec{
+			Image: "ghcr.io/agents-sandbox/coding-runtime:test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox failed: %v", err)
+	}
+
+	wantDir := filepath.Join(sandboxDataRoot, sandboxID)
+	info, err := os.Stat(wantDir)
+	if err != nil {
+		t.Fatalf("expected mount staging directory %q to exist: %v", wantDir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %q to be a directory, got mode %v", wantDir, info.Mode())
+	}
+}
+
 func writeDockerJSON(t *testing.T, w http.ResponseWriter, payload any) {
 	t.Helper()
 
@@ -638,9 +702,8 @@ func TestBuiltinToolMountsPreserveSymlinks(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(homeDir, "nonexistent-runtime"))
 
 	// Builtin resources are mounted directly from the host path; symlinks are preserved as-is.
-	runtimeState := &sandboxRuntimeState{}
 	backendWithoutState := &dockerRuntimeBackend{config: ServiceConfig{}}
-	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, runtimeState)
+	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin", []string{"claude"}, "")
 	if err != nil {
 		t.Fatalf("materializeBuiltinTools failed: %v", err)
 	}
@@ -665,7 +728,7 @@ func TestBuiltinToolMountsPreserveSymlinks(t *testing.T) {
 	if err := os.Remove(claudeJSONSource); err != nil {
 		t.Fatalf("Remove .claude.json failed: %v", err)
 	}
-	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin-missing", []string{"claude"}, &sandboxRuntimeState{}); err == nil {
+	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-builtin-missing", []string{"claude"}, ""); err == nil {
 		t.Fatal("expected error when ~/.claude.json does not exist, got nil")
 	}
 }
@@ -680,7 +743,7 @@ func TestMaterializeBuiltinToolsSkipsOptionalWhenHostPathMissing(t *testing.T) {
 
 	// Request an optional tool (uv) whose host paths do not exist.
 	// materializeBuiltinTools should skip them silently instead of failing.
-	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-optional-skip", []string{"uv"}, &sandboxRuntimeState{})
+	mounts, err := backendWithoutState.materializeBuiltinTools("sandbox-optional-skip", []string{"uv"}, "")
 	if err != nil {
 		t.Fatalf("expected optional tool mounts to be skipped, got error: %v", err)
 	}
@@ -690,7 +753,7 @@ func TestMaterializeBuiltinToolsSkipsOptionalWhenHostPathMissing(t *testing.T) {
 
 	// When mixing required and optional tools, the required tool must still fail
 	// if its path is missing.
-	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-mixed", []string{"uv", "claude"}, &sandboxRuntimeState{}); err == nil {
+	if _, err := backendWithoutState.materializeBuiltinTools("sandbox-mixed", []string{"uv", "claude"}, ""); err == nil {
 		t.Fatal("expected error for required tool (claude) with missing host path, got nil")
 	}
 }
