@@ -109,6 +109,7 @@ flowchart TB
 Create-path rules:
 - `CreateSandbox` returns immediately after acceptance; the caller must not infer readiness from the response alone.
 - The daemon must fail fast on invalid mounts, copies, unknown builtin_tools, invalid companion container declarations, or unsafe artifact targets. Duplicate `sandbox_id` returns a specific error code.
+- If the resolved `CreateSpec.gpus` is `all`, the primary container is created with Docker GPU `DeviceRequests` for all NVIDIA GPUs. The empty value creates no GPU device request. GPU device access is only device access; it is not a VRAM quota, compute quota, or resource limit.
 - If materialization fails after resources exist, cleanup continues on a daemon-owned background context with bounded timeout.
 - Create-failure cleanup removes the dedicated network and any partially created containers.
 
@@ -150,6 +151,8 @@ For each container:
 - `disk_limit` → `HostConfig.StorageOpt["size"]` as a plain decimal byte count.
 
 Any of the three limits can be omitted independently; an omitted limit means Docker applies no enforcement for that dimension on that container. There is no sandbox-wide resource pool — two containers in the same sandbox do not compete against a shared budget, and one container hitting its limit does not constrain its siblings. See [Configuration Reference: Resource Limits Prerequisites](configuration_reference.md#resource-limits-prerequisites) for the host-side prerequisites that each key requires.
+
+GPU access is intentionally outside this resource-limit model. `CreateSpec.gpus=all` maps to Docker GPU `DeviceRequests` on the primary container; it grants device access and does not create a VRAM quota, compute quota, or sandbox resource limit.
 
 ## Reconciliation
 

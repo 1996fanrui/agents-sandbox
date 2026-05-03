@@ -25,6 +25,7 @@ defer client.Close()
 
 sandbox, err := client.CreateSandbox(ctx,
     sdkclient.WithImage("ghcr.io/agents-sandbox/coding-runtime:latest"),
+    sdkclient.WithGPUs("all"),
     sdkclient.WithLabels(map[string]string{"team": "sdk"}),
 )
 if err != nil { log.Fatal(err) }
@@ -80,6 +81,8 @@ type ExecHandle struct {
 `CompanionContainerSpec` uses `Envs` (not `Environment`); `HealthcheckConfig` uses `*time.Duration` for duration fields.
 
 `ListActiveExecs` uses the option pattern: pass `WithSandboxID` to filter by sandbox.
+
+`WithGPUs("all")` requests Docker GPU device access for the primary container. Omit the option for no GPU access. This option is only device access; it is not a VRAM quota, compute quota, or resource limit.
 
 ## Stable Behavior
 

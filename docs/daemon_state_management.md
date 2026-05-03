@@ -32,6 +32,8 @@ Daemon-originated intent and history. Write to bbolt **before** accepting the op
 
 `sandbox-config` stores the final resolved `CreateSpec` after YAML parsing and parameter override merging. Resource-limit strings (`cpu_limit`, `memory_limit`, `disk_limit` on the primary and the same three fields on each `CompanionContainerSpec`) are part of this `CreateSpec` blob and ride the existing persistence path — no separate bucket is introduced. These strings are immutable after create and are re-parsed on each container create and on restart recovery to rebuild the per-container `HostConfig.NanoCPUs` / `HostConfig.Memory` / `HostConfig.StorageOpt["size"]` values. Resource limits are not daemon-independent persistent state: they are always derived from `CreateSpec`, and there are no sandbox-scoped cgroup resources to reconcile separately from the containers themselves.
 
+`CreateSpec.gpus` follows the same persisted `CreateSpec` path. `gpus="all"` is replayable intent for Docker GPU DeviceRequests on the primary container; `""` means no GPU device request. It is only device access; it is not a VRAM quota, compute quota, or resource limit, and the daemon stores no separate GPU accounting state.
+
 ## Category B — Docker Runtime State
 
 Actual condition of Docker containers and networks. Never written to bbolt; obtained via `docker inspect` on restart.

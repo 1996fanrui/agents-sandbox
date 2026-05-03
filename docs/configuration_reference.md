@@ -54,6 +54,7 @@ The northbound API may override only a narrow subset of behavior:
 | `command` (primary) | Yes | Optional override of primary container CMD; defaults to daemon sleep-loop when omitted. Must be a long-lived process — see [Primary container command](#primary-container-command). |
 | `companion_containers.<name>.command` | Yes | Optional override of a companion container CMD; defaults to the image's built-in `CMD` when omitted. Must be a long-lived process with the same exit semantics as the primary `command`. |
 | `ports` | Yes | Each sandbox may expose container ports to the host via Docker port publishing (`-p`). Each entry specifies `container_port`, `host_port`, and `protocol` (tcp/udp/sctp). |
+| `gpus` | Yes | `CreateSpec.gpus` accepts `all` to request Docker GPU device access for the primary container, or `""` / omitted for no GPU access. This is only device access; it is not a VRAM quota, compute quota, or resource limit. |
 | `runtime.idle_ttl` | Yes | `CreateSpec.idle_ttl` overrides the global threshold per sandbox. `nil` (unset) uses the daemon global default; `0` disables idle stop for that sandbox. |
 | `runtime.cleanup_ttl` | No | Cleanup policy stays daemon-owned |
 | `CreateSpec.cpu_limit` / `CompanionContainerSpec.cpu_limit` | Yes | Docker `--cpus` style, e.g. `"2"`, `"0.5"`. Per-container: the top-level value scopes to the primary container, each companion carries its own `cpu_limit`. Wired to `HostConfig.NanoCPUs`. `""` = unlimited. |
@@ -66,7 +67,7 @@ The daemon persists sandbox event history in `ids.db`. For STOPPED sandboxes, on
 
 The daemon merges the parsed YAML (base) with the `CreateSpec` (override) per field type:
 
-- Scalar fields (`image`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`): non-empty / non-nil override replaces base.
+- Scalar fields (`image`, `gpus`, `cpu_limit`, `memory_limit`, `disk_limit`, `idle_ttl`): non-empty / non-nil override replaces base.
 - Map fields (`labels`, `envs`): key-level merge — override key wins, base-only keys preserved.
 - Repeated structured fields (`mounts`, `copies`, `ports`, `builtin_tools`, `companion_containers`): base + override append, base first. `builtin_tools` is deduped after append (preserving first-occurrence order); the other repeated fields keep every entry.
 - `command` (primary container only): override non-empty wins entirely. A command is a single executable invocation, so append has no executable meaning. Companion containers have no per-companion command-merge path: they are appended whole, and `validateCreateSpec` rejects duplicate companion `name`s.
@@ -76,6 +77,8 @@ After merge the daemon runs `validateCreateSpec`, which rejects same-`target` co
 ## Resource Limits Prerequisites
 
 Resource limits are per-container and wired directly to Docker-native HostConfig keys. The daemon parses each limit string and forwards the resulting value to Docker without touching systemd; missing prerequisites surface at `ContainerCreate` time as `FailedPrecondition` with Docker's native error preserved for diagnosis.
+
+GPU device access is configured separately from CPU, memory, and disk enforcement. `CreateSpec.gpus="all"` maps to Docker GPU DeviceRequests for the primary container, while an empty value sends no GPU device request. It is only device access; it is not a VRAM quota, compute quota, or resource limit.
 
 - **`cpu_limit`** → `HostConfig.NanoCPUs = millicores * 1_000_000`. Docker enforces the cap via standard cgroup v2 controllers under Docker's own scope. No additional host prerequisites beyond Docker itself.
 - **`memory_limit`** → `HostConfig.Memory = bytes`. `HostConfig.MemorySwap` is intentionally not set and retains Docker's default (= `2 * Memory` on hosts with swap, effectively equal to `Memory` on hosts without swap). Docker rejects values below 6 MiB; the daemon surfaces that as-is.
